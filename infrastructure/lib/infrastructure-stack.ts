@@ -545,58 +545,43 @@ export class InfrastructureStack extends cdk.Stack {
     });
 
     // ============================================
-    // Static Assets Deployment Lambda
+    // IAM User for GitHub Actions
     // ============================================
 
-    // Lambda function to deploy static assets to S3
-    const deployStaticFunction = new lambda.Function(this, 'DeployStaticFunction', {
-      runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'index.handler',
-      code: lambda.Code.fromAsset('lambda/deploy-static', {
-        bundling: {
-          image: lambda.Runtime.NODEJS_20_X.bundlingImage,
-          command: [
-            'bash', '-c', [
-              'cp -r /asset-input/* /asset-output/',
-              'cd /asset-output',
-              'npm install --omit=dev',
-              // Copy static assets into the Lambda bundle
-              'mkdir -p /asset-output/static',
-              'cp -r /asset-input/../../frontend/static/* /asset-output/static/ || true',
-            ].join(' && '),
+    // Create IAM user for GitHub Actions to deploy static assets
+    const githubActionsUser = new iam.User(this, 'GitHubActionsUser', {
+      userName: 'github-actions-frontend-deploy',
+    });
+
+    // Create policy for deploying to S3 and invalidating CloudFront
+    const frontendDeployPolicy = new iam.Policy(this, 'FrontendDeployPolicy', {
+      policyName: 'frontend-deploy-policy',
+      statements: [
+        // S3 permissions to upload static assets
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            's3:PutObject',
+            's3:PutObjectAcl',
+            's3:DeleteObject',
+            's3:ListBucket',
           ],
-        },
-      }),
-      environment: {
-        BUCKET_NAME: websiteBucket.bucketName,
-        DISTRIBUTION_ID: distribution.distributionId,
-      },
-      timeout: cdk.Duration.minutes(5),
-      memorySize: 512,
-      description: 'Deploys static assets to S3 on stack updates',
+          resources: [
+            websiteBucket.bucketArn,
+            `${websiteBucket.bucketArn}/*`,
+          ],
+        }),
+        // CloudFront permissions to invalidate cache
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ['cloudfront:CreateInvalidation'],
+          resources: [`arn:aws:cloudfront::${this.account}:distribution/${distribution.distributionId}`],
+        }),
+      ],
     });
 
-    // Grant permissions to deployment Lambda
-    websiteBucket.grantReadWrite(deployStaticFunction);
-    deployStaticFunction.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['cloudfront:CreateInvalidation'],
-        resources: [`arn:aws:cloudfront::${cdk.Stack.of(this).account}:distribution/${distribution.distributionId}`],
-      })
-    );
-
-    // Custom resource to trigger deployment on stack updates
-    const deployStaticProvider = new cr.Provider(this, 'DeployStaticProvider', {
-      onEventHandler: deployStaticFunction,
-    });
-
-    new cdk.CustomResource(this, 'DeployStaticResource', {
-      serviceToken: deployStaticProvider.serviceToken,
-      properties: {
-        // Static asset changes are detected via Lambda function code hash
-        // No version property needed to avoid unnecessary redeployments
-      },
-    });
+    // Attach policy to user
+    frontendDeployPolicy.attachToUser(githubActionsUser);
 
     // ============================================
     // Outputs
@@ -629,6 +614,16 @@ export class InfrastructureStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'WebsiteBucketName', {
       value: websiteBucket.bucketName,
       description: 'S3 Website Bucket Name',
+    });
+
+    new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
+      value: distribution.distributionId,
+      description: 'CloudFront Distribution ID (for GitHub Actions)',
+    });
+
+    new cdk.CfnOutput(this, 'GitHubActionsUserName', {
+      value: githubActionsUser.userName,
+      description: 'IAM User for GitHub Actions (create access keys for this user)',
     });
   }
 }
