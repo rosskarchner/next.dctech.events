@@ -1,0 +1,4 @@
+# Ignore all installed dependencies and build artifacts
+*
+!lambda_function.py
+!requirements.txt

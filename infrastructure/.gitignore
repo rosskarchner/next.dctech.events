@@ -1,0 +1,24 @@
+# Node
+node_modules
+npm-debug.log
+.npm
+
+# CDK
+cdk.out
+.cdk.staging
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.dist-info/
+
+# Misc
+.DS_Store
+.env
+

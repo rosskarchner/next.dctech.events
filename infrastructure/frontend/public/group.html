@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Group Details - Organize DC Tech Events</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.7/dist/amazon-cognito-identity.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>Organize DC Tech Events</h1>
+            <nav id="main-nav"></nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Main Group Content Loaded via HTMX -->
+        <div id="group-content" 
+             class="card group-detail-card"
+             hx-trigger="load"
+             hx-indicator=".htmx-indicator">
+             <div class="loading htmx-indicator">Loading group details...</div>
+        </div>
+    </main>
+
+    <script src="/js/config.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/htmx-config.js"></script>
+    <script>
+        // Get ID from URL query param
+        const urlParams = new URLSearchParams(window.location.search);
+        const groupId = urlParams.get('id');
+
+        if (groupId) {
+            const contentDiv = document.getElementById('group-content');
+            contentDiv.setAttribute('hx-get', `/api/groups/${groupId}`);
+        } else {
+            document.getElementById('group-content').innerHTML = '<div class="message error">No group specified</div>';
+        }
+    </script>
+</body>
+</html>

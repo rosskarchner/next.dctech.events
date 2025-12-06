@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Event - Organize DC Tech Events</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.7/dist/amazon-cognito-identity.min.js"></script>
+</head>
+
+<body>
+    <header>
+        <div class="container">
+            <h1>Organize DC Tech Events</h1>
+            <nav id="main-nav"></nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="card">
+            <h2>Create a New Event</h2>
+            <div id="message"></div>
+
+            <form hx-post="/api/events" hx-target="#message" hx-swap="innerHTML">
+                <div class="form-group">
+                    <label for="title">Event Title *</label>
+                    <input type="text" name="title" id="title" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="date">Date *</label>
+                    <input type="date" name="date" id="date" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="time">Time</label>
+                    <input type="time" name="time" id="time">
+                </div>
+
+                <div class="form-group">
+                    <label for="location">Location</label>
+                    <input type="text" name="location" id="location" placeholder="Address or venue name">
+                </div>
+
+                <div class="form-group">
+                    <label for="url">Event URL</label>
+                    <input type="url" name="url" id="url" placeholder="https://example.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <textarea name="description" id="description"
+                        placeholder="Tell people about your event..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="groupId">Group (optional)</label>
+                    <select name="groupId" id="groupId">
+                        <option value="">None (standalone event)</option>
+                    </select>
+                    <small>You can only add events to groups where you are a manager or owner</small>
+                </div>
+
+                <button type="submit" class="btn btn-primary">
+                    <span class="htmx-indicator">Creating...</span>
+                    <span>Create Event</span>
+                </button>
+            </form>
+        </div>
+    </main>
+
+    <script src="/js/config.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/htmx-config.js"></script>
+    <script>
+        if (!window.auth.requireAuth()) {
+            // Will redirect to auth page
+        }
+
+        // Handle successful creation - redirect to event page
+        document.body.addEventListener('htmx:afterOnLoad', function (event) {
+            if (event.detail.successful && event.detail.xhr.status === 201) {
+                // Determine eventId from response (assumes server returns HTML with eventId somewhere or we parse the location header?)
+                // Actually the backend `createEvent` returns HTML string for confirmation which doesn't easy parse eventId for redirect
+                // UNLESS we update backend to return JSON for this specific create call?
+                // OR we just show the confirmation content returned by the server.
+                // The server returns `event_created_confirmation` template.
+
+                // Let's assume the server HTML response is what we want to show, 
+                // which is handled by hx-target="#message" hx-swap="innerHTML".
+                // But we probably want to redirect or clear the form?
+
+                const response = event.detail.xhr.responseText;
+                // If it contains "Event created successfully", we might want to wait and redirect.
+                // For now, let's just let HTMX swap the content into #message
+
+                // If we want redirect, we can parse it from the response if we embed it, or use HX-Redirect header.
+                // The backend `createEvent` returns a rendered template. 
+                // I'll leave it as swap for now, maybe clear the form.
+                if (event.detail.target.id === 'message') {
+                    document.querySelector('form').reset();
+                }
+            }
+        });
+
+        // Load groups via API (JSON) using fetch since we need to populate select
+        async function loadMyGroups() {
+            try {
+                // We need to handle auth token manually for fetch since htmx-config handles it for htmx
+                const token = await new Promise((resolve) => window.auth.getIdToken((err, t) => resolve(t)));
+
+                const response = await fetch(window.CONFIG.apiUrl + 'groups', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    // Groups list returns HTML if HTMX request, but JSON if not?
+                    // api/index.js `listGroups` checks `isHtmx`. Fetch is NOT htmx.
+                    // So it should return JSON `{ groups: [] }`.
+
+                    const groups = data.groups || [];
+                    const select = document.getElementById('groupId');
+
+                    groups.forEach(group => {
+                        const option = document.createElement('option');
+                        option.value = group.groupId;
+                        option.textContent = group.name;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading groups:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadMyGroups);
+
+        // Check for groupId query param
+        const urlParams = new URLSearchParams(window.location.search);
+        const preselectGroupId = urlParams.get('groupId');
+        if (preselectGroupId) {
+            // Wait for groups to load then select
+            setTimeout(() => {
+                const select = document.getElementById('groupId');
+                if (select) select.value = preselectGroupId;
+            }, 1000);
+        }
+    </script>
+</body>
+
+</html>
