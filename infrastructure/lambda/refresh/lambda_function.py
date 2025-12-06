@@ -379,27 +379,28 @@ def sync_ical_feeds():
                 print(f"Fetching iCal for {group.get('name')}...")
                 events = fetch_ical_feed(group['ical'], group)
 
-                # Store events in DynamoDB
-                for event in events:
-                    # Generate unique event ID based on group and event data
-                    # Using 32 characters (128 bits) for adequate collision resistance
-                    event_hash = f"{group['groupId']}-{event.get('title', '')}-{event.get('eventDate', '')}"
-                    event_id = hashlib.sha256(event_hash.encode()).hexdigest()[:32]
+                # Use batch_writer for efficient bulk writes
+                with events_table.batch_writer() as batch:
+                    for event in events:
+                        # Generate unique event ID based on group and event data
+                        # Using 32 characters (128 bits) for adequate collision resistance
+                        event_hash = f"{group['groupId']}-{event.get('title', '')}-{event.get('eventDate', '')}"
+                        event_id = hashlib.sha256(event_hash.encode()).hexdigest()[:32]
 
-                    timestamp = datetime.utcnow().isoformat() + 'Z'
-                    event_item = {
-                        'eventId': event_id,
-                        'groupId': group['groupId'],
-                        'group': group.get('name', ''),
-                        'group_website': group.get('website', ''),
-                        'eventType': 'all',
-                        'createdAt': timestamp,
-                        'createdBy': 'ical_sync',
-                        'lastSyncedAt': timestamp,
-                        **event
-                    }
+                        timestamp = datetime.utcnow().isoformat() + 'Z'
+                        event_item = {
+                            'eventId': event_id,
+                            'groupId': group['groupId'],
+                            'group': group.get('name', ''),
+                            'group_website': group.get('website', ''),
+                            'eventType': 'all',
+                            'createdAt': timestamp,
+                            'createdBy': 'ical_sync',
+                            'lastSyncedAt': timestamp,
+                            **event
+                        }
 
-                    events_table.put_item(Item=event_item)
+                        batch.put_item(Item=event_item)
 
                 ical_events_synced += len(events)
                 print(f"Synced {len(events)} events for {group.get('name')}")
@@ -411,6 +412,7 @@ def sync_ical_feeds():
         print(f"Error fetching groups: {str(e)}")
 
     return ical_events_synced
+
 
 
 def lambda_handler(event, context):

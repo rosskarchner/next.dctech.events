@@ -1,5 +1,5 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand, BatchWriteCommand } = require('@aws-sdk/lib-dynamodb');
 
 const { CognitoJwtVerifier } = require('aws-jwt-verify');
 
@@ -13,6 +13,31 @@ const { extractLocationInfo, normalizeAddress, getRegionName } = require('./loca
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
+
+// ============================================
+// In-Memory Cache for frequently accessed data
+// ============================================
+const cache = {
+  groups: { data: null, expiry: 0 },
+};
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+// Helper to get user display name for denormalization
+async function getUserDisplayName(userId) {
+  try {
+    const result = await docClient.send(new GetCommand({
+      TableName: process.env.USERS_TABLE,
+      Key: { userId },
+      ProjectionExpression: 'fullname, email',
+    }));
+    if (result.Item) {
+      return result.Item.fullname || result.Item.email?.split('@')[0] || userId.substring(0, 8);
+    }
+  } catch (e) {
+    console.error('Error fetching user display name:', e);
+  }
+  return userId.substring(0, 8); // Fallback to truncated UUID
+}
 
 // Check if event is online-only based on location
 const isOnlineOnlyEvent = (location) => {
@@ -322,7 +347,7 @@ const html = {
   memberItem: (member, currentUserId, isOwner) => `
     <div class="member-item" id="member-${member.userId}">
       <div class="member-info">
-        <strong>${escapeHtml(member.userId)}</strong>
+        <strong>${escapeHtml(member.userName || member.userId.substring(0, 8))}</strong>
         <span style="margin-left: 10px; color: #7f8c8d;">(${member.role})</span>
       </div>
       ${isOwner && member.userId !== currentUserId ? `
@@ -517,16 +542,24 @@ async function updateUser(userId, updates) {
 
 // Group handlers
 async function listGroups(isHtmx) {
-  const result = await docClient.send(new QueryCommand({
-    TableName: process.env.GROUPS_TABLE,
-    IndexName: 'activeGroupsIndex',
-    KeyConditionExpression: 'active = :active',
-    ExpressionAttributeValues: {
-      ':active': 'true',
-    },
-  }));
-
-  const groups = result.Items || [];
+  // Check cache first
+  const now = Date.now();
+  let groups;
+  if (cache.groups.data && cache.groups.expiry > now) {
+    groups = cache.groups.data;
+  } else {
+    const result = await docClient.send(new QueryCommand({
+      TableName: process.env.GROUPS_TABLE,
+      IndexName: 'activeGroupsIndex',
+      KeyConditionExpression: 'active = :active',
+      ExpressionAttributeValues: {
+        ':active': 'true',
+      },
+    }));
+    groups = result.Items || [];
+    cache.groups.data = groups;
+    cache.groups.expiry = now + CACHE_TTL_MS;
+  }
 
   if (isHtmx) {
     if (groups.length === 0) {
@@ -675,11 +708,15 @@ async function listGroupMembers(groupId, isHtmx, currentUserId) {
 async function joinGroup(groupId, userId) {
   const timestamp = new Date().toISOString();
 
+  // Fetch user display name for denormalization
+  const userName = await getUserDisplayName(userId);
+
   await docClient.send(new PutCommand({
     TableName: process.env.GROUP_MEMBERS_TABLE,
     Item: {
       groupId,
       userId,
+      userName,
       role: 'member',
       joinedAt: timestamp,
     },
@@ -758,12 +795,16 @@ async function postMessage(groupId, userId, content) {
 
   const timestamp = new Date().toISOString();
 
+  // Fetch user display name for denormalization
+  const userName = await getUserDisplayName(userId);
+
   await docClient.send(new PutCommand({
     TableName: process.env.MESSAGES_TABLE,
     Item: {
       groupId,
       timestamp,
       userId,
+      userName,
       content,
     },
   }));
@@ -773,22 +814,22 @@ async function postMessage(groupId, userId, content) {
 
 // Event handlers
 async function listEvents(queryParams, isHtmx) {
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
+
   const result = await docClient.send(new QueryCommand({
     TableName: process.env.EVENTS_TABLE,
     IndexName: 'dateEventsIndex',
-    KeyConditionExpression: 'eventType = :eventType',
+    KeyConditionExpression: 'eventType = :eventType AND eventDate >= :today',
     ExpressionAttributeValues: {
       ':eventType': 'all',
+      ':today': todayStr,
     },
     ScanIndexForward: true,
   }));
 
-  let events = result.Items || [];
-
-  // Filter to upcoming events
-  const now = new Date();
-  events = events.filter(e => new Date(e.eventDate) >= now);
-  events.sort((a, b) => new Date(a.eventDate) - new Date(b.eventDate));
+  const events = result.Items || [];
+  // Already sorted by DB, no need to sort again
 
   if (isHtmx) {
     if (events.length === 0) {
@@ -1014,30 +1055,46 @@ async function convertRSVPsToGroup(eventId, userId, groupName) {
     },
   }));
 
-  // Add creator as owner
-  await docClient.send(new PutCommand({
-    TableName: process.env.GROUP_MEMBERS_TABLE,
-    Item: {
-      groupId,
-      userId,
-      role: 'owner',
-      joinedAt: timestamp,
+  // Collect all member items for batch write
+  const ownerUserName = await getUserDisplayName(userId);
+  const memberItems = [{
+    PutRequest: {
+      Item: {
+        groupId,
+        userId,
+        userName: ownerUserName,
+        role: 'owner',
+        joinedAt: timestamp,
+      },
     },
-  }));
+  }];
 
-  // Add all RSVPs as members
-  for (const rsvp of rsvps.Items) {
+  for (const rsvp of (rsvps.Items || [])) {
     if (rsvp.userId !== userId) {
-      await docClient.send(new PutCommand({
-        TableName: process.env.GROUP_MEMBERS_TABLE,
-        Item: {
-          groupId,
-          userId: rsvp.userId,
-          role: 'member',
-          joinedAt: timestamp,
+      const memberUserName = await getUserDisplayName(rsvp.userId);
+      memberItems.push({
+        PutRequest: {
+          Item: {
+            groupId,
+            userId: rsvp.userId,
+            userName: memberUserName,
+            role: 'member',
+            joinedAt: timestamp,
+          },
         },
-      }));
+      });
     }
+  }
+
+  // Batch write in chunks of 25
+  const BATCH_SIZE = 25;
+  for (let i = 0; i < memberItems.length; i += BATCH_SIZE) {
+    const batch = memberItems.slice(i, i + BATCH_SIZE);
+    await docClient.send(new BatchWriteCommand({
+      RequestItems: {
+        [process.env.GROUP_MEMBERS_TABLE]: batch,
+      },
+    }));
   }
 
   return createResponse(201, { groupId, message: 'Group created successfully from RSVPs' });
