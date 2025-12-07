@@ -862,11 +862,13 @@ async function createGroup(userId, userEmail, data) {
     name: data.name,
     website: data.website || '',
     description: data.description || '',
+    topicSlug: data.topicSlug || null,
     active: 'true',
     createdBy: userId,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+
 
   // Create group
   await docClient.send(new PutCommand({
@@ -1148,11 +1150,14 @@ async function createEvent(userId, data) {
     url: data.url || '',
     description: data.description || '',
     groupId: data.groupId || null,
+    topicSlug: data.topicSlug || null,
+    upvoteCount: 0,
     eventType: 'all',
     createdBy: userId,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+
 
   await docClient.send(new PutCommand({
     TableName: process.env.EVENTS_TABLE,
@@ -2044,13 +2049,21 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
       };
     }
 
-    const html = renderTemplate('submit_event', {
+    // Fetch topics for dropdown
+    const topicsResult = await docClient.send(new ScanCommand({
+      TableName: process.env.TOPICS_TABLE,
+    }));
+    const topics = (topicsResult.Items || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    const htmlContent = renderTemplate('submit_event', {
       userId,
       isAuthenticated: true,
+      topics,
     });
 
-    return createResponse(200, html, true);
+    return createResponse(200, htmlContent, true);
   }
+
 
   // POST /submit/ - Create event
   if (path === '/submit/' && method === 'POST') {
@@ -2091,12 +2104,15 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
         url: body.url || '',
         description: body.description || '',
         cost: body.cost || '',
+        topicSlug: body.topicSlug || null,
+        upvoteCount: 0,
         eventType: 'all',
         createdBy: userId,
         createdAt: timestamp,
         updatedAt: timestamp,
       },
     }));
+
 
     const html = renderTemplate('event_created_confirmation', {
       eventId,
@@ -2118,13 +2134,21 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
       };
     }
 
-    const html = renderTemplate('submit_group', {
+    // Fetch topics for dropdown
+    const topicsResult = await docClient.send(new ScanCommand({
+      TableName: process.env.TOPICS_TABLE,
+    }));
+    const topics = (topicsResult.Items || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    const htmlContent = renderTemplate('submit_group', {
       userId,
       isAuthenticated: true,
+      topics,
     });
 
-    return createResponse(200, html, true);
+    return createResponse(200, htmlContent, true);
   }
+
 
   // POST /submit-group/ - Create group
   if (path === '/submit-group/' && method === 'POST') {

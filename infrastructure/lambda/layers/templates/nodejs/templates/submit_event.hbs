@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,194 +9,195 @@
   <link rel="stylesheet" href="/static/css/main.css">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <style>
-.submit-container {
-    max-width: 800px;
-    margin: 0 auto;
-}
-
-.submit-container h2 {
-    margin-bottom: var(--spacing-lg);
-}
-
-.event-section {
-    border: 1px solid var(--color-border);
-    border-radius: 5px;
-    padding: 20px;
-    margin-bottom: var(--spacing-lg);
-}
-
-.event-section h3 {
-    margin-top: 0;
-    margin-bottom: var(--spacing-lg);
-    font-size: 1.25rem;
-}
-
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-lg);
-}
-
-@media (max-width: 640px) {
-    .form-row {
-        grid-template-columns: 1fr;
+    .submit-container {
+      max-width: 800px;
+      margin: 0 auto;
     }
-}
 
-.form-group {
-    margin-bottom: var(--spacing-lg);
-}
+    .submit-container h2 {
+      margin-bottom: var(--spacing-lg);
+    }
 
-.form-group label {
-    display: block;
-    font-weight: 600;
-    margin-bottom: var(--spacing-sm);
-    color: var(--color-text);
-}
+    .event-section {
+      border: 1px solid var(--color-border);
+      border-radius: 5px;
+      padding: 20px;
+      margin-bottom: var(--spacing-lg);
+    }
 
-.form-group label .required {
-    color: #dc2626;
-    font-weight: bold;
-}
+    .event-section h3 {
+      margin-top: 0;
+      margin-bottom: var(--spacing-lg);
+      font-size: 1.25rem;
+    }
 
-.form-group input,
-.form-group textarea,
-.form-group select {
-    width: 100%;
-    padding: var(--spacing-sm);
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    font-size: 1rem;
-    font-family: inherit;
-    box-sizing: border-box;
-}
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--spacing-lg);
+    }
 
-.form-group input:focus,
-.form-group textarea:focus,
-.form-group select:focus {
-    outline: none;
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
+    @media (max-width: 640px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+    }
 
-.form-group small {
-    display: block;
-    margin-top: var(--spacing-xs);
-    color: var(--color-text-light);
-    font-size: 0.875rem;
-}
+    .form-group {
+      margin-bottom: var(--spacing-lg);
+    }
 
-.time-selector {
-    display: flex;
-    gap: var(--spacing-sm);
-}
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: var(--spacing-sm);
+      color: var(--color-text);
+    }
 
-.time-selector select {
-    flex: 1;
-}
+    .form-group label .required {
+      color: #dc2626;
+      font-weight: bold;
+    }
 
-.optional-details {
-    margin-top: var(--spacing-lg);
-    border-top: 1px solid var(--color-border);
-    padding-top: var(--spacing-lg);
-}
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      padding: var(--spacing-sm);
+      border: 1px solid var(--color-border);
+      border-radius: var(--border-radius);
+      font-size: 1rem;
+      font-family: inherit;
+      box-sizing: border-box;
+    }
 
-.optional-details summary {
-    cursor: pointer;
-    font-weight: 600;
-    color: var(--color-primary);
-    padding: var(--spacing-sm) 0;
-    list-style-position: inside;
-}
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
 
-.optional-details summary:hover {
-    color: var(--color-primary-hover);
-}
+    .form-group small {
+      display: block;
+      margin-top: var(--spacing-xs);
+      color: var(--color-text-light);
+      font-size: 0.875rem;
+    }
 
-.optional-fields {
-    padding-top: var(--spacing-lg);
-}
+    .time-selector {
+      display: flex;
+      gap: var(--spacing-sm);
+    }
 
-.btn {
-    padding: var(--spacing-sm) var(--spacing-lg);
-    border: none;
-    border-radius: var(--border-radius);
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: inline-flex;
-    align-items: center;
-    text-decoration: none;
-}
+    .time-selector select {
+      flex: 1;
+    }
 
-.btn-primary {
-    background-color: var(--color-primary);
-    color: white;
-}
+    .optional-details {
+      margin-top: var(--spacing-lg);
+      border-top: 1px solid var(--color-border);
+      padding-top: var(--spacing-lg);
+    }
 
-.btn-primary:hover {
-    background-color: var(--color-primary-hover);
-}
+    .optional-details summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--color-primary);
+      padding: var(--spacing-sm) 0;
+      list-style-position: inside;
+    }
 
-.btn-primary:disabled {
-    background-color: var(--color-text-lighter);
-    cursor: not-allowed;
-}
+    .optional-details summary:hover {
+      color: var(--color-primary-hover);
+    }
 
-.btn-secondary {
-    background-color: var(--color-background-alt);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-}
+    .optional-fields {
+      padding-top: var(--spacing-lg);
+    }
 
-.btn-secondary:hover {
-    background-color: var(--color-border);
-}
+    .btn {
+      padding: var(--spacing-sm) var(--spacing-lg);
+      border: none;
+      border-radius: var(--border-radius);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      text-decoration: none;
+    }
 
-.form-actions {
-    display: flex;
-    gap: var(--spacing-md);
-    margin-top: var(--spacing-xl);
-}
+    .btn-primary {
+      background-color: var(--color-primary);
+      color: white;
+    }
 
-.status-message {
-    padding: var(--spacing-md);
-    border-radius: var(--border-radius);
-    margin-bottom: var(--spacing-md);
-}
+    .btn-primary:hover {
+      background-color: var(--color-primary-hover);
+    }
 
-.status-message.error {
-    background-color: #fef2f2;
-    border: 1px solid #fca5a5;
-    color: #991b1b;
-}
+    .btn-primary:disabled {
+      background-color: var(--color-text-lighter);
+      cursor: not-allowed;
+    }
 
-.status-message.success {
-    background-color: #f0fdf4;
-    border: 1px solid #86efac;
-    color: #166534;
-}
+    .btn-secondary {
+      background-color: var(--color-background-alt);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
 
-.status-message.info {
-    background-color: #eff6ff;
-    border: 1px solid #93c5fd;
-    color: #1e40af;
-}
+    .btn-secondary:hover {
+      background-color: var(--color-border);
+    }
 
-.success-box {
-    padding: var(--spacing-xl);
-    background-color: #f0fdf4;
-    border: 2px solid #86efac;
-    border-radius: var(--border-radius);
-}
+    .form-actions {
+      display: flex;
+      gap: var(--spacing-md);
+      margin-top: var(--spacing-xl);
+    }
 
-.success-box h3 {
-    color: #166534;
-    margin-top: 0;
-}
+    .status-message {
+      padding: var(--spacing-md);
+      border-radius: var(--border-radius);
+      margin-bottom: var(--spacing-md);
+    }
+
+    .status-message.error {
+      background-color: #fef2f2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+    }
+
+    .status-message.success {
+      background-color: #f0fdf4;
+      border: 1px solid #86efac;
+      color: #166534;
+    }
+
+    .status-message.info {
+      background-color: #eff6ff;
+      border: 1px solid #93c5fd;
+      color: #1e40af;
+    }
+
+    .success-box {
+      padding: var(--spacing-xl);
+      background-color: #f0fdf4;
+      border: 2px solid #86efac;
+      border-radius: var(--border-radius);
+    }
+
+    .success-box h3 {
+      color: #166534;
+      margin-top: 0;
+    }
   </style>
 </head>
+
 <body>
   <header>
     <h1 class="logo"><a href="/">DC Tech Events</a></h1>
@@ -216,23 +218,19 @@
     <div class="submit-container">
       <h2>Submit events to DC Tech Events</h2>
 
-      <form id="event-form"
-            hx-post="/submit/"
-            hx-target="#result"
-            hx-swap="innerHTML">
+      <form id="event-form" hx-post="/submit/" hx-target="#result" hx-swap="innerHTML">
         <div class="event-section">
           <h3>Event Details</h3>
 
           <div class="form-group">
             <label for="title">Event Title <span class="required">*</span></label>
             <input type="text" id="title" name="title" required maxlength="200"
-                   placeholder="e.g., Python User Group Monthly Meetup" autocomplete="off">
+              placeholder="e.g., Python User Group Monthly Meetup" autocomplete="off">
           </div>
 
           <div class="form-group">
             <label for="url">Event URL <span class="required">*</span></label>
-            <input type="url" id="url" name="url" required
-                   placeholder="https://example.com/event" autocomplete="url">
+            <input type="url" id="url" name="url" required placeholder="https://example.com/event" autocomplete="url">
           </div>
 
           <div class="form-row">
@@ -278,7 +276,7 @@
           <div class="form-group">
             <label for="location">Location <span class="required">*</span></label>
             <input type="text" id="location" name="location" required maxlength="200"
-                   placeholder="123 Main St, Washington, DC 20001" autocomplete="off">
+              placeholder="123 Main St, Washington, DC 20001" autocomplete="off">
           </div>
 
           <details class="optional-details">
@@ -297,11 +295,23 @@
 
               <div class="form-group">
                 <label for="cost">Cost</label>
-                <input type="text" id="cost" name="cost" maxlength="100"
-                       placeholder="e.g., Free, $10, $5-$15" autocomplete="off">
+                <input type="text" id="cost" name="cost" maxlength="100" placeholder="e.g., Free, $10, $5-$15"
+                  autocomplete="off">
+              </div>
+
+              <div class="form-group">
+                <label for="topicSlug">Topic</label>
+                <select id="topicSlug" name="topicSlug">
+                  <option value="">-- Select a topic --</option>
+                  {{#each topics}}
+                  <option value="{{slug}}">{{name}}</option>
+                  {{/each}}
+                </select>
+                <small>Categorize this event by topic</small>
               </div>
             </div>
           </details>
+
         </div>
 
         <div id="result"></div>
@@ -331,7 +341,7 @@
     document.getElementById('time-ampm').value = 'PM';
 
     // Convert time selectors to HH:MM format before submission
-    document.getElementById('event-form').addEventListener('htmx:configRequest', function(evt) {
+    document.getElementById('event-form').addEventListener('htmx:configRequest', function (evt) {
       const hour = document.getElementById('time-hour').value;
       const minute = document.getElementById('time-minute').value;
       const ampm = document.getElementById('time-ampm').value;
@@ -355,4 +365,5 @@
     });
   </script>
 </body>
+
 </html>
