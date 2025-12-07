@@ -140,25 +140,25 @@ Phased plan to transform DC Tech Events into the community hub described in `COM
 
 ### 3.1 Follow/Unfollow
 **CDK Changes:**
-- [ ] Create `TopicFollows` table (PK: `userId`, SK: `topicSlug`)
-- [ ] Add GSI: `topicFollowersIndex` (PK: `topicSlug`)
+- [x] Create `TopicFollows` table (PK: `userId`, SK: `topicSlug`)
+- [x] Add GSI: `topicFollowersIndex` (PK: `topicSlug`)
 
 **API Changes:**
-- [ ] Add `followTopic()`, `unfollowTopic()`, `getFollowedTopics()`
-- [ ] Add routes: `POST/DELETE /api/topics/{slug}/follow`
+- [x] Add `followTopic()`, `unfollowTopic()`, `getFollowedTopics()`
+- [x] Add routes: `POST/DELETE /api/topics/{slug}/follow`
 
 **Modify Templates:**
-- [ ] Update `topic_page.hbs` — add Follow/Unfollow button
+- [x] Update `topic_page.hbs` — add Follow/Unfollow button
 
 ### 3.2 Personalized Feed
 **New Routes:**
-- [ ] `GET /my-feed` → personalized feed page
+- [x] `GET /my-feed` → personalized feed page
 
 **New Templates:**
-- [ ] Create `my_feed.hbs`
+- [x] Create `my_feed.hbs`
 
 **Modify Templates:**
-- [ ] Update `homepage.hbs` — add "Your Feed" sidebar for logged-in users
+- [x] Update `homepage.hbs` — add "Your Feed" sidebar for logged-in users
 
 ---
 
