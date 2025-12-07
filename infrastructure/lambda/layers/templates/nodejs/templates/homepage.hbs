@@ -8,42 +8,214 @@
   <meta name="description" content="Technology conferences and meetups in and around Washington, DC">
   <link rel="stylesheet" href="/static/css/main.css">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    .home-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: var(--spacing-xl);
+    }
+
+    @media (min-width: 900px) {
+      .home-layout {
+        grid-template-columns: 1fr 320px;
+      }
+    }
+
+    .home-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-lg);
+    }
+
+    .sidebar-section {
+      background: var(--color-background-alt);
+      border-radius: var(--border-radius);
+      padding: var(--spacing-md);
+    }
+
+    .sidebar-section h3 {
+      font-size: 1rem;
+      margin-bottom: var(--spacing-sm);
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+    }
+
+    .sidebar-section h3 a {
+      font-weight: normal;
+      font-size: 0.875rem;
+      margin-left: auto;
+    }
+
+    .followed-topics-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--spacing-xs);
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .topic-badge-sm {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      background: white;
+      border-radius: var(--border-radius);
+      font-size: 0.75rem;
+      text-decoration: none;
+      color: var(--color-text);
+      transition: background 0.2s;
+    }
+
+    .topic-badge-sm:hover {
+      background: var(--color-border);
+    }
+
+    .topic-color-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .feed-event-item {
+      padding: var(--spacing-sm) 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .feed-event-item:last-child {
+      border-bottom: none;
+    }
+
+    .feed-event-date {
+      font-size: 0.75rem;
+      color: var(--color-text-light);
+    }
+
+    .feed-event-title {
+      font-size: 0.875rem;
+      color: var(--color-text);
+      text-decoration: none;
+      display: block;
+      margin-top: 2px;
+    }
+
+    .feed-event-title:hover {
+      color: var(--color-primary);
+    }
+
+    .sidebar-cta {
+      text-align: center;
+      padding: var(--spacing-md);
+      color: var(--color-text-light);
+      font-size: 0.875rem;
+    }
+
+    .sidebar-cta a {
+      color: var(--color-primary);
+    }
+
+    .sidebar-empty {
+      text-align: center;
+      padding: var(--spacing-sm);
+      color: var(--color-text-light);
+      font-size: 0.875rem;
+    }
+
+    .sidebar-empty a {
+      color: var(--color-primary);
+    }
+
+    .events-section h2 {
+      margin-bottom: var(--spacing-md);
+    }
+
+    #subscribe {
+      margin-bottom: var(--spacing-lg);
+      padding: var(--spacing-md);
+      background: var(--color-background-alt);
+      border-radius: var(--border-radius);
+    }
+
+    #subscribe a {
+      color: var(--color-primary);
+    }
+  </style>
 </head>
 
 <body>
-  <header>
-    <h1 class="logo"><a href="/">DC Tech Events</a></h1>
-    <div>
-      <div>Technology conferences and meetups in and around Washington, DC</div>
-      <nav>
-        <a href="/locations/">Locations</a> |
-        <a href="/locations/dc/">Washington DC</a> |
-        <a href="/locations/va/">Virginia</a> |
-        <a href="/locations/md/">Maryland</a> |
-        <a href="/groups/">Groups</a> |
-        <a href="/submit/">Submit Event</a>
-      </nav>
-    </div>
-  </header>
+  {{> header}}
 
-  <div class="home-container">
-    <section class="events-section">
-      <h2>{{stats.upcomingCount}} Upcoming Events</h2>
+  <main class="container">
+    <div class="home-layout">
+      <section class="events-section">
+        <h2>{{stats.upcomingCount}} Upcoming Events</h2>
 
-      <div id="subscribe">
-        <div>
-          Get this calendar in your inbox every week! <a href="https://newsletter.dctech.events"
-            hx-get="https://newsletter.dctech.events" hx-target="#subscribe" hx-swap="innerHTML">Subscribe today</a>.
+        <div id="subscribe">
+          <div>
+            Get this calendar in your inbox every week! <a href="https://newsletter.dctech.events">Subscribe today</a>.
+          </div>
         </div>
-      </div>
 
-      {{> events_by_day}}
-    </section>
-  </div>
+        {{> events_by_day}}
+      </section>
 
-  <footer>
-    <p>&copy; {{year}} DC Tech Events</p>
-  </footer>
+      {{#if isAuthenticated}}
+      <aside class="home-sidebar">
+        <div class="sidebar-section">
+          <h3>
+            🎯 Your Feed
+            <a href="/my-feed/">View all →</a>
+          </h3>
+
+          {{#if hasFollowedTopics}}
+          <div class="followed-topics-list">
+            {{#each followedTopics}}
+            <a href="/topics/{{this.slug}}/" class="topic-badge-sm">
+              <span class="topic-color-dot" style="background-color: {{this.color}}"></span>
+              {{this.name}}
+            </a>
+            {{/each}}
+          </div>
+
+          {{#if feedEventsByDay.length}}
+          {{#each feedEventsByDay}}
+          <div class="feed-day-group">
+            <div class="feed-event-date">{{dateLabel}}</div>
+            {{#each events}}
+            <div class="feed-event-item">
+              <a href="{{url}}" class="feed-event-title" target="_blank" rel="noopener">{{title}}</a>
+            </div>
+            {{/each}}
+          </div>
+          {{/each}}
+          {{else}}
+          <div class="sidebar-empty">
+            <p>No upcoming events in your topics.</p>
+          </div>
+          {{/if}}
+          {{else}}
+          <div class="sidebar-empty">
+            <p>You haven't followed any topics yet.</p>
+            <p><a href="/topics/">Browse topics</a> to personalize your feed!</p>
+          </div>
+          {{/if}}
+        </div>
+
+        <div class="sidebar-section">
+          <h3>📝 Quick Actions</h3>
+          <p style="margin: 0; font-size: 0.875rem;">
+            <a href="/submit/" style="display: block; padding: 8px 0;">Submit an Event</a>
+            <a href="/submit-group/" style="display: block; padding: 8px 0;">Submit a Group</a>
+            <a href="/topics/" style="display: block; padding: 8px 0;">Browse Topics</a>
+          </p>
+        </div>
+      </aside>
+      {{/if}}
+    </div>
+  </main>
+
+  {{> footer}}
 </body>
 
 </html>

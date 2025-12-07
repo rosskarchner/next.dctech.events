@@ -696,7 +696,7 @@ async function listTopics(isHtmx) {
 
 
 // Get single topic with its events
-async function getTopic(slug, isHtmx) {
+async function getTopic(slug, isHtmx, userId = null) {
   // Get topic details
   const topicResult = await docClient.send(new GetCommand({
     TableName: process.env.TOPICS_TABLE,
@@ -727,19 +727,27 @@ async function getTopic(slug, isHtmx) {
 
   const events = eventsResult.Items || [];
 
+  // Check if user is following this topic
+  let isFollowing = false;
+  if (userId) {
+    isFollowing = await isFollowingTopic(userId, slug);
+  }
+
   if (isHtmx) {
     const eventsByDay = prepareEventsByDay(events);
     const htmlContent = renderTemplate('topic_page', {
       topic,
       events,
       eventsByDay,
-      isAuthenticated: false,
+      isFollowing,
+      isAuthenticated: !!userId,
     });
     return createResponse(200, htmlContent, true);
   }
 
-  return createResponse(200, { topic, events });
+  return createResponse(200, { topic, events, isFollowing });
 }
+
 
 // Create topic (admin only)
 async function createTopic(userId, data) {
@@ -795,7 +803,107 @@ async function getEventsByTopic(topicSlug, limit = 50) {
   return result.Items || [];
 }
 
+// ============================================
+// Topic Following handlers
+// ============================================
+
+// Follow a topic
+async function followTopic(userId, topicSlug, isHtmx = false) {
+  const timestamp = new Date().toISOString();
+
+  await docClient.send(new PutCommand({
+    TableName: process.env.TOPIC_FOLLOWS_TABLE,
+    Item: {
+      userId,
+      topicSlug,
+      followedAt: timestamp,
+    },
+  }));
+
+  // Return button HTML for HTMX swap
+  if (isHtmx) {
+    const html = `<button class="follow-btn following"
+                          hx-delete="/api/topics/${topicSlug}/follow"
+                          hx-target="#follow-button-container"
+                          hx-swap="innerHTML">
+                      Following ✓
+                  </button>`;
+    return createResponse(200, html, true);
+  }
+
+  return createResponse(200, { message: 'Topic followed', topicSlug });
+}
+
+// Unfollow a topic
+async function unfollowTopic(userId, topicSlug, isHtmx = false) {
+  await docClient.send(new DeleteCommand({
+    TableName: process.env.TOPIC_FOLLOWS_TABLE,
+    Key: { userId, topicSlug },
+  }));
+
+  // Return button HTML for HTMX swap
+  if (isHtmx) {
+    const html = `<button class="follow-btn"
+                          hx-post="/api/topics/${topicSlug}/follow"
+                          hx-target="#follow-button-container"
+                          hx-swap="innerHTML">
+                      Follow
+                  </button>`;
+    return createResponse(200, html, true);
+  }
+
+  return createResponse(200, { message: 'Topic unfollowed', topicSlug });
+}
+
+// Get topics followed by a user
+async function getFollowedTopics(userId) {
+  const result = await docClient.send(new QueryCommand({
+    TableName: process.env.TOPIC_FOLLOWS_TABLE,
+    KeyConditionExpression: 'userId = :userId',
+    ExpressionAttributeValues: {
+      ':userId': userId,
+    },
+  }));
+
+  return result.Items || [];
+}
+
+// Check if user is following a specific topic
+async function isFollowingTopic(userId, topicSlug) {
+  const result = await docClient.send(new GetCommand({
+    TableName: process.env.TOPIC_FOLLOWS_TABLE,
+    Key: { userId, topicSlug },
+  }));
+
+  return !!result.Item;
+}
+
+// Get personalized feed for user (events from followed topics)
+async function getPersonalizedFeed(userId, limit = 50) {
+  const followedTopics = await getFollowedTopics(userId);
+
+  if (followedTopics.length === 0) {
+    return [];
+  }
+
+  const today = formatDate(new Date());
+  const allEvents = [];
+
+  // Fetch events for each followed topic
+  for (const follow of followedTopics) {
+    const events = await getEventsByTopic(follow.topicSlug, 20);
+    allEvents.push(...events);
+  }
+
+  // Deduplicate and sort by date
+  const uniqueEvents = [...new Map(allEvents.map(e => [e.eventId, e])).values()];
+  uniqueEvents.sort((a, b) => a.eventDate.localeCompare(b.eventDate));
+
+  return uniqueEvents.slice(0, limit);
+}
+
 // Group handlers
+
 
 async function listGroups(isHtmx) {
   // Check cache first
@@ -1797,11 +1905,39 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     const eventsByDay = prepareEventsByDay(events);
     const stats = generateStats(events);
 
+    // Fetch personalized feed data for authenticated users
+    let followedTopics = [];
+    let feedEventsByDay = [];
+    if (userId) {
+      const followedTopicRecords = await getFollowedTopics(userId);
+      const topicSlugs = followedTopicRecords.map(f => f.topicSlug);
+
+      // Get topic details for display
+      if (topicSlugs.length > 0) {
+        for (const slug of topicSlugs) {
+          const topicResult = await docClient.send(new GetCommand({
+            TableName: process.env.TOPICS_TABLE,
+            Key: { slug },
+          }));
+          if (topicResult.Item) {
+            followedTopics.push(topicResult.Item);
+          }
+        }
+
+        // Get personalized feed events (limited for sidebar)
+        const feedEvents = await getPersonalizedFeed(userId, 10);
+        feedEventsByDay = prepareEventsByDay(feedEvents);
+      }
+    }
+
     const html = renderTemplate('homepage', {
       eventsByDay,
       stats,
       isAuthenticated: !!userId,
       isHtmx,
+      followedTopics,
+      feedEventsByDay,
+      hasFollowedTopics: followedTopics.length > 0,
     });
 
     return createResponse(200, html, true);
@@ -1947,8 +2083,9 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
   // GET /topics/{slug} - Single topic page
   if (path.match(/^\/topics\/[a-z0-9-]+\/?$/) && method === 'GET') {
     const slug = path.match(/^\/topics\/([a-z0-9-]+)/)[1];
-    return await getTopic(slug, isHtmx);
+    return await getTopic(slug, isHtmx, userId);
   }
+
 
   // POST /api/topics - Create topic (admin only)
   if (path === '/api/topics' && method === 'POST') {
@@ -1957,6 +2094,63 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     }
     const body = parsedBody || {};
     return await createTopic(userId, body);
+  }
+
+  // POST /api/topics/{slug}/follow - Follow a topic
+  if (path.match(/^\/api\/topics\/[a-z0-9-]+\/follow$/) && method === 'POST') {
+    if (!userId) {
+      return createResponse(403, { error: 'Authentication required' });
+    }
+    const slug = path.match(/^\/api\/topics\/([a-z0-9-]+)\/follow$/)[1];
+    return await followTopic(userId, slug, isHtmx);
+  }
+
+  // DELETE /api/topics/{slug}/follow - Unfollow a topic
+  if (path.match(/^\/api\/topics\/[a-z0-9-]+\/follow$/) && method === 'DELETE') {
+    if (!userId) {
+      return createResponse(403, { error: 'Authentication required' });
+    }
+    const slug = path.match(/^\/api\/topics\/([a-z0-9-]+)\/follow$/)[1];
+    return await unfollowTopic(userId, slug, isHtmx);
+  }
+
+  // GET /my-feed - Personalized feed page
+  if ((path === '/my-feed' || path === '/my-feed/') && method === 'GET') {
+    if (!userId) {
+      return {
+        statusCode: 302,
+        headers: { 'Location': cognitoLoginUrl('/my-feed') },
+        body: '',
+      };
+    }
+
+    const events = await getPersonalizedFeed(userId);
+    const eventsByDay = prepareEventsByDay(events);
+    const followedTopics = await getFollowedTopics(userId);
+
+    // Get topic details for display
+    const topicSlugs = followedTopics.map(f => f.topicSlug);
+    let topicDetails = [];
+    if (topicSlugs.length > 0) {
+      for (const slug of topicSlugs) {
+        const topicResult = await docClient.send(new GetCommand({
+          TableName: process.env.TOPICS_TABLE,
+          Key: { slug },
+        }));
+        if (topicResult.Item) {
+          topicDetails.push(topicResult.Item);
+        }
+      }
+    }
+
+    const htmlContent = renderTemplate('my_feed', {
+      eventsByDay,
+      followedTopics: topicDetails,
+      hasFollowedTopics: topicDetails.length > 0,
+      isAuthenticated: true,
+    });
+
+    return createResponse(200, htmlContent, true);
   }
 
   // GET /newsletter.html - HTML newsletter

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Feed - DC Tech Events</title>
+    <meta name="description" content="Personalized feed of events from topics you follow">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        .feed-container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .feed-header {
+            margin-bottom: var(--spacing-xl);
+            padding-bottom: var(--spacing-lg);
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .feed-header h1 {
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .feed-header p {
+            color: var(--color-text-light);
+            margin: 0;
+        }
+
+        .followed-topics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--spacing-sm);
+            margin-top: var(--spacing-md);
+        }
+
+        .topic-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            background: var(--color-background-alt);
+            border-radius: var(--border-radius);
+            font-size: 0.875rem;
+            text-decoration: none;
+            color: var(--color-text);
+            transition: background 0.2s;
+        }
+
+        .topic-badge:hover {
+            background: var(--color-border);
+        }
+
+        .topic-badge-color {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .empty-state {
+            padding: var(--spacing-xl);
+            text-align: center;
+            color: var(--color-text-light);
+            background: var(--color-background-alt);
+            border-radius: var(--border-radius);
+        }
+
+        .empty-state a {
+            color: var(--color-primary);
+        }
+
+        .manage-link {
+            margin-top: var(--spacing-md);
+        }
+
+        .manage-link a {
+            color: var(--color-primary);
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+
+<body>
+    {{> header}}
+
+    <main class="container">
+        <div class="feed-container">
+            <div class="feed-header">
+                <h1>My Feed</h1>
+                <p>Events from topics you follow</p>
+
+                {{#if followedTopics.length}}
+                <div class="followed-topics">
+                    {{#each followedTopics}}
+                    <a href="/topics/{{this.slug}}/" class="topic-badge">
+                        <span class="topic-badge-color" style="background-color: {{this.color}}"></span>
+                        {{this.name}}
+                    </a>
+                    {{/each}}
+                </div>
+                <div class="manage-link">
+                    <a href="/topics/">Browse more topics →</a>
+                </div>
+                {{else}}
+                <div class="manage-link">
+                    <a href="/topics/">Follow some topics to get started →</a>
+                </div>
+                {{/if}}
+            </div>
+
+            {{#if eventsByDay.length}}
+            {{> events_by_day}}
+            {{else}}
+            <div class="empty-state">
+                {{#if followedTopics.length}}
+                <p>No upcoming events in your followed topics.</p>
+                <p><a href="/topics/">Browse all topics</a> to discover more events.</p>
+                {{else}}
+                <p>You haven't followed any topics yet.</p>
+                <p><a href="/topics/">Browse topics</a> and follow the ones that interest you!</p>
+                {{/if}}
+            </div>
+            {{/if}}
+        </div>
+    </main>
+
+    {{> footer}}
+</body>
+
+</html>

@@ -27,6 +27,14 @@
             margin-bottom: var(--spacing-sm);
         }
 
+        .topic-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--spacing-md);
+            flex-wrap: wrap;
+        }
+
         .topic-color {
             width: 16px;
             height: 16px;
@@ -107,10 +115,27 @@
     <main class="container">
         <div class="topic-container">
             <div class="topic-header">
-                <h1>
-                    <span class="topic-color" style="background-color: {{topic.color}}"></span>
-                    {{topic.name}}
-                </h1>
+                <div class="topic-title-row">
+                    <h1>
+                        <span class="topic-color" style="background-color: {{topic.color}}"></span>
+                        {{topic.name}}
+                    </h1>
+                    {{#if isAuthenticated}}
+                    <div id="follow-button-container">
+                        {{#if isFollowing}}
+                        <button class="follow-btn following" hx-delete="/api/topics/{{topic.slug}}/follow"
+                            hx-target="#follow-button-container" hx-swap="innerHTML">
+                            Following ✓
+                        </button>
+                        {{else}}
+                        <button class="follow-btn" hx-post="/api/topics/{{topic.slug}}/follow"
+                            hx-target="#follow-button-container" hx-swap="innerHTML">
+                            Follow
+                        </button>
+                        {{/if}}
+                    </div>
+                    {{/if}}
+                </div>
                 {{#if topic.description}}
                 <p>{{topic.description}}</p>
                 {{/if}}

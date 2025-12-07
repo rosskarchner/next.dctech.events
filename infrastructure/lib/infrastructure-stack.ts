@@ -255,6 +255,23 @@ export class InfrastructureStack extends cdk.Stack {
       sortKey: { name: 'eventDate', type: dynamodb.AttributeType.STRING },
     });
 
+    // TopicFollows table (user topic subscriptions)
+    const topicFollowsTable = new dynamodb.Table(this, 'TopicFollowsTable', {
+      tableName: 'organize-topic-follows',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'topicSlug', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    });
+
+    // Add GSI for getting followers of a topic
+    topicFollowsTable.addGlobalSecondaryIndex({
+      indexName: 'topicFollowersIndex',
+      partitionKey: { name: 'topicSlug', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+    });
+
 
     // ============================================
     // S3 Bucket for Static Website and Exports
@@ -318,6 +335,7 @@ export class InfrastructureStack extends cdk.Stack {
       RSVPS_TABLE: rsvpsTable.tableName,
       MESSAGES_TABLE: messagesTable.tableName,
       TOPICS_TABLE: topicsTable.tableName,
+      TOPIC_FOLLOWS_TABLE: topicFollowsTable.tableName,
       USER_POOL_ID: userPool.userPoolId,
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
       USER_POOL_REGION: cdk.Stack.of(this).region,
@@ -326,6 +344,7 @@ export class InfrastructureStack extends cdk.Stack {
       NEXT_DCTECH_DOMAIN: this.node.tryGetContext('nextDomain') || 'next.dctech.events',
       GITHUB_REPO: this.node.tryGetContext('githubRepo') || 'rosskarchner/dctech.events',
     };
+
 
 
     // Lambda Layer for Handlebars templates
@@ -355,6 +374,7 @@ export class InfrastructureStack extends cdk.Stack {
     rsvpsTable.grantReadWriteData(apiFunction);
     messagesTable.grantReadWriteData(apiFunction);
     topicsTable.grantReadWriteData(apiFunction);
+    topicFollowsTable.grantReadWriteData(apiFunction);
 
 
     // Grant Cognito permissions
