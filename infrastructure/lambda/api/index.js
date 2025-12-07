@@ -2020,6 +2020,19 @@ const cognitoLoginUrl = (redirectPath) => {
   return `${cognitoUrl}/login?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&state=${encodeURIComponent(redirectPath)}`;
 };
 
+// Cognito logout URL helper
+const cognitoLogoutUrl = () => {
+  const domain = process.env.COGNITO_DOMAIN;
+  const region = process.env.USER_POOL_REGION || 'us-east-1';
+  const clientId = process.env.USER_POOL_CLIENT_ID;
+
+  // Construct full Cognito logout URL
+  const cognitoUrl = `https://${domain}.auth.${region}.amazoncognito.com`;
+  const logoutUri = encodeURIComponent(`https://next.dctech.events/`);
+
+  return `${cognitoUrl}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
+};
+
 // ============================================
 // Route Handlers for next.dctech.events
 // ============================================
@@ -2106,6 +2119,19 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     return {
       statusCode: 302,
       headers: { 'Location': cognitoLoginUrl('/') },
+      body: '',
+    };
+  }
+
+  // GET /logout - Clear session and redirect to Cognito logout
+  if ((path === '/logout' || path === '/logout/') && method === 'GET') {
+    return {
+      statusCode: 302,
+      headers: {
+        'Location': cognitoLogoutUrl(),
+        // Clear the auth cookie
+        'Set-Cookie': 'idToken=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Secure; SameSite=Lax',
+      },
       body: '',
     };
   }
