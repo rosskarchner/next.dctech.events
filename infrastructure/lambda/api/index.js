@@ -2025,6 +2025,36 @@ const cognitoLoginUrl = (redirectPath) => {
 // ============================================
 
 const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody) => {
+  // ============================================
+  // Nickname Enforcement: Redirect users without nickname to profile setup
+  // ============================================
+  // Skip this check for: login, callback, profile setup itself, static assets, API routes
+  const exemptPaths = [
+    '/login', '/callback', '/profile/setup', '/api/',
+    '/static/', '/sitemap.xml', '/newsletter.html'
+  ];
+  const isExemptPath = exemptPaths.some(p => path.startsWith(p) || path === p.replace('/', ''));
+
+  if (userId && !isExemptPath) {
+    // Check if user has set up their profile (has a nickname)
+    const userResult = await docClient.send(new GetCommand({
+      TableName: process.env.USERS_TABLE,
+      Key: { userId },
+    }));
+
+    const hasNickname = userResult.Item?.nickname;
+
+    if (!hasNickname) {
+      // Redirect to profile setup, preserving intended destination
+      const returnUrl = encodeURIComponent(path);
+      return {
+        statusCode: 302,
+        headers: { 'Location': `/profile/setup?return=${returnUrl}` },
+        body: '',
+      };
+    }
+  }
+
   // PUBLIC ROUTES
 
   // GET / - Homepage with upcoming events
@@ -2554,16 +2584,21 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     }));
 
     if (userResult.Item?.nickname) {
-      // Already set up, redirect to profile
+      // Already set up, redirect to intended destination or profile
+      const returnUrl = event.queryStringParameters?.return || `/user/${userResult.Item.nickname}`;
       return {
         statusCode: 302,
-        headers: { 'Location': `/user/${userResult.Item.nickname}` },
+        headers: { 'Location': decodeURIComponent(returnUrl) },
         body: '',
       };
     }
 
+    // Get return URL from query params
+    const returnUrl = event.queryStringParameters?.return || '/';
+
     const htmlContent = renderTemplate('profile_setup', {
       isAuthenticated: true,
+      returnUrl,
     });
     return createResponse(200, htmlContent, true);
   }

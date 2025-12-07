@@ -115,6 +115,8 @@
                         <small>3-30 characters. Letters, numbers, underscores, and hyphens only.</small>
                     </div>
 
+                    <input type="hidden" id="returnUrl" value="{{returnUrl}}">
+
                     <button type="submit" class="btn btn-primary">Continue</button>
                 </form>
             </div>
@@ -124,12 +126,19 @@
     {{> footer}}
 
     <script>
-        // On successful setup, redirect to profile
+        // On successful setup, redirect to intended destination or profile
         document.body.addEventListener('htmx:afterRequest', function (evt) {
             if (evt.detail.successful && evt.detail.xhr.status === 200) {
-                const response = JSON.parse(evt.detail.xhr.responseText);
-                if (response.nickname) {
-                    window.location.href = '/user/' + response.nickname;
+                const returnUrl = document.getElementById('returnUrl').value;
+                if (returnUrl && returnUrl !== '/') {
+                    window.location.href = decodeURIComponent(returnUrl);
+                } else {
+                    const response = JSON.parse(evt.detail.xhr.responseText);
+                    if (response.nickname) {
+                        window.location.href = '/user/' + response.nickname;
+                    } else {
+                        window.location.href = '/';
+                    }
                 }
             }
         });
