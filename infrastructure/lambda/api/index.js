@@ -2028,10 +2028,11 @@ const cognitoLogoutUrl = () => {
 
   // Construct full Cognito logout URL
   const cognitoUrl = `https://${domain}.auth.${region}.amazoncognito.com`;
-  const redirectUri = encodeURIComponent(`https://next.dctech.events/`);
+  // Note: logout_uri must exactly match one of the allowed "Sign out URLs" in Cognito app client settings
+  // The CDK configures 'https://next.dctech.events' (no trailing slash)
+  const logoutUri = encodeURIComponent(`https://next.dctech.events`);
 
-  // Cognito requires 'redirect_uri' (not 'logout_uri') as the parameter name
-  return `${cognitoUrl}/logout?client_id=${clientId}&redirect_uri=${redirectUri}`;
+  return `${cognitoUrl}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
 };
 
 // ============================================
