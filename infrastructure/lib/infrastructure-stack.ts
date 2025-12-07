@@ -279,6 +279,23 @@ export class InfrastructureStack extends cdk.Stack {
       sortKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
     });
 
+    // EventUpvotes table (for tracking event upvotes)
+    const eventUpvotesTable = new dynamodb.Table(this, 'EventUpvotesTable', {
+      tableName: 'organize-event-upvotes',
+      partitionKey: { name: 'eventId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    });
+
+    // Add GSI for getting all upvotes by a user
+    eventUpvotesTable.addGlobalSecondaryIndex({
+      indexName: 'userUpvotesIndex',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'eventId', type: dynamodb.AttributeType.STRING },
+    });
+
 
     // ============================================
     // S3 Bucket for Static Website and Exports
@@ -343,6 +360,7 @@ export class InfrastructureStack extends cdk.Stack {
       MESSAGES_TABLE: messagesTable.tableName,
       TOPICS_TABLE: topicsTable.tableName,
       TOPIC_FOLLOWS_TABLE: topicFollowsTable.tableName,
+      EVENT_UPVOTES_TABLE: eventUpvotesTable.tableName,
       USER_POOL_ID: userPool.userPoolId,
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
       USER_POOL_REGION: cdk.Stack.of(this).region,
@@ -382,6 +400,7 @@ export class InfrastructureStack extends cdk.Stack {
     messagesTable.grantReadWriteData(apiFunction);
     topicsTable.grantReadWriteData(apiFunction);
     topicFollowsTable.grantReadWriteData(apiFunction);
+    eventUpvotesTable.grantReadWriteData(apiFunction);
 
 
     // Grant Cognito permissions

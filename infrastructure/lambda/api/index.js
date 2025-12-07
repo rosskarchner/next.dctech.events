@@ -1252,25 +1252,77 @@ async function getEvent(eventId, userId, isHtmx) {
   }));
 
   if (!result.Item) {
+    if (isHtmx) {
+      return createResponse(404, html.error('Event not found'), true);
+    }
     return createResponse(404, { error: 'Event not found' });
   }
 
-  if (isHtmx) {
-    let rsvpStatus = null;
+  const event = result.Item;
+
+  // For native events (or HTMX requests), return full detail page
+  if (event.isNative || isHtmx) {
+    // Get user's RSVP status
+    let userRsvp = null;
     if (userId) {
-      const rsvp = await docClient.send(new GetCommand({
+      const rsvpResult = await docClient.send(new GetCommand({
         TableName: process.env.RSVPS_TABLE,
         Key: { eventId, userId }
       }));
-      if (rsvp.Item) {
-        rsvpStatus = rsvp.Item.status;
-      }
+      userRsvp = rsvpResult.Item?.status || null;
     }
-    const htmlContent = html.eventDetail(result.Item, rsvpStatus);
+
+    // Get upvote status
+    const { hasUpvoted } = await getUpvoteStatus(eventId, userId);
+
+    // Get topic info if available
+    let topic = null;
+    if (event.topicSlug) {
+      const topicResult = await docClient.send(new GetCommand({
+        TableName: process.env.TOPICS_TABLE,
+        Key: { slug: event.topicSlug },
+      }));
+      topic = topicResult.Item || null;
+    }
+
+    // Get creator nickname
+    let creatorNickname = null;
+    if (event.createdBy) {
+      const creatorResult = await docClient.send(new GetCommand({
+        TableName: process.env.USERS_TABLE,
+        Key: { userId: event.createdBy },
+      }));
+      creatorNickname = creatorResult.Item?.nickname || null;
+    }
+
+    // Get RSVP count
+    let rsvpCount = 0;
+    if (event.rsvpEnabled) {
+      const rsvpsResult = await docClient.send(new QueryCommand({
+        TableName: process.env.RSVPS_TABLE,
+        KeyConditionExpression: 'eventId = :eventId',
+        ExpressionAttributeValues: { ':eventId': eventId },
+        Select: 'COUNT',
+      }));
+      rsvpCount = rsvpsResult.Count || 0;
+    }
+
+    const htmlContent = renderTemplate('event_detail', {
+      ...event,
+      topic,
+      isAuthenticated: !!userId,
+      hasUpvoted,
+      userRsvp,
+      userRsvpYes: userRsvp === 'yes',
+      userRsvpMaybe: userRsvp === 'maybe',
+      creatorNickname,
+      rsvpCount,
+    });
     return createResponse(200, htmlContent, true);
   }
 
-  return createResponse(200, result.Item);
+  // For external link events, return JSON (API use)
+  return createResponse(200, event);
 }
 
 async function createEvent(userId, data) {
@@ -1286,18 +1338,28 @@ async function createEvent(userId, data) {
   const eventId = uuidv4();
   const timestamp = new Date().toISOString();
 
+  // Determine if this is a native event (hosted on dctech.events) or external link
+  const isNative = data.eventType === 'native' || data.isNative === true || data.isNative === 'true';
+
   const event = {
     eventId,
     title: data.title,
     eventDate: data.date,
+    endDate: data.end_date || null,
     time: data.time || '',
     location: data.location || '',
-    url: data.url || '',
+    url: isNative ? null : (data.url || ''),
     description: data.description || '',
     groupId: data.groupId || null,
     topicSlug: data.topicSlug || null,
+    cost: data.cost || null,
     upvoteCount: 0,
-    eventType: 'all',
+    eventType: 'all', // For GSI queries
+    isNative,
+    // RSVP settings (only meaningful for native events)
+    rsvpEnabled: isNative && (data.rsvpEnabled === true || data.rsvpEnabled === 'true' || data.rsvpEnabled === 'on'),
+    rsvpLimit: isNative && data.rsvpLimit ? parseInt(data.rsvpLimit, 10) : null,
+    showRsvpList: isNative ? (data.showRsvpList !== 'false' && data.showRsvpList !== false) : true, // Default to showing
     createdBy: userId,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -1387,6 +1449,226 @@ async function deleteEvent(eventId, userId) {
   }));
 
   return createResponse(200, { message: 'Event deleted successfully' });
+}
+
+// ============================================
+// Event Upvote Functions (Phase 4)
+// ============================================
+
+// Upvote an event
+async function upvoteEvent(eventId, userId, isHtmx = false) {
+  // Get the event to check it exists and user isn't the creator
+  const eventResult = await docClient.send(new GetCommand({
+    TableName: process.env.EVENTS_TABLE,
+    Key: { eventId },
+  }));
+
+  if (!eventResult.Item) {
+    if (isHtmx) {
+      return createResponse(404, html.error('Event not found'), true);
+    }
+    return createResponse(404, { error: 'Event not found' });
+  }
+
+  // Users cannot upvote their own events
+  if (eventResult.Item.createdBy === userId) {
+    if (isHtmx) {
+      return createResponse(403, html.error('You cannot upvote your own event'), true);
+    }
+    return createResponse(403, { error: 'Cannot upvote your own event' });
+  }
+
+  const timestamp = new Date().toISOString();
+
+  try {
+    // Add upvote record (will fail if already exists due to PK+SK)
+    await docClient.send(new PutCommand({
+      TableName: process.env.EVENT_UPVOTES_TABLE,
+      Item: {
+        eventId,
+        userId,
+        createdAt: timestamp,
+      },
+      ConditionExpression: 'attribute_not_exists(eventId) AND attribute_not_exists(userId)',
+    }));
+
+    // Increment upvote count on the event
+    await docClient.send(new UpdateCommand({
+      TableName: process.env.EVENTS_TABLE,
+      Key: { eventId },
+      UpdateExpression: 'SET upvoteCount = if_not_exists(upvoteCount, :zero) + :inc',
+      ExpressionAttributeValues: {
+        ':inc': 1,
+        ':zero': 0,
+      },
+    }));
+
+    // Increment karma for event creator
+    if (eventResult.Item.createdBy) {
+      await docClient.send(new UpdateCommand({
+        TableName: process.env.USERS_TABLE,
+        Key: { userId: eventResult.Item.createdBy },
+        UpdateExpression: 'SET karma = if_not_exists(karma, :zero) + :inc',
+        ExpressionAttributeValues: {
+          ':inc': 1,
+          ':zero': 0,
+        },
+      }));
+    }
+
+    const newCount = (eventResult.Item.upvoteCount || 0) + 1;
+
+    if (isHtmx) {
+      // Return updated upvote button showing "upvoted" state
+      return createResponse(200, `
+        <button class="upvote-btn upvoted" 
+                hx-delete="/api/events/${eventId}/upvote" 
+                hx-target="this" 
+                hx-swap="outerHTML">
+          ▲ ${newCount}
+        </button>
+      `, true);
+    }
+
+    return createResponse(200, { message: 'Upvoted', upvoteCount: newCount });
+  } catch (err) {
+    if (err.name === 'ConditionalCheckFailedException') {
+      // Already upvoted
+      if (isHtmx) {
+        return createResponse(200, html.error('Already upvoted'), true);
+      }
+      return createResponse(409, { error: 'Already upvoted' });
+    }
+    throw err;
+  }
+}
+
+// Remove upvote from an event
+async function removeUpvote(eventId, userId, isHtmx = false) {
+  // Check if upvote exists
+  const upvoteResult = await docClient.send(new GetCommand({
+    TableName: process.env.EVENT_UPVOTES_TABLE,
+    Key: { eventId, userId },
+  }));
+
+  if (!upvoteResult.Item) {
+    if (isHtmx) {
+      return createResponse(404, html.error('No upvote to remove'), true);
+    }
+    return createResponse(404, { error: 'No upvote to remove' });
+  }
+
+  // Get current event upvote count
+  const eventResult = await docClient.send(new GetCommand({
+    TableName: process.env.EVENTS_TABLE,
+    Key: { eventId },
+  }));
+
+  // Remove upvote record
+  await docClient.send(new DeleteCommand({
+    TableName: process.env.EVENT_UPVOTES_TABLE,
+    Key: { eventId, userId },
+  }));
+
+  // Decrement upvote count on the event
+  await docClient.send(new UpdateCommand({
+    TableName: process.env.EVENTS_TABLE,
+    Key: { eventId },
+    UpdateExpression: 'SET upvoteCount = upvoteCount - :dec',
+    ExpressionAttributeValues: {
+      ':dec': 1,
+    },
+  }));
+
+  // Decrement karma for event creator
+  if (eventResult.Item?.createdBy) {
+    await docClient.send(new UpdateCommand({
+      TableName: process.env.USERS_TABLE,
+      Key: { userId: eventResult.Item.createdBy },
+      UpdateExpression: 'SET karma = karma - :dec',
+      ExpressionAttributeValues: {
+        ':dec': 1,
+      },
+    }));
+  }
+
+  const newCount = Math.max(0, (eventResult.Item?.upvoteCount || 1) - 1);
+
+  if (isHtmx) {
+    // Return updated upvote button showing "not upvoted" state
+    return createResponse(200, `
+      <button class="upvote-btn" 
+              hx-post="/api/events/${eventId}/upvote" 
+              hx-target="this" 
+              hx-swap="outerHTML">
+        ▲ ${newCount}
+      </button>
+    `, true);
+  }
+
+  return createResponse(200, { message: 'Upvote removed', upvoteCount: newCount });
+}
+
+// Check if user has upvoted an event
+async function getUpvoteStatus(eventId, userId) {
+  if (!userId) {
+    return { hasUpvoted: false };
+  }
+
+  const result = await docClient.send(new GetCommand({
+    TableName: process.env.EVENT_UPVOTES_TABLE,
+    Key: { eventId, userId },
+  }));
+
+  return { hasUpvoted: !!result.Item };
+}
+
+// Get featured events (top by upvotes in the next 14 days)
+async function getFeaturedEvents(limit = 5) {
+  const today = formatDate(new Date());
+  const twoWeeksFromNow = new Date();
+  twoWeeksFromNow.setDate(twoWeeksFromNow.getDate() + 14);
+  const futureDate = formatDate(twoWeeksFromNow);
+
+  // Get upcoming events
+  const result = await docClient.send(new QueryCommand({
+    TableName: process.env.EVENTS_TABLE,
+    IndexName: 'dateEventsIndex',
+    KeyConditionExpression: 'eventType = :eventType AND eventDate BETWEEN :today AND :future',
+    ExpressionAttributeValues: {
+      ':eventType': 'all',
+      ':today': today,
+      ':future': futureDate,
+    },
+  }));
+
+  const events = result.Items || [];
+
+  // Sort by upvote count (descending), then by date
+  events.sort((a, b) => {
+    const upvoteDiff = (b.upvoteCount || 0) - (a.upvoteCount || 0);
+    if (upvoteDiff !== 0) return upvoteDiff;
+    return a.eventDate.localeCompare(b.eventDate);
+  });
+
+  // Get top events, but extend to include ties
+  if (events.length <= limit) {
+    return events;
+  }
+
+  const featured = events.slice(0, limit);
+  const cutoffScore = featured[featured.length - 1]?.upvoteCount || 0;
+
+  // Include any events tied with the last one
+  for (let i = limit; i < events.length; i++) {
+    if ((events[i].upvoteCount || 0) === cutoffScore) {
+      featured.push(events[i]);
+    } else {
+      break;
+    }
+  }
+
+  return featured;
 }
 
 // RSVP handlers
@@ -2798,6 +3080,25 @@ exports.handler = async (event) => {
     }
     if (path.match(/^\/events\/[^/]+$/) && method === 'DELETE') {
       return await deleteEvent(pathParams.eventId, userId);
+    }
+
+    // Upvote routes
+    if (path.match(/^\/api\/events\/[^/]+\/upvote$/) && method === 'POST') {
+      if (!userId) {
+        if (isHtmx) {
+          return createResponse(200, '<a href="/login" class="upvote-btn">▲ Sign in to upvote</a>', true);
+        }
+        return createResponse(403, { error: 'Authentication required' });
+      }
+      const eventId = path.match(/^\/api\/events\/([^/]+)\/upvote$/)[1];
+      return await upvoteEvent(eventId, userId, isHtmx);
+    }
+    if (path.match(/^\/api\/events\/[^/]+\/upvote$/) && method === 'DELETE') {
+      if (!userId) {
+        return createResponse(403, { error: 'Authentication required' });
+      }
+      const eventId = path.match(/^\/api\/events\/([^/]+)\/upvote$/)[1];
+      return await removeUpvote(eventId, userId, isHtmx);
     }
 
     // RSVP routes

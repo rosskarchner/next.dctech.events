@@ -7,7 +7,7 @@
   <title>Submit an Event - DC Tech Events</title>
   <meta name="description" content="Submit a tech event to DC Tech Events">
   <link rel="stylesheet" href="/static/css/main.css">
-  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <style>
     .submit-container {
       max-width: 800px;
@@ -95,6 +95,107 @@
       flex: 1;
     }
 
+    /* Event Type Toggle */
+    .event-type-toggle {
+      display: flex;
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-lg);
+    }
+
+    .event-type-option {
+      flex: 1;
+      position: relative;
+    }
+
+    .event-type-option input[type="radio"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .event-type-option label {
+      display: block;
+      padding: var(--spacing-md);
+      border: 2px solid var(--color-border);
+      border-radius: var(--border-radius);
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .event-type-option label:hover {
+      border-color: var(--color-primary);
+    }
+
+    .event-type-option input[type="radio"]:checked+label {
+      border-color: var(--color-primary);
+      background: rgba(37, 99, 235, 0.05);
+    }
+
+    .event-type-option .type-title {
+      font-weight: 600;
+      display: block;
+      margin-bottom: var(--spacing-xs);
+    }
+
+    .event-type-option .type-desc {
+      font-size: 0.875rem;
+      color: var(--color-text-light);
+    }
+
+    /* Native Event Options */
+    .native-options {
+      background: var(--color-background-alt);
+      border-radius: var(--border-radius);
+      padding: var(--spacing-lg);
+      margin-top: var(--spacing-md);
+      display: none;
+    }
+
+    .native-options.visible {
+      display: block;
+    }
+
+    .native-options h4 {
+      margin-top: 0;
+      margin-bottom: var(--spacing-md);
+      font-size: 1rem;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-md);
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      width: auto;
+      margin-top: 3px;
+    }
+
+    .checkbox-group label {
+      margin-bottom: 0;
+      font-weight: normal;
+    }
+
+    .checkbox-group small {
+      display: block;
+      margin-top: 4px;
+      color: var(--color-text-light);
+      font-size: 0.8rem;
+    }
+
+    .rsvp-privacy-note {
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+      border-radius: var(--border-radius);
+      padding: var(--spacing-sm);
+      font-size: 0.875rem;
+      margin-top: var(--spacing-md);
+    }
+
     .optional-details {
       margin-top: var(--spacing-lg);
       border-top: 1px solid var(--color-border);
@@ -178,47 +279,78 @@
       color: #166534;
     }
 
-    .status-message.info {
-      background-color: #eff6ff;
-      border: 1px solid #93c5fd;
-      color: #1e40af;
+    #url-group {
+      transition: opacity 0.2s;
     }
 
-    .success-box {
-      padding: var(--spacing-xl);
-      background-color: #f0fdf4;
-      border: 2px solid #86efac;
-      border-radius: var(--border-radius);
-    }
-
-    .success-box h3 {
-      color: #166534;
-      margin-top: 0;
+    #url-group.hidden {
+      opacity: 0.5;
+      pointer-events: none;
     }
   </style>
 </head>
 
 <body>
-  <header>
-    <h1 class="logo"><a href="/">DC Tech Events</a></h1>
-    <div>
-      <div>Technology conferences and meetups in and around Washington, DC</div>
-      <nav>
-        <a href="/locations/">Locations</a> |
-        <a href="/locations/dc/">Washington DC</a> |
-        <a href="/locations/va/">Virginia</a> |
-        <a href="/locations/md/">Maryland</a> |
-        <a href="/groups/">Groups</a> |
-        <a href="/submit/">Submit Event</a>
-      </nav>
-    </div>
-  </header>
+  {{> header}}
 
   <main class="container">
     <div class="submit-container">
-      <h2>Submit events to DC Tech Events</h2>
+      <h2>Submit an Event</h2>
 
       <form id="event-form" hx-post="/submit/" hx-target="#result" hx-swap="innerHTML">
+        <div class="event-section">
+          <h3>Event Type</h3>
+
+          <div class="event-type-toggle">
+            <div class="event-type-option">
+              <input type="radio" id="type-external" name="eventType" value="external" checked>
+              <label for="type-external">
+                <span class="type-title">🔗 Link to External Page</span>
+                <span class="type-desc">Link to Meetup, Eventbrite, etc.</span>
+              </label>
+            </div>
+            <div class="event-type-option">
+              <input type="radio" id="type-native" name="eventType" value="native">
+              <label for="type-native">
+                <span class="type-title">🏠 Host on DC Tech Events</span>
+                <span class="type-desc">Create a page here with RSVP</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Native Event Options (shown when native is selected) -->
+          <div id="native-options" class="native-options">
+            <h4>RSVP Settings</h4>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="rsvpEnabled" name="rsvpEnabled" value="true" checked>
+              <div>
+                <label for="rsvpEnabled">Enable RSVP</label>
+                <small>Allow users to indicate they're attending</small>
+              </div>
+            </div>
+
+            <div class="form-group" id="rsvp-limit-group">
+              <label for="rsvpLimit">Attendee Limit (optional)</label>
+              <input type="number" id="rsvpLimit" name="rsvpLimit" min="1" placeholder="Leave blank for unlimited">
+              <small>Maximum number of attendees</small>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="showRsvpList" name="showRsvpList" value="true" checked>
+              <div>
+                <label for="showRsvpList">Show attendee list publicly</label>
+                <small>Display names of people who RSVP</small>
+              </div>
+            </div>
+
+            <div class="rsvp-privacy-note">
+              <strong>Note:</strong> As the event organizer, you can always see all attendees regardless of their
+              privacy settings.
+            </div>
+          </div>
+        </div>
+
         <div class="event-section">
           <h3>Event Details</h3>
 
@@ -228,9 +360,10 @@
               placeholder="e.g., Python User Group Monthly Meetup" autocomplete="off">
           </div>
 
-          <div class="form-group">
+          <div class="form-group" id="url-group">
             <label for="url">Event URL <span class="required">*</span></label>
-            <input type="url" id="url" name="url" required placeholder="https://example.com/event" autocomplete="url">
+            <input type="url" id="url" name="url" placeholder="https://example.com/event" autocomplete="url">
+            <small>Link to the event page on Meetup, Eventbrite, etc.</small>
           </div>
 
           <div class="form-row">
@@ -290,7 +423,8 @@
 
               <div class="form-group">
                 <label for="description">Description</label>
-                <textarea id="description" name="description" rows="4" autocomplete="off"></textarea>
+                <textarea id="description" name="description" rows="4" autocomplete="off"
+                  placeholder="Describe the event..."></textarea>
               </div>
 
               <div class="form-group">
@@ -324,11 +458,46 @@
     </div>
   </main>
 
-  <footer>
-    <p>&copy; {{year}} DC Tech Events</p>
-  </footer>
+  {{> footer}}
 
   <script>
+    // Toggle native options visibility based on event type
+    const typeExternal = document.getElementById('type-external');
+    const typeNative = document.getElementById('type-native');
+    const nativeOptions = document.getElementById('native-options');
+    const urlGroup = document.getElementById('url-group');
+    const urlInput = document.getElementById('url');
+
+    function updateFormForEventType() {
+      const isNative = typeNative.checked;
+
+      if (isNative) {
+        nativeOptions.classList.add('visible');
+        urlGroup.classList.add('hidden');
+        urlInput.removeAttribute('required');
+      } else {
+        nativeOptions.classList.remove('visible');
+        urlGroup.classList.remove('hidden');
+        urlInput.setAttribute('required', 'required');
+      }
+    }
+
+    typeExternal.addEventListener('change', updateFormForEventType);
+    typeNative.addEventListener('change', updateFormForEventType);
+
+    // Toggle RSVP limit visibility based on RSVP enabled
+    const rsvpEnabled = document.getElementById('rsvpEnabled');
+    const rsvpLimitGroup = document.getElementById('rsvp-limit-group');
+    const showRsvpListCheckbox = document.getElementById('showRsvpList');
+
+    rsvpEnabled.addEventListener('change', function () {
+      const isEnabled = this.checked;
+      rsvpLimitGroup.style.opacity = isEnabled ? '1' : '0.5';
+      rsvpLimitGroup.style.pointerEvents = isEnabled ? 'auto' : 'none';
+      showRsvpListCheckbox.parentElement.parentElement.style.opacity = isEnabled ? '1' : '0.5';
+      showRsvpListCheckbox.parentElement.parentElement.style.pointerEvents = isEnabled ? 'auto' : 'none';
+    });
+
     // Set default date to tomorrow
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -367,3 +536,7 @@
 </body>
 
 </html>
+</CodeContent>
+<parameter name="Description">Redesigned the event submission form with a unified interface for both external links and
+  native events. Users can toggle between linking to an external event page or hosting the event directly on DC Tech
+  Events with RSVP functionality and privacy settings.

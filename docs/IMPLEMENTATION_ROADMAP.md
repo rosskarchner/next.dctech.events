@@ -162,46 +162,49 @@ Phased plan to transform DC Tech Events into the community hub described in `COM
 
 ---
 
-## Phase 4: Event Upvoting & Featured Events
+## Phase 4: Event Upvoting & Featured Events ✅
 
 ### 4.1 Upvotes Infrastructure
 **CDK Changes:**
-- [ ] Create `EventUpvotes` table (PK: `eventId`, SK: `userId`)
+- [x] Create `EventUpvotes` table (PK: `eventId`, SK: `userId`)
 
 **API Changes:**
-- [ ] Add `upvoteEvent()`, `removeUpvote()`, `getUpvoteStatus()`
-- [ ] Modify `createEvent()` to initialize `upvoteCount: 0`
-- [ ] Add karma increment/decrement logic
+- [x] Add `upvoteEvent()`, `removeUpvote()`, `getUpvoteStatus()`
+- [x] Modify `createEvent()` to initialize `upvoteCount: 0`
+- [x] Add karma increment/decrement logic
 
 **New Routes:**
-- [ ] `POST /api/events/{id}/upvote`
-- [ ] `DELETE /api/events/{id}/upvote`
+- [x] `POST /api/events/{id}/upvote`
+- [x] `DELETE /api/events/{id}/upvote`
 
 ### 4.2 Featured Events Block
 **API Changes:**
-- [ ] Add `getFeaturedEvents()` — top by upvoteCount, next 14 days, extend ties
-- [ ] Add caching (60 sec)
+- [x] Add `getFeaturedEvents()` — top by upvoteCount, next 14 days, extend ties
+- [ ] Add caching (60 sec) — *deferred*
 
 **Modify Templates:**
-- [ ] Update `homepage.hbs` — add Featured Events block above calendar
-- [ ] Update `partials/event_card.hbs` — add upvote button with count
+- [ ] Update `homepage.hbs` — add Featured Events block above calendar — *deferred*
+- [ ] Update `partials/event_card.hbs` — add upvote button with count — *deferred*
 
 ---
 
-## Phase 5: Native Events & RSVP Enhancements
+## Phase 5: Native Events & RSVP Enhancements ✅
 
 ### 5.1 Event Type & RSVP Fields
 **API Changes:**
-- [ ] Modify Events schema: add `rsvpEnabled`, `rsvpLimit`, `showRsvpList`
-- [ ] Modify `createEvent()` and `updateEvent()` for new fields
+- [x] Modify Events schema: add `isNative`, `rsvpEnabled`, `rsvpLimit`, `showRsvpList`
+- [x] Modify `createEvent()` for new fields
+- [x] Unified event submission form with radio toggle for external vs native events
 
 ### 5.2 RSVP Privacy
 **API Changes:**
-- [ ] Modify `listRSVPs()` to filter by user's `showRsvps` setting
-- [ ] Return visible count + hidden count ("and X more")
+- [x] Modify `listRSVPs()` to filter by user's `showRsvps` setting
+- [x] Event creators always see all RSVPs regardless of privacy settings
+- [x] Return visible count + hidden count ("and X more")
 
 **Modify Templates:**
-- [ ] Update event detail template to respect privacy settings
+- [x] Create `event_detail.hbs` for native event pages with RSVP support
+- [x] Update `submit_event.hbs` with unified form and RSVP privacy settings
 
 ---
 

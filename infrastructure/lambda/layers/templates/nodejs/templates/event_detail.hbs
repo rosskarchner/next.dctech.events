@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}} - DC Tech Events</title>
+    <meta name="description"
+        content="{{title}} on {{formatShortDate eventDate}}{{#if location}} at {{location}}{{/if}}">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        .event-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .event-header {
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .event-header h1 {
+            margin: 0 0 var(--spacing-md) 0;
+            font-size: 2rem;
+        }
+
+        .event-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--spacing-md);
+            color: var(--color-text-light);
+            font-size: 1rem;
+        }
+
+        .event-meta-item {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+        }
+
+        .event-meta-item .icon {
+            font-size: 1.25rem;
+        }
+
+        .event-actions {
+            display: flex;
+            gap: var(--spacing-md);
+            margin-top: var(--spacing-lg);
+        }
+
+        .upvote-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            padding: var(--spacing-sm) var(--spacing-md);
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            color: var(--color-text);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1rem;
+            text-decoration: none;
+        }
+
+        .upvote-btn:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+
+        .upvote-btn.upvoted {
+            background: var(--color-primary);
+            border-color: var(--color-primary);
+            color: white;
+        }
+
+        .event-body {
+            background: white;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: var(--spacing-xl);
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .event-description {
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+
+        .event-section {
+            margin-top: var(--spacing-xl);
+            padding-top: var(--spacing-lg);
+            border-top: 1px solid var(--color-border);
+        }
+
+        .event-section h2 {
+            margin: 0 0 var(--spacing-md) 0;
+            font-size: 1.25rem;
+        }
+
+        /* RSVP Section */
+        .rsvp-section {
+            background: var(--color-background-alt);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-lg);
+        }
+
+        .rsvp-buttons {
+            display: flex;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-md);
+        }
+
+        .rsvp-btn {
+            padding: var(--spacing-sm) var(--spacing-lg);
+            border: 2px solid var(--color-border);
+            border-radius: var(--border-radius);
+            background: white;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+
+        .rsvp-btn:hover {
+            border-color: var(--color-primary);
+        }
+
+        .rsvp-btn.active {
+            border-color: var(--color-primary);
+            background: var(--color-primary);
+            color: white;
+        }
+
+        .rsvp-btn.going {
+            border-color: #22c55e;
+        }
+
+        .rsvp-btn.going.active {
+            background: #22c55e;
+            border-color: #22c55e;
+        }
+
+        .rsvp-btn.maybe {
+            border-color: #f59e0b;
+        }
+
+        .rsvp-btn.maybe.active {
+            background: #f59e0b;
+            border-color: #f59e0b;
+        }
+
+        .rsvp-list {
+            margin-top: var(--spacing-md);
+        }
+
+        .rsvp-list p {
+            margin: var(--spacing-xs) 0;
+        }
+
+        .topic-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: white;
+        }
+
+        .creator-info {
+            font-size: 0.875rem;
+            color: var(--color-text-light);
+        }
+
+        .creator-info a {
+            color: var(--color-primary);
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            color: var(--color-text-light);
+            text-decoration: none;
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .back-link:hover {
+            color: var(--color-primary);
+        }
+    </style>
+</head>
+
+<body>
+    {{> header}}
+
+    <main class="container">
+        <div class="event-container">
+            <a href="/" class="back-link">← Back to events</a>
+
+            <div class="event-header">
+                <h1>{{title}}</h1>
+
+                <div class="event-meta">
+                    <div class="event-meta-item">
+                        <span class="icon">📅</span>
+                        <span>{{formatLongDate eventDate}}{{#if time}} at {{formatTime time}}{{/if}}</span>
+                    </div>
+                    {{#if location}}
+                    <div class="event-meta-item">
+                        <span class="icon">📍</span>
+                        <span>{{location}}</span>
+                    </div>
+                    {{/if}}
+                    {{#if cost}}
+                    <div class="event-meta-item">
+                        <span class="icon">💵</span>
+                        <span>{{cost}}</span>
+                    </div>
+                    {{/if}}
+                    {{#if topic}}
+                    <div class="event-meta-item">
+                        <span class="topic-badge" style="background-color: {{topic.color}}">{{topic.name}}</span>
+                    </div>
+                    {{/if}}
+                </div>
+
+                <div class="event-actions">
+                    {{#if isAuthenticated}}
+                    {{#if hasUpvoted}}
+                    <button class="upvote-btn upvoted" hx-delete="/api/events/{{eventId}}/upvote" hx-target="this"
+                        hx-swap="outerHTML">
+                        ▲ {{upvoteCount}}
+                    </button>
+                    {{else}}
+                    <button class="upvote-btn" hx-post="/api/events/{{eventId}}/upvote" hx-target="this"
+                        hx-swap="outerHTML">
+                        ▲ {{upvoteCount}}
+                    </button>
+                    {{/if}}
+                    {{else}}
+                    <a href="/login" class="upvote-btn">▲ {{upvoteCount}} - Sign in to upvote</a>
+                    {{/if}}
+                </div>
+            </div>
+
+            <div class="event-body">
+                {{#if description}}
+                <div class="event-description">{{description}}</div>
+                {{else}}
+                <p class="text-muted">No description provided.</p>
+                {{/if}}
+
+                {{#if rsvpEnabled}}
+                <div class="event-section">
+                    <h2>RSVP</h2>
+                    <div class="rsvp-section">
+                        {{#if isAuthenticated}}
+                        <div class="rsvp-buttons" id="rsvp-buttons">
+                            <button class="rsvp-btn going {{#if userRsvpYes}}active{{/if}}"
+                                hx-post="/events/{{eventId}}/rsvps" hx-vals='{"status": "yes"}'
+                                hx-target="#rsvp-buttons" hx-swap="outerHTML">
+                                ✓ Going
+                            </button>
+                            <button class="rsvp-btn maybe {{#if userRsvpMaybe}}active{{/if}}"
+                                hx-post="/events/{{eventId}}/rsvps" hx-vals='{"status": "maybe"}'
+                                hx-target="#rsvp-buttons" hx-swap="outerHTML">
+                                ? Maybe
+                            </button>
+                            {{#if userRsvp}}
+                            <button class="rsvp-btn" hx-delete="/events/{{eventId}}/rsvps" hx-target="#rsvp-buttons"
+                                hx-swap="outerHTML">
+                                ✕ Cancel
+                            </button>
+                            {{/if}}
+                        </div>
+                        {{else}}
+                        <p><a href="/login">Sign in</a> to RSVP to this event.</p>
+                        {{/if}}
+
+                        {{#if showRsvpList}}
+                        <div class="rsvp-list" id="rsvp-list" hx-get="/events/{{eventId}}/rsvps" hx-trigger="load"
+                            hx-swap="innerHTML">
+                            Loading attendees...
+                        </div>
+                        {{else}}
+                        <p class="text-muted">{{rsvpCount}} people are attending.</p>
+                        {{/if}}
+                    </div>
+                </div>
+                {{/if}}
+
+                <div class="event-section">
+                    <p class="creator-info">
+                        Submitted by {{#if creatorNickname}}<a
+                            href="/user/{{creatorNickname}}">{{creatorNickname}}</a>{{else}}Anonymous{{/if}}
+                        on {{formatShortDate createdAt}}
+                    </p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    {{> footer}}
+</body>
+
+</html>
