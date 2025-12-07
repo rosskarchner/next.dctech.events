@@ -613,10 +613,12 @@ async function setupProfile(userId, nickname) {
 async function getPublicProfile(nickname, isHtmx) {
   const user = await getUserByNickname(nickname);
   if (!user) {
-    if (isHtmx) {
-      return createResponse(404, html.error('User not found'), true);
-    }
-    return createResponse(404, { error: 'User not found' });
+    // Always return HTML for page requests
+    const htmlContent = renderTemplate('profile_page', {
+      notFound: true,
+      nickname,
+    });
+    return createResponse(404, htmlContent, true);
   }
 
   // Get user's submitted events
@@ -638,14 +640,12 @@ async function getPublicProfile(nickname, isHtmx) {
     avatarUrl: user.avatarUrl || '',
     karma: user.karma || 0,
     submittedEvents: eventsResult.Items || [],
+    isAuthenticated: false, // Will be set by caller if needed
   };
 
-  if (isHtmx) {
-    const htmlContent = renderTemplate('profile_page', publicData);
-    return createResponse(200, htmlContent, true);
-  }
-
-  return createResponse(200, publicData);
+  // Always return HTML for page requests
+  const htmlContent = renderTemplate('profile_page', publicData);
+  return createResponse(200, htmlContent, true);
 }
 
 // Update user profile

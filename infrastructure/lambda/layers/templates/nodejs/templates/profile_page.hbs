@@ -151,6 +151,13 @@
 
     <main class="container">
         <div class="profile-container">
+            {{#if notFound}}
+            <div class="empty-state" style="margin-top: var(--spacing-xl);">
+                <h2>User Not Found</h2>
+                <p>The user "{{nickname}}" doesn't exist or may have changed their nickname.</p>
+                <p><a href="/">← Back to home</a></p>
+            </div>
+            {{else}}
             <div class="profile-header">
                 <div class="profile-avatar">
                     {{#if avatarUrl}}
@@ -199,6 +206,7 @@
                 </div>
                 {{/if}}
             </div>
+            {{/if}}
         </div>
     </main>
 
