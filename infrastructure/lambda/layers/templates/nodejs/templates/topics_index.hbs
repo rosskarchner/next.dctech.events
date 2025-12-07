@@ -14,7 +14,12 @@
             margin: 0 auto;
         }
 
-        .topics-intro {
+        .topics-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: var(--spacing-md);
             margin-bottom: var(--spacing-xl);
         }
 
@@ -24,6 +29,7 @@
 
         .topics-intro p {
             color: var(--color-text-light);
+            margin: 0;
         }
 
         .topics-grid {
@@ -76,6 +82,120 @@
             padding: var(--spacing-xxl);
             color: var(--color-text-light);
         }
+
+        /* Admin Panel Styles */
+        .admin-panel {
+            background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+            border-radius: 8px;
+            padding: var(--spacing-lg);
+            margin-bottom: var(--spacing-xl);
+            color: white;
+        }
+
+        .admin-panel h3 {
+            margin: 0 0 var(--spacing-md) 0;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+        }
+
+        .admin-panel h3::before {
+            content: "🔐";
+        }
+
+        .admin-form {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-md);
+        }
+
+        @media (max-width: 600px) {
+            .admin-form {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .admin-form .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .admin-form label {
+            display: block;
+            font-size: 0.875rem;
+            margin-bottom: 4px;
+            opacity: 0.9;
+        }
+
+        .admin-form input,
+        .admin-form textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: var(--border-radius);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        .admin-form input::placeholder,
+        .admin-form textarea::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .admin-form input:focus,
+        .admin-form textarea:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .admin-form input[type="color"] {
+            height: 42px;
+            padding: 4px;
+            cursor: pointer;
+        }
+
+        .admin-form button {
+            padding: 10px 20px;
+            background: white;
+            color: #1e3a5f;
+            border: none;
+            border-radius: var(--border-radius);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .admin-form button:hover {
+            background: #f0f0f0;
+            transform: translateY(-1px);
+        }
+
+        #create-topic-result {
+            grid-column: 1 / -1;
+        }
+
+        #create-topic-result .message {
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--border-radius);
+            margin-top: var(--spacing-sm);
+        }
+
+        #create-topic-result .message.success {
+            background: rgba(34, 197, 94, 0.2);
+            color: #86efac;
+        }
+
+        #create-topic-result .message.success a {
+            color: white;
+        }
+
+        #create-topic-result .message.error {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+        }
     </style>
 </head>
 
@@ -84,10 +204,42 @@
 
     <main class="container">
         <div class="topics-container">
-            <div class="topics-intro">
-                <h1>Topics</h1>
-                <p>Explore events by technology area or interest.</p>
+            <div class="topics-header">
+                <div class="topics-intro">
+                    <h1>Topics</h1>
+                    <p>Explore events by technology area or interest.</p>
+                </div>
             </div>
+
+            {{#if isAdmin}}
+            <div class="admin-panel">
+                <h3>Admin: Create New Topic</h3>
+                <form class="admin-form" hx-post="/api/topics" hx-target="#create-topic-result" hx-swap="innerHTML">
+                    <div>
+                        <label for="topic-name">Topic Name *</label>
+                        <input type="text" id="topic-name" name="name" placeholder="e.g., Machine Learning" required>
+                    </div>
+                    <div>
+                        <label for="topic-slug">URL Slug *</label>
+                        <input type="text" id="topic-slug" name="slug" placeholder="e.g., machine-learning"
+                            pattern="[a-z0-9-]+" required>
+                    </div>
+                    <div class="full-width">
+                        <label for="topic-description">Description</label>
+                        <textarea id="topic-description" name="description" rows="2"
+                            placeholder="Brief description of the topic..."></textarea>
+                    </div>
+                    <div>
+                        <label for="topic-color">Color</label>
+                        <input type="color" id="topic-color" name="color" value="#3b82f6">
+                    </div>
+                    <div>
+                        <button type="submit">Create Topic</button>
+                    </div>
+                    <div id="create-topic-result" class="full-width"></div>
+                </form>
+            </div>
+            {{/if}}
 
             {{#if topics.length}}
             <div class="topics-grid">
@@ -106,6 +258,9 @@
             {{else}}
             <div class="empty-state">
                 <p>No topics available yet.</p>
+                {{#if isAdmin}}
+                <p>Use the form above to create the first topic!</p>
+                {{/if}}
             </div>
             {{/if}}
         </div>

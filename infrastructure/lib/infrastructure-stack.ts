@@ -129,6 +129,13 @@ export class InfrastructureStack extends cdk.Stack {
       },
     });
 
+    // Create 'admin' group for privileged users (topic creation, moderation, etc.)
+    new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
+      userPoolId: userPool.userPoolId,
+      groupName: 'admin',
+      description: 'Administrators who can create topics and moderate content',
+    });
+
     // ============================================
     // DynamoDB Tables
     // ============================================
@@ -380,7 +387,7 @@ export class InfrastructureStack extends cdk.Stack {
     // Grant Cognito permissions
     apiFunction.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ['cognito-idp:GetUser', 'cognito-idp:AdminGetUser'],
+        actions: ['cognito-idp:GetUser', 'cognito-idp:AdminGetUser', 'cognito-idp:AdminListGroupsForUser'],
         resources: [userPool.userPoolArn],
       })
     );

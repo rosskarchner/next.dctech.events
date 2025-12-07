@@ -211,6 +211,28 @@ async function verifyJWT(token) {
   }
 }
 
+// Helper to check if user is in the 'admin' Cognito group
+async function isUserAdmin(userId) {
+  if (!userId) return false;
+
+  try {
+    const { CognitoIdentityProviderClient, AdminListGroupsForUserCommand } = await import('@aws-sdk/client-cognito-identity-provider');
+    const cognitoClient = new CognitoIdentityProviderClient({});
+
+    const command = new AdminListGroupsForUserCommand({
+      UserPoolId: process.env.USER_POOL_ID,
+      Username: userId,
+    });
+
+    const response = await cognitoClient.send(command);
+    const groups = response.Groups || [];
+    return groups.some(group => group.GroupName === 'admin');
+  } catch (error) {
+    console.error('Error checking admin status:', error);
+    return false;
+  }
+}
+
 // Helper to parse API Gateway event
 async function parseEvent(event) {
   const path = event.path || event.resource;
@@ -675,7 +697,7 @@ async function updateUser(userId, updates) {
 // ============================================
 
 // List all topics
-async function listTopics(isHtmx) {
+async function listTopics(isHtmx, userId = null, isAdmin = false) {
   // Topics table uses slug as PK only, so we use Scan
   const result = await docClient.send(new ScanCommand({
     TableName: process.env.TOPICS_TABLE,
@@ -686,12 +708,14 @@ async function listTopics(isHtmx) {
   // Sort alphabetically by name
   topics.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-  if (isHtmx) {
-    const htmlContent = renderTemplate('topics_index', { topics, isAuthenticated: false });
-    return createResponse(200, htmlContent, true);
-  }
-
-  return createResponse(200, topics);
+  // Always return HTML for page requests (browser navigation)
+  // isHtmx distinguishes between full page load and HTMX partial
+  const htmlContent = renderTemplate('topics_index', {
+    topics,
+    isAuthenticated: !!userId,
+    isAdmin,
+  });
+  return createResponse(200, htmlContent, true);
 }
 
 
@@ -749,40 +773,53 @@ async function getTopic(slug, isHtmx, userId = null) {
 }
 
 
-// Create topic (admin only)
-async function createTopic(userId, data) {
-  // TODO: Add admin check
+// Create topic (admin only - access control done in route handler)
+async function createTopic(userId, data, isHtmx = false) {
   const { slug, name, description, color } = data;
 
   if (!slug || !name) {
+    if (isHtmx) {
+      return createResponse(400, html.error('Slug and name are required'), true);
+    }
     return createResponse(400, { error: 'Slug and name are required' });
   }
 
   // Validate slug format
   if (!/^[a-z0-9-]+$/.test(slug)) {
+    if (isHtmx) {
+      return createResponse(400, html.error('Slug must be lowercase letters, numbers, and hyphens only'), true);
+    }
     return createResponse(400, { error: 'Slug must be lowercase letters, numbers, and hyphens only' });
   }
 
   const timestamp = new Date().toISOString();
 
-  await docClient.send(new PutCommand({
-    TableName: process.env.TOPICS_TABLE,
-    Item: {
-      slug,
-      name,
-      description: description || '',
-      color: color || '#3b82f6',
-      createdAt: timestamp,
-      createdBy: userId,
-    },
-    ConditionExpression: 'attribute_not_exists(slug)',
-  })).catch(err => {
+  try {
+    await docClient.send(new PutCommand({
+      TableName: process.env.TOPICS_TABLE,
+      Item: {
+        slug,
+        name,
+        description: description || '',
+        color: color || '#3b82f6',
+        createdAt: timestamp,
+        createdBy: userId,
+      },
+      ConditionExpression: 'attribute_not_exists(slug)',
+    }));
+  } catch (err) {
     if (err.name === 'ConditionalCheckFailedException') {
-      throw new Error('Topic already exists');
+      if (isHtmx) {
+        return createResponse(409, html.error('A topic with this slug already exists'), true);
+      }
+      return createResponse(409, { error: 'Topic already exists' });
     }
     throw err;
-  });
+  }
 
+  if (isHtmx) {
+    return createResponse(201, html.success(`Topic "${name}" created successfully! <a href="/topics/${slug}/">View topic →</a>`), true);
+  }
   return createResponse(201, { message: 'Topic created', slug });
 }
 
@@ -2086,7 +2123,8 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
 
   // GET /topics/ - Topics list
   if ((path === '/topics/' || path === '/topics') && method === 'GET') {
-    return await listTopics(isHtmx);
+    const isAdmin = await isUserAdmin(userId);
+    return await listTopics(isHtmx, userId, isAdmin);
   }
 
   // GET /topics/{slug} - Single topic page
@@ -2101,8 +2139,12 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     if (!userId) {
       return createResponse(403, { error: 'Authentication required' });
     }
+    const isAdmin = await isUserAdmin(userId);
+    if (!isAdmin) {
+      return createResponse(403, { error: 'Admin access required' });
+    }
     const body = parsedBody || {};
-    return await createTopic(userId, body);
+    return await createTopic(userId, body, isHtmx);
   }
 
   // POST /api/topics/{slug}/follow - Follow a topic
