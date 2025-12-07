@@ -54,10 +54,11 @@ Transform DC Tech Events from an event aggregator into a community hub — "Hack
 | Setting | Controlled By | Notes |
 |---------|---------------|-------|
 | `showRsvpList` | Event creator | Show names vs. only counts |
-| `showRsvps` | User profile | Allow name to appear in RSVP lists |
+| `showRsvps` | User profile | Allow name to appear on public RSVP lists |
 
 **Display Logic:**
-- If event shows RSVP list: Display users who have `showRsvps: true`
+- **Event organizers** can always see all RSVP names, regardless of user privacy settings
+- For other attendees: Display users who have `showRsvps: true`
 - Hidden users shown as: "and 7 more"
 
 ---

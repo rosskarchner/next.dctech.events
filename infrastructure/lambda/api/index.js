@@ -1390,7 +1390,8 @@ async function deleteEvent(eventId, userId) {
 }
 
 // RSVP handlers
-async function listRSVPs(eventId) {
+async function listRSVPs(eventId, requestingUserId = null, isHtmx = false) {
+  // Get all RSVPs for this event
   const result = await docClient.send(new QueryCommand({
     TableName: process.env.RSVPS_TABLE,
     KeyConditionExpression: 'eventId = :eventId',
@@ -1399,7 +1400,97 @@ async function listRSVPs(eventId) {
     },
   }));
 
-  return createResponse(200, { rsvps: result.Items });
+  const rsvps = result.Items || [];
+
+  // Check if requesting user is the event creator
+  const isCreator = requestingUserId ? await isEventCreator(eventId, requestingUserId) : false;
+
+  // If event creator, return all RSVPs without filtering
+  if (isCreator) {
+    if (isHtmx) {
+      // For event creators, show all attendees with a note
+      let htmlContent = '<div class="rsvp-list">';
+      if (rsvps.length === 0) {
+        htmlContent += '<p class="text-muted">No RSVPs yet.</p>';
+      } else {
+        const going = rsvps.filter(r => r.status === 'yes');
+        const maybe = rsvps.filter(r => r.status === 'maybe');
+
+        if (going.length > 0) {
+          htmlContent += `<p><strong>Going (${going.length}):</strong> ${going.map(r => escapeHtml(r.userName || r.userId)).join(', ')}</p>`;
+        }
+        if (maybe.length > 0) {
+          htmlContent += `<p><strong>Maybe (${maybe.length}):</strong> ${maybe.map(r => escapeHtml(r.userName || r.userId)).join(', ')}</p>`;
+        }
+        htmlContent += '<p class="text-muted" style="font-size: 0.875rem; margin-top: 0.5rem;"><em>As the event organizer, you can see all RSVPs regardless of privacy settings.</em></p>';
+      }
+      htmlContent += '</div>';
+      return createResponse(200, htmlContent, true);
+    }
+    return createResponse(200, { rsvps, isCreator: true });
+  }
+
+  // For non-creators, filter RSVPs based on each user's showRsvps setting
+  // We need to fetch user privacy settings
+  const visibleRsvps = [];
+  let hiddenCount = 0;
+
+  for (const rsvp of rsvps) {
+    // Get user's privacy setting
+    const userResult = await docClient.send(new GetCommand({
+      TableName: process.env.USERS_TABLE,
+      Key: { userId: rsvp.userId },
+      ProjectionExpression: 'showRsvps, nickname',
+    }));
+
+    const userSettings = userResult.Item || {};
+    // Default to showing RSVPs if setting not explicitly set to false
+    const showRsvps = userSettings.showRsvps !== false;
+
+    if (showRsvps) {
+      // Use nickname if available, otherwise use stored userName
+      rsvp.displayName = userSettings.nickname || rsvp.userName || 'Anonymous';
+      visibleRsvps.push(rsvp);
+    } else {
+      hiddenCount++;
+    }
+  }
+
+  if (isHtmx) {
+    let htmlContent = '<div class="rsvp-list">';
+    if (rsvps.length === 0) {
+      htmlContent += '<p class="text-muted">No RSVPs yet.</p>';
+    } else {
+      const going = visibleRsvps.filter(r => r.status === 'yes');
+      const maybe = visibleRsvps.filter(r => r.status === 'maybe');
+      const goingHidden = rsvps.filter(r => r.status === 'yes').length - going.length;
+      const maybeHidden = rsvps.filter(r => r.status === 'maybe').length - maybe.length;
+
+      if (going.length > 0 || goingHidden > 0) {
+        let goingText = going.map(r => escapeHtml(r.displayName)).join(', ');
+        if (goingHidden > 0) {
+          goingText += going.length > 0 ? ` and ${goingHidden} more` : `${goingHidden} ${goingHidden === 1 ? 'person' : 'people'}`;
+        }
+        htmlContent += `<p><strong>Going (${going.length + goingHidden}):</strong> ${goingText}</p>`;
+      }
+      if (maybe.length > 0 || maybeHidden > 0) {
+        let maybeText = maybe.map(r => escapeHtml(r.displayName)).join(', ');
+        if (maybeHidden > 0) {
+          maybeText += maybe.length > 0 ? ` and ${maybeHidden} more` : `${maybeHidden} ${maybeHidden === 1 ? 'person' : 'people'}`;
+        }
+        htmlContent += `<p><strong>Maybe (${maybe.length + maybeHidden}):</strong> ${maybeText}</p>`;
+      }
+    }
+    htmlContent += '</div>';
+    return createResponse(200, htmlContent, true);
+  }
+
+  return createResponse(200, {
+    rsvps: visibleRsvps,
+    totalCount: rsvps.length,
+    hiddenCount,
+    isCreator: false
+  });
 }
 
 async function createOrUpdateRSVP(eventId, userId, status) {
@@ -2648,7 +2739,7 @@ exports.handler = async (event) => {
 
     // RSVP routes
     if (path.match(/^\/events\/[^/]+\/rsvps$/) && method === 'GET') {
-      return await listRSVPs(pathParams.eventId);
+      return await listRSVPs(pathParams.eventId, userId, isHtmx);
     }
     if (path.match(/^\/events\/[^/]+\/rsvps$/) && method === 'POST') {
       return await createOrUpdateRSVP(pathParams.eventId, userId, body.status);
