@@ -2028,9 +2028,10 @@ const cognitoLogoutUrl = () => {
 
   // Construct full Cognito logout URL
   const cognitoUrl = `https://${domain}.auth.${region}.amazoncognito.com`;
-  const logoutUri = encodeURIComponent(`https://next.dctech.events/`);
+  const redirectUri = encodeURIComponent(`https://next.dctech.events/`);
 
-  return `${cognitoUrl}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
+  // Cognito requires 'redirect_uri' (not 'logout_uri') as the parameter name
+  return `${cognitoUrl}/logout?client_id=${clientId}&redirect_uri=${redirectUri}`;
 };
 
 // ============================================
