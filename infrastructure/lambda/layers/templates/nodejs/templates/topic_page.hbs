@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{topic.name}} - DC Tech Events</title>
+    <meta name="description" content="{{topic.description}}">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        .topic-container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .topic-header {
+            margin-bottom: var(--spacing-xl);
+            padding-bottom: var(--spacing-lg);
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .topic-header h1 {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .topic-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .topic-header p {
+            color: var(--color-text-light);
+            margin: 0;
+        }
+
+        .topic-nav {
+            display: flex;
+            gap: var(--spacing-lg);
+            margin-top: var(--spacing-md);
+        }
+
+        .topic-nav a {
+            padding: var(--spacing-xs) 0;
+            color: var(--color-text-light);
+            text-decoration: none;
+            border-bottom: 2px solid transparent;
+        }
+
+        .topic-nav a.active {
+            color: var(--color-primary);
+            border-bottom-color: var(--color-primary);
+        }
+
+        .topic-nav a:hover {
+            color: var(--color-primary);
+        }
+
+        .topic-section {
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .topic-section h2 {
+            font-size: 1.25rem;
+            margin-bottom: var(--spacing-md);
+        }
+
+        .follow-btn {
+            padding: var(--spacing-xs) var(--spacing-md);
+            border: 1px solid var(--color-primary);
+            border-radius: var(--border-radius);
+            background: white;
+            color: var(--color-primary);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .follow-btn:hover {
+            background: var(--color-primary);
+            color: white;
+        }
+
+        .follow-btn.following {
+            background: var(--color-primary);
+            color: white;
+        }
+
+        .empty-state {
+            padding: var(--spacing-xl);
+            text-align: center;
+            color: var(--color-text-light);
+            background: var(--color-background-alt);
+            border-radius: var(--border-radius);
+        }
+    </style>
+</head>
+
+<body>
+    {{> header}}
+
+    <main class="container">
+        <div class="topic-container">
+            <div class="topic-header">
+                <h1>
+                    <span class="topic-color" style="background-color: {{topic.color}}"></span>
+                    {{topic.name}}
+                </h1>
+                {{#if topic.description}}
+                <p>{{topic.description}}</p>
+                {{/if}}
+                <div class="topic-nav">
+                    <a href="/topics/{{topic.slug}}/" class="active">Events</a>
+                    <a href="/topics/{{topic.slug}}/discussions/">Discussions</a>
+                </div>
+            </div>
+
+            <div class="topic-section">
+                <h2>Upcoming Events</h2>
+                {{#if eventsByDay.length}}
+                {{> events_by_day}}
+                {{else}}
+                <div class="empty-state">
+                    <p>No upcoming events in this topic.</p>
+                </div>
+                {{/if}}
+            </div>
+        </div>
+    </main>
+
+    {{> footer}}
+</body>
+
+</html>
