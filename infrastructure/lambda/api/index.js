@@ -1943,6 +1943,15 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     return createResponse(200, html, true);
   }
 
+  // GET /login - Redirect to Cognito login
+  if ((path === '/login' || path === '/login/') && method === 'GET') {
+    return {
+      statusCode: 302,
+      headers: { 'Location': cognitoLoginUrl('/') },
+      body: '',
+    };
+  }
+
   // GET /week/:weekId - Week view
   if (path.match(/^\/week\/[\d]{4}-W\d{2}\/?$/)) {
     const weekId = path.match(/\/week\/([\d]{4}-W\d{2})/)[1];
