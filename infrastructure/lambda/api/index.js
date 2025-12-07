@@ -1,5 +1,6 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand, BatchWriteCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand, BatchWriteCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+
 
 const { CognitoJwtVerifier } = require('aws-jwt-verify');
 
@@ -170,8 +171,15 @@ Handlebars.registerHelper('getCitySlug', (cityState) => {
   return parts.length >= 1 ? parts[0].toLowerCase().replace(/\s+/g, '-') : '';
 });
 
+// Helper to get substring of a string
+Handlebars.registerHelper('substring', (str, start, end) => {
+  if (!str) return '';
+  return str.substring(start, end);
+});
+
 // Initialize partials on Lambda cold start
 registerPartials();
+
 
 // Template rendering helper
 // Note: Templates use {{}} for automatic HTML escaping. The {{{content}}} in base.hbs
@@ -525,22 +533,270 @@ async function getUser(userId) {
   return createResponse(200, result.Item);
 }
 
+// Get user by nickname (for public profile pages)
+async function getUserByNickname(nickname) {
+  const result = await docClient.send(new QueryCommand({
+    TableName: process.env.USERS_TABLE,
+    IndexName: 'nicknameIndex',
+    KeyConditionExpression: 'nickname = :nickname',
+    ExpressionAttributeValues: {
+      ':nickname': nickname,
+    },
+    Limit: 1,
+  }));
+
+  return result.Items?.[0] || null;
+}
+
+// Check if nickname is available
+async function checkNicknameAvailable(nickname, currentUserId = null) {
+  const existingUser = await getUserByNickname(nickname);
+  if (!existingUser) return true;
+  // If the nickname belongs to the current user, it's "available" for them
+  return existingUser.userId === currentUserId;
+}
+
+// Setup profile for new user (set nickname)
+async function setupProfile(userId, nickname) {
+  // Validate nickname format
+  if (!nickname || nickname.length < 3 || nickname.length > 30) {
+    return createResponse(400, { error: 'Nickname must be 3-30 characters' });
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(nickname)) {
+    return createResponse(400, { error: 'Nickname can only contain letters, numbers, underscores, and hyphens' });
+  }
+
+  // Check availability
+  const available = await checkNicknameAvailable(nickname, userId);
+  if (!available) {
+    return createResponse(409, { error: 'Nickname already taken' });
+  }
+
+  const timestamp = new Date().toISOString();
+
+  await docClient.send(new UpdateCommand({
+    TableName: process.env.USERS_TABLE,
+    Key: { userId },
+    UpdateExpression: 'SET nickname = :nickname, updatedAt = :updatedAt',
+    ExpressionAttributeValues: {
+      ':nickname': nickname,
+      ':updatedAt': timestamp,
+    },
+  }));
+
+  return createResponse(200, { message: 'Profile setup complete', nickname });
+}
+
+// Get public profile data (for /user/{nickname} pages)
+async function getPublicProfile(nickname, isHtmx) {
+  const user = await getUserByNickname(nickname);
+  if (!user) {
+    if (isHtmx) {
+      return createResponse(404, html.error('User not found'), true);
+    }
+    return createResponse(404, { error: 'User not found' });
+  }
+
+  // Get user's submitted events
+  const eventsResult = await docClient.send(new QueryCommand({
+    TableName: process.env.EVENTS_TABLE,
+    IndexName: 'dateEventsIndex',
+    KeyConditionExpression: 'eventType = :eventType',
+    FilterExpression: 'createdBy = :userId',
+    ExpressionAttributeValues: {
+      ':eventType': 'all',
+      ':userId': user.userId,
+    },
+  }));
+
+  const publicData = {
+    nickname: user.nickname,
+    bio: user.bio || '',
+    links: user.links || [],
+    avatarUrl: user.avatarUrl || '',
+    karma: user.karma || 0,
+    submittedEvents: eventsResult.Items || [],
+  };
+
+  if (isHtmx) {
+    const htmlContent = renderTemplate('profile_page', publicData);
+    return createResponse(200, htmlContent, true);
+  }
+
+  return createResponse(200, publicData);
+}
+
+// Update user profile
 async function updateUser(userId, updates) {
   const timestamp = new Date().toISOString();
 
-  await docClient.send(new PutCommand({
+  // If updating nickname, check availability
+  if (updates.nickname) {
+    const available = await checkNicknameAvailable(updates.nickname, userId);
+    if (!available) {
+      return createResponse(409, { error: 'Nickname already taken' });
+    }
+  }
+
+  // Build update expression for allowed fields
+  const allowedFields = ['nickname', 'bio', 'links', 'avatarUrl', 'showRsvps', 'emailPrefs', 'followedTopics'];
+  const updateParts = [];
+  const expressionValues = { ':updatedAt': timestamp };
+  const expressionNames = {};
+
+  for (const field of allowedFields) {
+    if (updates[field] !== undefined) {
+      updateParts.push(`#${field} = :${field}`);
+      expressionValues[`:${field}`] = updates[field];
+      expressionNames[`#${field}`] = field;
+    }
+  }
+
+  if (updateParts.length === 0) {
+    return createResponse(400, { error: 'No valid fields to update' });
+  }
+
+  updateParts.push('updatedAt = :updatedAt');
+
+  await docClient.send(new UpdateCommand({
     TableName: process.env.USERS_TABLE,
-    Item: {
-      userId,
-      ...updates,
-      updatedAt: timestamp,
-    },
+    Key: { userId },
+    UpdateExpression: `SET ${updateParts.join(', ')}`,
+    ExpressionAttributeValues: expressionValues,
+    ExpressionAttributeNames: Object.keys(expressionNames).length > 0 ? expressionNames : undefined,
   }));
 
   return createResponse(200, { message: 'User updated successfully' });
 }
 
+
+// ============================================
+// Topics handlers
+// ============================================
+
+// List all topics
+async function listTopics(isHtmx) {
+  // Topics table uses slug as PK only, so we use Scan
+  const result = await docClient.send(new ScanCommand({
+    TableName: process.env.TOPICS_TABLE,
+  }));
+
+  const topics = result.Items || [];
+
+  // Sort alphabetically by name
+  topics.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  if (isHtmx) {
+    const htmlContent = renderTemplate('topics_index', { topics, isAuthenticated: false });
+    return createResponse(200, htmlContent, true);
+  }
+
+  return createResponse(200, topics);
+}
+
+
+// Get single topic with its events
+async function getTopic(slug, isHtmx) {
+  // Get topic details
+  const topicResult = await docClient.send(new GetCommand({
+    TableName: process.env.TOPICS_TABLE,
+    Key: { slug },
+  }));
+
+  if (!topicResult.Item) {
+    if (isHtmx) {
+      return createResponse(404, html.error('Topic not found'), true);
+    }
+    return createResponse(404, { error: 'Topic not found' });
+  }
+
+  const topic = topicResult.Item;
+
+  // Get upcoming events in this topic
+  const today = formatDate(new Date());
+  const eventsResult = await docClient.send(new QueryCommand({
+    TableName: process.env.EVENTS_TABLE,
+    IndexName: 'topicIndex',
+    KeyConditionExpression: 'topicSlug = :slug AND eventDate >= :today',
+    ExpressionAttributeValues: {
+      ':slug': slug,
+      ':today': today,
+    },
+    Limit: 50,
+  }));
+
+  const events = eventsResult.Items || [];
+
+  if (isHtmx) {
+    const eventsByDay = prepareEventsByDay(events);
+    const htmlContent = renderTemplate('topic_page', {
+      topic,
+      events,
+      eventsByDay,
+      isAuthenticated: false,
+    });
+    return createResponse(200, htmlContent, true);
+  }
+
+  return createResponse(200, { topic, events });
+}
+
+// Create topic (admin only)
+async function createTopic(userId, data) {
+  // TODO: Add admin check
+  const { slug, name, description, color } = data;
+
+  if (!slug || !name) {
+    return createResponse(400, { error: 'Slug and name are required' });
+  }
+
+  // Validate slug format
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    return createResponse(400, { error: 'Slug must be lowercase letters, numbers, and hyphens only' });
+  }
+
+  const timestamp = new Date().toISOString();
+
+  await docClient.send(new PutCommand({
+    TableName: process.env.TOPICS_TABLE,
+    Item: {
+      slug,
+      name,
+      description: description || '',
+      color: color || '#3b82f6',
+      createdAt: timestamp,
+      createdBy: userId,
+    },
+    ConditionExpression: 'attribute_not_exists(slug)',
+  })).catch(err => {
+    if (err.name === 'ConditionalCheckFailedException') {
+      throw new Error('Topic already exists');
+    }
+    throw err;
+  });
+
+  return createResponse(201, { message: 'Topic created', slug });
+}
+
+// Get events by topic
+async function getEventsByTopic(topicSlug, limit = 50) {
+  const today = formatDate(new Date());
+  const result = await docClient.send(new QueryCommand({
+    TableName: process.env.EVENTS_TABLE,
+    IndexName: 'topicIndex',
+    KeyConditionExpression: 'topicSlug = :slug AND eventDate >= :today',
+    ExpressionAttributeValues: {
+      ':slug': topicSlug,
+      ':today': today,
+    },
+    Limit: limit,
+  }));
+
+  return result.Items || [];
+}
+
 // Group handlers
+
 async function listGroups(isHtmx) {
   // Check cache first
   const now = Date.now();
@@ -1674,6 +1930,30 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     return createResponse(200, html, true);
   }
 
+  // ============================================
+  // Topics Routes
+  // ============================================
+
+  // GET /topics/ - Topics list
+  if ((path === '/topics/' || path === '/topics') && method === 'GET') {
+    return await listTopics(isHtmx);
+  }
+
+  // GET /topics/{slug} - Single topic page
+  if (path.match(/^\/topics\/[a-z0-9-]+\/?$/) && method === 'GET') {
+    const slug = path.match(/^\/topics\/([a-z0-9-]+)/)[1];
+    return await getTopic(slug, isHtmx);
+  }
+
+  // POST /api/topics - Create topic (admin only)
+  if (path === '/api/topics' && method === 'POST') {
+    if (!userId) {
+      return createResponse(403, { error: 'Authentication required' });
+    }
+    const body = parsedBody || {};
+    return await createTopic(userId, body);
+  }
+
   // GET /newsletter.html - HTML newsletter
   if (path === '/newsletter.html' && method === 'GET') {
     const events = await getUpcomingEvents(14);
@@ -1887,9 +2167,101 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     return createResponse(200, html, true);
   }
 
+  // ============================================
+  // Profile Routes
+  // ============================================
+
+  // GET /user/{nickname} - Public profile page
+  if (path.match(/^\/user\/[a-zA-Z0-9_-]+\/?$/) && method === 'GET') {
+    const nickname = path.match(/^\/user\/([a-zA-Z0-9_-]+)/)[1];
+    return await getPublicProfile(nickname, isHtmx);
+  }
+
+  // GET /profile/setup - Profile setup page for new users
+  if (path === '/profile/setup' && method === 'GET') {
+    if (!userId) {
+      return {
+        statusCode: 302,
+        headers: { 'Location': cognitoLoginUrl('/profile/setup') },
+        body: '',
+      };
+    }
+
+    // Check if user already has a nickname
+    const userResult = await docClient.send(new GetCommand({
+      TableName: process.env.USERS_TABLE,
+      Key: { userId },
+    }));
+
+    if (userResult.Item?.nickname) {
+      // Already set up, redirect to profile
+      return {
+        statusCode: 302,
+        headers: { 'Location': `/user/${userResult.Item.nickname}` },
+        body: '',
+      };
+    }
+
+    const htmlContent = renderTemplate('profile_setup', {
+      isAuthenticated: true,
+    });
+    return createResponse(200, htmlContent, true);
+  }
+
+  // POST /api/users/setup - Save nickname for new user
+  if (path === '/api/users/setup' && method === 'POST') {
+    if (!userId) {
+      return createResponse(403, { error: 'Authentication required' });
+    }
+
+    const body = parsedBody || {};
+    return await setupProfile(userId, body.nickname);
+  }
+
+  // GET /settings - User settings page
+  if (path === '/settings' && method === 'GET') {
+    if (!userId) {
+      return {
+        statusCode: 302,
+        headers: { 'Location': cognitoLoginUrl('/settings') },
+        body: '',
+      };
+    }
+
+    const userResult = await docClient.send(new GetCommand({
+      TableName: process.env.USERS_TABLE,
+      Key: { userId },
+    }));
+
+    const htmlContent = renderTemplate('settings', {
+      isAuthenticated: true,
+      user: userResult.Item || {},
+    });
+    return createResponse(200, htmlContent, true);
+  }
+
+  // PUT /api/users/me - Update current user's profile
+  if (path === '/api/users/me' && method === 'PUT') {
+    if (!userId) {
+      return createResponse(403, { error: 'Authentication required' });
+    }
+
+    const body = parsedBody || {};
+    return await updateUser(userId, body);
+  }
+
+  // GET /api/users/me - Get current user's profile
+  if (path === '/api/users/me' && method === 'GET') {
+    if (!userId) {
+      return createResponse(403, { error: 'Authentication required' });
+    }
+    return await getUser(userId);
+  }
+
   // Default 404
   return createResponse(404, '<h1>Page Not Found</h1>', true);
 };
+
 
 // Main handler
 // Helper to check if a route requires authentication

@@ -77,7 +77,7 @@ export class InfrastructureStack extends cdk.Stack {
     //
     // The UserPoolClient below supports all identity providers - you just need to
     // tell it which ones are available by updating the list here when you add them.
-    
+
     const identityProviders = [
       cognito.UserPoolClientIdentityProvider.COGNITO,  // Username/password
       // Add more as you create them manually:
@@ -120,7 +120,7 @@ export class InfrastructureStack extends cdk.Stack {
 
     // Use provided domain prefix or generate one with account ID for uniqueness
     // Cognito domain prefixes must be globally unique across all AWS regions
-    const cognitoDomainPrefix = props?.cognitoDomainPrefix || 
+    const cognitoDomainPrefix = props?.cognitoDomainPrefix ||
       `organize-dctech-${cdk.Stack.of(this).account}`;
 
     const userPoolDomain = userPool.addDomain('OrganizeUserPoolDomain', {
@@ -141,6 +141,13 @@ export class InfrastructureStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
     });
+
+    // Add GSI for nickname lookups (public profile pages)
+    usersTable.addGlobalSecondaryIndex({
+      indexName: 'nicknameIndex',
+      partitionKey: { name: 'nickname', type: dynamodb.AttributeType.STRING },
+    });
+
 
     // Groups table
     const groupsTable = new dynamodb.Table(this, 'GroupsTable', {
@@ -225,6 +232,30 @@ export class InfrastructureStack extends cdk.Stack {
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
     });
 
+    // Topics table (for community hub categories)
+    const topicsTable = new dynamodb.Table(this, 'TopicsTable', {
+      tableName: 'organize-topics',
+      partitionKey: { name: 'slug', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    });
+
+    // Add GSI for groups by topic
+    groupsTable.addGlobalSecondaryIndex({
+      indexName: 'topicIndex',
+      partitionKey: { name: 'topicSlug', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'name', type: dynamodb.AttributeType.STRING },
+    });
+
+    // Add GSI for events by topic
+    eventsTable.addGlobalSecondaryIndex({
+      indexName: 'topicIndex',
+      partitionKey: { name: 'topicSlug', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'eventDate', type: dynamodb.AttributeType.STRING },
+    });
+
+
     // ============================================
     // S3 Bucket for Static Website and Exports
     // ============================================
@@ -286,6 +317,7 @@ export class InfrastructureStack extends cdk.Stack {
       EVENTS_TABLE: eventsTable.tableName,
       RSVPS_TABLE: rsvpsTable.tableName,
       MESSAGES_TABLE: messagesTable.tableName,
+      TOPICS_TABLE: topicsTable.tableName,
       USER_POOL_ID: userPool.userPoolId,
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
       USER_POOL_REGION: cdk.Stack.of(this).region,
@@ -294,6 +326,7 @@ export class InfrastructureStack extends cdk.Stack {
       NEXT_DCTECH_DOMAIN: this.node.tryGetContext('nextDomain') || 'next.dctech.events',
       GITHUB_REPO: this.node.tryGetContext('githubRepo') || 'rosskarchner/dctech.events',
     };
+
 
     // Lambda Layer for Handlebars templates
     const templatesLayer = new lambda.LayerVersion(this, 'TemplatesLayer', {
@@ -321,6 +354,8 @@ export class InfrastructureStack extends cdk.Stack {
     eventsTable.grantReadWriteData(apiFunction);
     rsvpsTable.grantReadWriteData(apiFunction);
     messagesTable.grantReadWriteData(apiFunction);
+    topicsTable.grantReadWriteData(apiFunction);
+
 
     // Grant Cognito permissions
     apiFunction.addToRolePolicy(
@@ -472,10 +507,10 @@ export class InfrastructureStack extends cdk.Stack {
     // The Lambda function handles all routing and authentication internally
     // Note: Authorizer is removed to support both public and protected routes
     // The Lambda validates Cognito tokens when present and checks permissions per route
-    
+
     // Add root path handler
     api.root.addMethod('ANY', apiIntegration);
-    
+
     // Add proxy resource for all other paths
     const proxy = api.root.addResource('{proxy+}');
     proxy.addMethod('ANY', apiIntegration);
