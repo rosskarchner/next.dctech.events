@@ -40,6 +40,28 @@ async function getUserDisplayName(userId) {
   return userId.substring(0, 8); // Fallback to truncated UUID
 }
 
+// Format relative time (e.g., "2 hours ago", "3 days ago")
+function formatRelativeTime(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 30) {
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } else if (diffDays > 0) {
+    return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+  } else if (diffHours > 0) {
+    return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+  } else if (diffMins > 0) {
+    return `${diffMins} min${diffMins !== 1 ? 's' : ''} ago`;
+  } else {
+    return 'just now';
+  }
+}
 // Check if event is online-only based on location
 const isOnlineOnlyEvent = (location) => {
   if (!location || typeof location !== 'string') {
@@ -1356,6 +1378,8 @@ async function createEvent(userId, data) {
     upvoteCount: 0,
     eventType: 'all', // For GSI queries
     isNative,
+    // Recurrence (Phase 6)
+    recurrenceRule: data.recurrenceRule || null,
     // RSVP settings (only meaningful for native events)
     rsvpEnabled: isNative && (data.rsvpEnabled === true || data.rsvpEnabled === 'true' || data.rsvpEnabled === 'on'),
     rsvpLimit: isNative && data.rsvpLimit ? parseInt(data.rsvpLimit, 10) : null,
@@ -1669,6 +1693,283 @@ async function getFeaturedEvents(limit = 5) {
   }
 
   return featured;
+}
+
+// ============================================
+// Phase 7: Discussion Board Functions
+// ============================================
+
+// Calculate HN-style "hot" score for sorting
+function calculateHotScore(upvotes, createdAt) {
+  const age = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60); // Hours
+  return (upvotes || 0) / Math.pow(age + 2, 1.8);
+}
+
+// List threads for a topic
+async function listThreads(topicSlug, sort = 'new', isHtmx = false) {
+  let result;
+
+  if (sort === 'new') {
+    result = await docClient.send(new QueryCommand({
+      TableName: process.env.THREADS_TABLE,
+      IndexName: 'threadsByDateIndex',
+      KeyConditionExpression: 'topicSlug = :slug',
+      ExpressionAttributeValues: { ':slug': topicSlug },
+      ScanIndexForward: false, // Newest first
+      Limit: 50,
+    }));
+  } else {
+    // For 'hot' and 'top', we need to get all and sort in memory
+    result = await docClient.send(new QueryCommand({
+      TableName: process.env.THREADS_TABLE,
+      KeyConditionExpression: 'topicSlug = :slug',
+      ExpressionAttributeValues: { ':slug': topicSlug },
+    }));
+  }
+
+  let threads = result.Items || [];
+
+  // Apply sorting
+  if (sort === 'top') {
+    threads.sort((a, b) => (b.upvoteCount || 0) - (a.upvoteCount || 0));
+  } else if (sort === 'hot') {
+    threads = threads.map(t => ({ ...t, hotScore: calculateHotScore(t.upvoteCount, t.createdAt) }));
+    threads.sort((a, b) => b.hotScore - a.hotScore);
+  }
+
+  // Enrich with author nicknames
+  for (const thread of threads) {
+    if (thread.authorId) {
+      const author = await docClient.send(new GetCommand({
+        TableName: process.env.USERS_TABLE,
+        Key: { userId: thread.authorId },
+      }));
+      thread.authorNickname = author.Item?.nickname || 'Anonymous';
+    }
+  }
+
+  if (isHtmx) {
+    const threadsHtml = threads.map(t => `
+      <div class="thread-item">
+        <div class="thread-votes">▲ ${t.upvoteCount || 0}</div>
+        <div class="thread-content">
+          <a href="/threads/${t.threadId}" class="thread-title">${escapeHtml(t.title)}</a>
+          <div class="thread-meta">
+            by <a href="/user/${t.authorNickname}">${escapeHtml(t.authorNickname)}</a>
+            · ${t.replyCount || 0} comments
+            · ${formatRelativeTime(t.createdAt)}
+          </div>
+        </div>
+      </div>
+    `).join('');
+    return createResponse(200, threadsHtml || '<p>No discussions yet. Be the first to start one!</p>', true);
+  }
+
+  return createResponse(200, { threads });
+}
+
+// Get a single thread with replies
+async function getThread(threadId, userId, isHtmx = false) {
+  // Find the thread (need to scan since we only have threadId)
+  const scanResult = await docClient.send(new ScanCommand({
+    TableName: process.env.THREADS_TABLE,
+    FilterExpression: 'threadId = :id',
+    ExpressionAttributeValues: { ':id': threadId },
+  }));
+
+  if (!scanResult.Items || scanResult.Items.length === 0) {
+    if (isHtmx) {
+      return createResponse(404, html.error('Thread not found'), true);
+    }
+    return createResponse(404, { error: 'Thread not found' });
+  }
+
+  const thread = scanResult.Items[0];
+
+  // Get author info
+  if (thread.authorId) {
+    const author = await docClient.send(new GetCommand({
+      TableName: process.env.USERS_TABLE,
+      Key: { userId: thread.authorId },
+    }));
+    thread.authorNickname = author.Item?.nickname || 'Anonymous';
+  }
+
+  // Get replies
+  const repliesResult = await docClient.send(new QueryCommand({
+    TableName: process.env.REPLIES_TABLE,
+    KeyConditionExpression: 'threadId = :id',
+    ExpressionAttributeValues: { ':id': threadId },
+  }));
+
+  const replies = repliesResult.Items || [];
+
+  // Enrich replies with author nicknames
+  for (const reply of replies) {
+    if (reply.authorId) {
+      const author = await docClient.send(new GetCommand({
+        TableName: process.env.USERS_TABLE,
+        Key: { userId: reply.authorId },
+      }));
+      reply.authorNickname = author.Item?.nickname || 'Anonymous';
+    }
+  }
+
+  // Sort replies by creation date
+  replies.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  // Check user upvote status
+  const hasUpvoted = userId ? false : false; // TODO: implement thread upvotes
+
+  if (isHtmx) {
+    const htmlContent = renderTemplate('thread_page', {
+      ...thread,
+      replies,
+      isAuthenticated: !!userId,
+      hasUpvoted,
+    });
+    return createResponse(200, htmlContent, true);
+  }
+
+  return createResponse(200, { thread, replies });
+}
+
+// Create a new thread
+async function createThread(topicSlug, userId, data, isHtmx = false) {
+  if (!userId) {
+    if (isHtmx) {
+      return createResponse(403, html.error('Please sign in to post'), true);
+    }
+    return createResponse(403, { error: 'Authentication required' });
+  }
+
+  if (!data.title || data.title.trim().length === 0) {
+    if (isHtmx) {
+      return createResponse(400, html.error('Title is required'), true);
+    }
+    return createResponse(400, { error: 'Title is required' });
+  }
+
+  const threadId = uuidv4();
+  const timestamp = new Date().toISOString();
+
+  const thread = {
+    topicSlug,
+    threadId,
+    title: data.title.trim(),
+    body: data.body?.trim() || '',
+    authorId: userId,
+    upvoteCount: 0,
+    replyCount: 0,
+    score: 0, // For GSI sorting
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+
+  await docClient.send(new PutCommand({
+    TableName: process.env.THREADS_TABLE,
+    Item: thread,
+  }));
+
+  if (isHtmx) {
+    return createResponse(201, `
+      <div class="status-message success">
+        Thread created! <a href="/threads/${threadId}">View your thread</a>
+      </div>
+    `, true);
+  }
+
+  return createResponse(201, { threadId, ...thread });
+}
+
+// Create a reply to a thread
+async function createReply(threadId, userId, data, isHtmx = false) {
+  if (!userId) {
+    if (isHtmx) {
+      return createResponse(403, html.error('Please sign in to reply'), true);
+    }
+    return createResponse(403, { error: 'Authentication required' });
+  }
+
+  if (!data.body || data.body.trim().length === 0) {
+    if (isHtmx) {
+      return createResponse(400, html.error('Reply content is required'), true);
+    }
+    return createResponse(400, { error: 'Reply content is required' });
+  }
+
+  // Verify thread exists
+  const threadScan = await docClient.send(new ScanCommand({
+    TableName: process.env.THREADS_TABLE,
+    FilterExpression: 'threadId = :id',
+    ExpressionAttributeValues: { ':id': threadId },
+  }));
+
+  if (!threadScan.Items || threadScan.Items.length === 0) {
+    if (isHtmx) {
+      return createResponse(404, html.error('Thread not found'), true);
+    }
+    return createResponse(404, { error: 'Thread not found' });
+  }
+
+  const thread = threadScan.Items[0];
+  const replyId = uuidv4();
+  const timestamp = new Date().toISOString();
+
+  // Calculate depth for nested replies (max depth: 5)
+  let depth = 0;
+  if (data.parentId) {
+    const parentReply = await docClient.send(new GetCommand({
+      TableName: process.env.REPLIES_TABLE,
+      Key: { threadId, replyId: data.parentId },
+    }));
+    depth = Math.min((parentReply.Item?.depth || 0) + 1, 5);
+  }
+
+  const reply = {
+    threadId,
+    replyId,
+    parentId: data.parentId || 'root',
+    body: data.body.trim(),
+    authorId: userId,
+    depth,
+    upvoteCount: 0,
+    createdAt: timestamp,
+  };
+
+  await docClient.send(new PutCommand({
+    TableName: process.env.REPLIES_TABLE,
+    Item: reply,
+  }));
+
+  // Increment reply count on thread
+  await docClient.send(new UpdateCommand({
+    TableName: process.env.THREADS_TABLE,
+    Key: { topicSlug: thread.topicSlug, threadId },
+    UpdateExpression: 'SET replyCount = if_not_exists(replyCount, :zero) + :inc',
+    ExpressionAttributeValues: { ':inc': 1, ':zero': 0 },
+  }));
+
+  // Get author nickname for response
+  const author = await docClient.send(new GetCommand({
+    TableName: process.env.USERS_TABLE,
+    Key: { userId },
+  }));
+  const authorNickname = author.Item?.nickname || 'Anonymous';
+
+  if (isHtmx) {
+    return createResponse(201, `
+      <div class="reply" style="margin-left: ${depth * 20}px">
+        <div class="reply-meta">
+          <a href="/user/${authorNickname}">${escapeHtml(authorNickname)}</a>
+          · just now
+        </div>
+        <div class="reply-body">${escapeHtml(reply.body)}</div>
+      </div>
+    `, true);
+  }
+
+  return createResponse(201, { replyId, ...reply, authorNickname });
 }
 
 // RSVP handlers
@@ -2594,6 +2895,35 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     }
     const slug = path.match(/^\/api\/topics\/([a-z0-9-]+)\/follow$/)[1];
     return await unfollowTopic(userId, slug, isHtmx);
+  }
+
+  // ============================================
+  // Phase 7: Discussion Board Routes
+  // ============================================
+
+  // GET /api/topics/{slug}/threads - List threads for a topic
+  if (path.match(/^\/api\/topics\/[a-z0-9-]+\/threads\/?$/) && method === 'GET') {
+    const slug = path.match(/^\/api\/topics\/([a-z0-9-]+)\/threads/)[1];
+    const sort = queryParams.sort || 'new';
+    return await listThreads(slug, sort, isHtmx);
+  }
+
+  // POST /api/topics/{slug}/threads - Create a new thread
+  if (path.match(/^\/api\/topics\/[a-z0-9-]+\/threads\/?$/) && method === 'POST') {
+    const slug = path.match(/^\/api\/topics\/([a-z0-9-]+)\/threads/)[1];
+    return await createThread(slug, userId, body, isHtmx);
+  }
+
+  // GET /threads/{id} - View a thread
+  if (path.match(/^\/threads\/[a-f0-9-]+\/?$/) && method === 'GET') {
+    const threadId = path.match(/^\/threads\/([a-f0-9-]+)/)[1];
+    return await getThread(threadId, userId, true); // Always return HTML
+  }
+
+  // POST /api/threads/{id}/replies - Create a reply
+  if (path.match(/^\/api\/threads\/[a-f0-9-]+\/replies\/?$/) && method === 'POST') {
+    const threadId = path.match(/^\/api\/threads\/([a-f0-9-]+)\/replies/)[1];
+    return await createReply(threadId, userId, body, isHtmx);
   }
 
   // GET /my-feed - Personalized feed page

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}} - DC Tech Events Discussions</title>
+    <meta name="description" content="Discussion: {{title}}">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        .thread-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .thread-header {
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .thread-header h1 {
+            margin: 0 0 var(--spacing-md) 0;
+            font-size: 1.75rem;
+        }
+
+        .thread-meta {
+            color: var(--color-text-light);
+            font-size: 0.875rem;
+        }
+
+        .thread-meta a {
+            color: var(--color-primary);
+        }
+
+        .thread-body {
+            background: white;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: var(--spacing-xl);
+            margin-bottom: var(--spacing-xl);
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+
+        .thread-actions {
+            display: flex;
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .upvote-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            padding: var(--spacing-sm) var(--spacing-md);
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: var(--color-text);
+        }
+
+        .upvote-btn:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+
+        .upvote-btn.upvoted {
+            background: var(--color-primary);
+            border-color: var(--color-primary);
+            color: white;
+        }
+
+        .replies-section h2 {
+            font-size: 1.25rem;
+            margin-bottom: var(--spacing-lg);
+            padding-bottom: var(--spacing-sm);
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .reply-form {
+            background: var(--color-background-alt);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-lg);
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .reply-form h3 {
+            margin-top: 0;
+            margin-bottom: var(--spacing-md);
+            font-size: 1rem;
+        }
+
+        .reply-form textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: var(--spacing-sm);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+            font-family: inherit;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+
+        .reply-form textarea:focus {
+            outline: none;
+            border-color: var(--color-primary);
+        }
+
+        .reply-form button {
+            margin-top: var(--spacing-sm);
+            padding: var(--spacing-sm) var(--spacing-lg);
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .reply-form button:hover {
+            background: var(--color-primary-hover);
+        }
+
+        .replies-list {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-md);
+        }
+
+        .reply {
+            background: white;
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-md);
+        }
+
+        .reply-meta {
+            font-size: 0.875rem;
+            color: var(--color-text-light);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .reply-meta a {
+            color: var(--color-primary);
+        }
+
+        .reply-body {
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            color: var(--color-text-light);
+            text-decoration: none;
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .back-link:hover {
+            color: var(--color-primary);
+        }
+
+        .topic-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            background: var(--color-primary);
+            color: white;
+            text-decoration: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: var(--color-text-light);
+            padding: var(--spacing-xl);
+            background: var(--color-background-alt);
+            border-radius: var(--border-radius);
+        }
+    </style>
+</head>
+
+<body>
+    {{> header}}
+
+    <main class="container">
+        <div class="thread-container">
+            <a href="/topics/{{topicSlug}}" class="back-link">← Back to {{topicSlug}}</a>
+
+            <div class="thread-header">
+                <h1>{{title}}</h1>
+                <div class="thread-meta">
+                    <a href="/topics/{{topicSlug}}" class="topic-badge">{{topicSlug}}</a>
+                    · posted by <a href="/user/{{authorNickname}}">{{authorNickname}}</a>
+                    · {{replyCount}} comments
+                </div>
+            </div>
+
+            {{#if body}}
+            <div class="thread-body">{{body}}</div>
+            {{/if}}
+
+            <div class="thread-actions">
+                {{#if isAuthenticated}}
+                {{#if hasUpvoted}}
+                <button class="upvote-btn upvoted">▲ {{upvoteCount}} Upvoted</button>
+                {{else}}
+                <button class="upvote-btn">▲ {{upvoteCount}} Upvote</button>
+                {{/if}}
+                {{else}}
+                <a href="/login" class="upvote-btn">▲ {{upvoteCount}} - Sign in to upvote</a>
+                {{/if}}
+            </div>
+
+            <div class="replies-section">
+                <h2>Comments</h2>
+
+                {{#if isAuthenticated}}
+                <div class="reply-form">
+                    <h3>Add a comment</h3>
+                    <form hx-post="/api/threads/{{threadId}}/replies" hx-target="#replies-list" hx-swap="beforeend">
+                        <textarea name="body" placeholder="What are your thoughts?" required></textarea>
+                        <button type="submit">Post Comment</button>
+                    </form>
+                </div>
+                {{else}}
+                <p><a href="/login">Sign in</a> to join the discussion.</p>
+                {{/if}}
+
+                <div class="replies-list" id="replies-list">
+                    {{#each replies}}
+                    <div class="reply" style="margin-left: {{multiply depth 20}}px">
+                        <div class="reply-meta">
+                            <a href="/user/{{authorNickname}}">{{authorNickname}}</a>
+                            · {{../createdAt}}
+                        </div>
+                        <div class="reply-body">{{body}}</div>
+                    </div>
+                    {{else}}
+                    <div class="empty-state">
+                        No comments yet. Be the first to share your thoughts!
+                    </div>
+                    {{/each}}
+                </div>
+            </div>
+        </div>
+    </main>
+
+    {{> footer}}
+</body>
+
+</html>

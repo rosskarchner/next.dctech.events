@@ -443,6 +443,45 @@
                 </select>
                 <small>Categorize this event by topic</small>
               </div>
+
+              <div class="form-group">
+                <label for="recurrenceRule">Recurrence (Optional)</label>
+                <select id="recurrenceRule" name="recurrenceRule">
+                  <option value="">One-time event</option>
+                  <optgroup label="Weekly">
+                    <option value="WEEKLY:SUN">Every Sunday</option>
+                    <option value="WEEKLY:MON">Every Monday</option>
+                    <option value="WEEKLY:TUE">Every Tuesday</option>
+                    <option value="WEEKLY:WED">Every Wednesday</option>
+                    <option value="WEEKLY:THU">Every Thursday</option>
+                    <option value="WEEKLY:FRI">Every Friday</option>
+                    <option value="WEEKLY:SAT">Every Saturday</option>
+                  </optgroup>
+                  <optgroup label="Monthly">
+                    <option value="MONTHLY:1:MON">1st Monday of month</option>
+                    <option value="MONTHLY:1:TUE">1st Tuesday of month</option>
+                    <option value="MONTHLY:1:WED">1st Wednesday of month</option>
+                    <option value="MONTHLY:1:THU">1st Thursday of month</option>
+                    <option value="MONTHLY:2:MON">2nd Monday of month</option>
+                    <option value="MONTHLY:2:TUE">2nd Tuesday of month</option>
+                    <option value="MONTHLY:2:WED">2nd Wednesday of month</option>
+                    <option value="MONTHLY:2:THU">2nd Thursday of month</option>
+                    <option value="MONTHLY:3:MON">3rd Monday of month</option>
+                    <option value="MONTHLY:3:TUE">3rd Tuesday of month</option>
+                    <option value="MONTHLY:3:WED">3rd Wednesday of month</option>
+                    <option value="MONTHLY:3:THU">3rd Thursday of month</option>
+                    <option value="MONTHLY:4:MON">4th Monday of month</option>
+                    <option value="MONTHLY:4:TUE">4th Tuesday of month</option>
+                    <option value="MONTHLY:4:WED">4th Wednesday of month</option>
+                    <option value="MONTHLY:4:THU">4th Thursday of month</option>
+                    <option value="MONTHLY:LAST:MON">Last Monday of month</option>
+                    <option value="MONTHLY:LAST:TUE">Last Tuesday of month</option>
+                    <option value="MONTHLY:LAST:WED">Last Wednesday of month</option>
+                    <option value="MONTHLY:LAST:THU">Last Thursday of month</option>
+                  </optgroup>
+                </select>
+                <small>Recurring events will be automatically expanded for the next 90 days</small>
+              </div>
             </div>
           </details>
 

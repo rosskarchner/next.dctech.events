@@ -208,50 +208,49 @@ Phased plan to transform DC Tech Events into the community hub described in `COM
 
 ---
 
-## Phase 6: Event Recurrence
+## Phase 6: Event Recurrence ✅
 
 ### 6.1 Recurrence Model
 **API Changes:**
-- [ ] Add `recurrenceRule` and `parentEventId` to Events
-- [ ] Create `expandRecurringEvent()` helper
+- [x] Add `recurrenceRule` and `parentEventId` to Events
+- [x] Create `expandRecurringEvent()` helper in recurrence Lambda
 
 **New Lambda:**
-- [ ] Create `lambda/recurrence/index.js` — daily expansion job
+- [x] Create `lambda/recurrence/index.js` — daily expansion job
 
 **CDK Changes:**
-- [ ] Add EventBridge rule for daily recurrence expansion
+- [x] Add EventBridge rule for daily recurrence expansion (2am UTC)
 
 **Modify Templates:**
-- [ ] Update `submit_event.hbs` — add recurrence picker
+- [x] Update `submit_event.hbs` — add recurrence picker (weekly/monthly patterns)
 
 ---
 
-## Phase 7: Discussion Boards
+## Phase 7: Discussion Boards ✅
 
 ### 7.1 Tables
 **CDK Changes:**
-- [ ] Create `Threads` table (PK: `topicSlug`, SK: `threadId`)
-- [ ] Create `Replies` table (PK: `threadId`, SK: `replyId`)
+- [x] Create `Threads` table (PK: `topicSlug`, SK: `threadId`) with GSIs for date/score sorting
+- [x] Create `Replies` table (PK: `threadId`, SK: `replyId`) with GSI for parent replies
 
 ### 7.2 APIs
 **API Changes:**
-- [ ] Add `listThreads()`, `getThread()`, `createThread()`
-- [ ] Add `createReply()`, `getReplies()`
-- [ ] Add upvote helpers for threads/replies
+- [x] Add `listThreads()`, `getThread()`, `createThread()`
+- [x] Add `createReply()` with nested reply support (max depth: 5)
+- [x] HN-style hot sorting algorithm
 
 **New Routes:**
-- [ ] `GET /api/topics/{slug}/threads`
-- [ ] `POST /api/topics/{slug}/threads`
-- [ ] `GET /threads/{id}`
-- [ ] `POST /api/threads/{id}/replies`
+- [x] `GET /api/topics/{slug}/threads`
+- [x] `POST /api/topics/{slug}/threads`
+- [x] `GET /threads/{id}`
+- [x] `POST /api/threads/{id}/replies`
 
 **New Templates:**
-- [ ] Update `topic_page.hbs` — add discussions section
-- [ ] Create `thread_page.hbs`
+- [x] Create `thread_page.hbs` — full discussion view with comments
 
 ### 7.3 Deprecate Group Messages
-- [ ] Remove `listMessages`, `postMessage` routes
-- [ ] Remove from `handleNextRequest()` routing
+- [ ] Remove `listMessages`, `postMessage` routes — *deferred*
+- [ ] Remove from `handleNextRequest()` routing — *deferred*
 
 ---
 

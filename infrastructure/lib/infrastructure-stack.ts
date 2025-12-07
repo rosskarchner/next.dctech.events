@@ -296,6 +296,51 @@ export class InfrastructureStack extends cdk.Stack {
       sortKey: { name: 'eventId', type: dynamodb.AttributeType.STRING },
     });
 
+    // ============================================
+    // Phase 7: Discussion Boards Tables
+    // ============================================
+
+    // Threads table (for topic discussions)
+    const threadsTable = new dynamodb.Table(this, 'ThreadsTable', {
+      tableName: 'organize-threads',
+      partitionKey: { name: 'topicSlug', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'threadId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    });
+
+    // Add GSI for getting threads by creation date (for "New" sorting)
+    threadsTable.addGlobalSecondaryIndex({
+      indexName: 'threadsByDateIndex',
+      partitionKey: { name: 'topicSlug', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'createdAt', type: dynamodb.AttributeType.STRING },
+    });
+
+    // Add GSI for getting threads by score (for "Hot" sorting)
+    threadsTable.addGlobalSecondaryIndex({
+      indexName: 'threadsByScoreIndex',
+      partitionKey: { name: 'topicSlug', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'score', type: dynamodb.AttributeType.NUMBER },
+    });
+
+    // Replies table (for thread comments)
+    const repliesTable = new dynamodb.Table(this, 'RepliesTable', {
+      tableName: 'organize-replies',
+      partitionKey: { name: 'threadId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'replyId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    });
+
+    // Add GSI for getting replies by parent (for nested threading)
+    repliesTable.addGlobalSecondaryIndex({
+      indexName: 'repliesByParentIndex',
+      partitionKey: { name: 'parentId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'createdAt', type: dynamodb.AttributeType.STRING },
+    });
+
 
     // ============================================
     // S3 Bucket for Static Website and Exports
@@ -361,6 +406,8 @@ export class InfrastructureStack extends cdk.Stack {
       TOPICS_TABLE: topicsTable.tableName,
       TOPIC_FOLLOWS_TABLE: topicFollowsTable.tableName,
       EVENT_UPVOTES_TABLE: eventUpvotesTable.tableName,
+      THREADS_TABLE: threadsTable.tableName,
+      REPLIES_TABLE: repliesTable.tableName,
       USER_POOL_ID: userPool.userPoolId,
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
       USER_POOL_REGION: cdk.Stack.of(this).region,
@@ -401,6 +448,8 @@ export class InfrastructureStack extends cdk.Stack {
     topicsTable.grantReadWriteData(apiFunction);
     topicFollowsTable.grantReadWriteData(apiFunction);
     eventUpvotesTable.grantReadWriteData(apiFunction);
+    threadsTable.grantReadWriteData(apiFunction);
+    repliesTable.grantReadWriteData(apiFunction);
 
 
     // Grant Cognito permissions
@@ -464,6 +513,33 @@ export class InfrastructureStack extends cdk.Stack {
       description: 'Refresh iCal feeds from 110+ groups and sync from GitHub',
     });
     refreshRule.addTarget(new targets.LambdaFunction(refreshFunction));
+
+    // ============================================
+    // Phase 6: Recurrence Expansion Lambda
+    // ============================================
+
+    // Recurrence Lambda (expands recurring events into instances)
+    const recurrenceFunction = new lambda.Function(this, 'RecurrenceFunction', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset('lambda/recurrence'),
+      environment: {
+        EVENTS_TABLE: eventsTable.tableName,
+      },
+      timeout: cdk.Duration.minutes(2),
+      memorySize: 256,
+      description: 'Expands recurring events into individual instances',
+    });
+
+    // Grant permissions to recurrence Lambda
+    eventsTable.grantReadWriteData(recurrenceFunction);
+
+    // Schedule recurrence expansion to run daily at 2am UTC
+    const recurrenceRule = new eventbridge.Rule(this, 'RecurrenceSchedule', {
+      schedule: eventbridge.Schedule.cron({ hour: '2', minute: '0' }),
+      description: 'Daily expansion of recurring events',
+    });
+    recurrenceRule.addTarget(new targets.LambdaFunction(recurrenceFunction));
 
     // ============================================
     // CloudWatch Alarms for Monitoring
