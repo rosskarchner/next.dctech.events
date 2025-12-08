@@ -16,6 +16,114 @@ const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
 
 // ============================================
+// Input Validation Functions
+// ============================================
+
+// Validate UUID format
+function validateUUID(id, paramName = 'ID') {
+  if (!id) {
+    throw new Error(`${paramName} is required`);
+  }
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(id)) {
+    throw new Error(`Invalid ${paramName} format`);
+  }
+  return id;
+}
+
+// Validate slug format (lowercase alphanumeric with hyphens)
+function validateSlug(slug, paramName = 'slug') {
+  if (!slug) {
+    throw new Error(`${paramName} is required`);
+  }
+  const slugRegex = /^[a-z0-9-]{1,100}$/;
+  if (!slugRegex.test(slug)) {
+    throw new Error(`Invalid ${paramName} format. Use lowercase letters, numbers, and hyphens only.`);
+  }
+  return slug;
+}
+
+// Validate nickname format
+function validateNickname(nickname) {
+  if (!nickname) {
+    throw new Error('Nickname is required');
+  }
+  if (nickname.length < 3 || nickname.length > 30) {
+    throw new Error('Nickname must be 3-30 characters');
+  }
+  const nicknameRegex = /^[a-zA-Z0-9_-]+$/;
+  if (!nicknameRegex.test(nickname)) {
+    throw new Error('Nickname can only contain letters, numbers, underscores, and hyphens');
+  }
+  return nickname;
+}
+
+// Validate email format
+function validateEmail(email) {
+  if (!email) {
+    throw new Error('Email is required');
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    throw new Error('Invalid email format');
+  }
+  return email;
+}
+
+// Validate URL format
+function validateURL(url, paramName = 'URL') {
+  if (!url) {
+    throw new Error(`${paramName} is required`);
+  }
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error(`${paramName} must use HTTP or HTTPS protocol`);
+    }
+    // Check for SSRF vulnerabilities - block private IPs
+    const hostname = parsed.hostname.toLowerCase();
+    const privatePatterns = [
+      /^localhost$/i,
+      /^127\./,
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[01])\./,
+      /^192\.168\./,
+      /^169\.254\./,
+      /^::1$/,
+      /^fe80:/i,
+      /^fc00:/i,
+    ];
+    if (privatePatterns.some(pattern => pattern.test(hostname))) {
+      throw new Error(`${paramName} cannot point to private/internal addresses`);
+    }
+    return url;
+  } catch (error) {
+    throw new Error(`Invalid ${paramName}: ${error.message}`);
+  }
+}
+
+// Validate string length
+function validateString(str, minLen, maxLen, paramName = 'Field') {
+  if (!str || typeof str !== 'string') {
+    throw new Error(`${paramName} is required`);
+  }
+  if (str.length < minLen || str.length > maxLen) {
+    throw new Error(`${paramName} must be between ${minLen} and ${maxLen} characters`);
+  }
+  return str.trim();
+}
+
+// Validate and sanitize HTML content
+function sanitizeHTML(html) {
+  if (!html) return '';
+  // Remove script tags and event handlers
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/on\w+\s*=\s*[^\s>]*/gi, '');
+}
+
+// ============================================
 // In-Memory Cache for frequently accessed data
 // ============================================
 const cache = {
@@ -327,23 +435,55 @@ async function parseEvent(event) {
   return { path, method, body, pathParams, queryParams, userId, userEmail, isHtmx };
 }
 
+// Helper to get allowed origin for CORS
+function getAllowedOrigin(requestHeaders = {}) {
+  const allowedOrigins = [
+    'https://next.dctech.events',
+    'https://organize.dctech.events',
+    process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : null,
+  ].filter(Boolean);
+
+  const origin = requestHeaders['origin'] || requestHeaders['Origin'] || '';
+  // If origin is in allowed list, return it; otherwise return first allowed origin
+  return allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+}
+
+// Global variable to store current request headers for use in createResponse
+let currentRequestHeaders = {};
+
 // Helper to create API response
 function createResponse(statusCode, body, isHtml = false) {
   const headers = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': getAllowedOrigin(currentRequestHeaders),
     'Access-Control-Allow-Headers': 'Content-Type,Authorization,HX-Request,HX-Target,HX-Trigger',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    'Access-Control-Allow-Credentials': 'true',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
   };
 
   if (isHtml) {
-    headers['Content-Type'] = 'text/html';
+    headers['Content-Type'] = 'text/html; charset=utf-8';
+    headers['Content-Security-Policy'] = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' https://unpkg.com",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: https:",
+      "connect-src 'self' https://*.amazoncognito.com https://*.amazonaws.com",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join('; ');
     return {
       statusCode,
       headers,
       body: body,
     };
   } else {
-    headers['Content-Type'] = 'application/json';
+    headers['Content-Type'] = 'application/json; charset=utf-8';
     return {
       statusCode,
       headers,
@@ -3325,6 +3465,9 @@ function requiresAuth(path, method) {
 exports.handler = async (event) => {
   let isHtmx = false;
   try {
+    // Store request headers globally for CORS handling
+    currentRequestHeaders = event.headers || {};
+    
     const site = determineSite(event);
     const { path, method, body, pathParams, queryParams, userId, userEmail, isHtmx: isHtmxRequest } = await parseEvent(event);
     isHtmx = isHtmxRequest;

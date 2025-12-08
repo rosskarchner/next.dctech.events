@@ -56,11 +56,12 @@ export class InfrastructureStack extends cdk.Stack {
         website: new cognito.StringAttribute({ minLen: 0, maxLen: 200, mutable: true }),
       },
       passwordPolicy: {
-        minLength: 8,
+        minLength: 12,
         requireLowercase: true,
         requireUppercase: true,
         requireDigits: true,
-        requireSymbols: false,
+        requireSymbols: true,
+        tempPasswordValidity: cdk.Duration.days(3),
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -147,6 +148,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for nickname lookups (public profile pages)
@@ -163,6 +165,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for active groups
@@ -180,6 +183,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for user's groups
@@ -196,6 +200,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for events by group
@@ -220,6 +225,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for user's RSVPs
@@ -237,6 +243,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Topics table (for community hub categories)
@@ -246,6 +253,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for groups by topic
@@ -270,6 +278,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for getting followers of a topic
@@ -287,6 +296,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for getting all upvotes by a user
@@ -308,6 +318,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for getting threads by creation date (for "New" sorting)
@@ -332,6 +343,7 @@ export class InfrastructureStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 
     // Add GSI for getting replies by parent (for nested threading)
@@ -351,11 +363,20 @@ export class InfrastructureStack extends cdk.Stack {
       publicReadAccess: false,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      versioned: true, // Enable versioning for rollback capability
+      lifecycleRules: [
+        {
+          noncurrentVersionExpiration: cdk.Duration.days(90), // Clean up old versions
+        },
+      ],
+      encryption: s3.BucketEncryption.S3_MANAGED, // Enable encryption at rest
+      enforceSSL: true, // Require SSL for all requests
       cors: [
         {
-          allowedOrigins: ['*'],
+          allowedOrigins: ['https://next.dctech.events'],
           allowedMethods: [s3.HttpMethods.GET],
-          allowedHeaders: ['*'],
+          allowedHeaders: ['Authorization', 'Content-Type'],
+          maxAge: 3600,
         },
       ],
     });
@@ -436,6 +457,8 @@ export class InfrastructureStack extends cdk.Stack {
       memorySize: 512,
       tracing: lambda.Tracing.ACTIVE, // Enable X-Ray tracing
       layers: [templatesLayer],
+      reservedConcurrentExecutions: 100, // Limit concurrent executions
+      retryAttempts: 1, // Limit automatic retries
     });
 
     // Grant permissions to Lambda
@@ -602,6 +625,15 @@ export class InfrastructureStack extends cdk.Stack {
     const api = new apigateway.RestApi(this, 'OrganizeApi', {
       restApiName: 'Organize DC Tech Events API',
       description: 'API for organize.dctech.events',
+      deployOptions: {
+        stageName: 'prod',
+        throttlingBurstLimit: 200,  // Maximum concurrent requests
+        throttlingRateLimit: 100,    // Requests per second
+        loggingLevel: apigateway.MethodLoggingLevel.ERROR,
+        dataTraceEnabled: false,     // Don't log request/response data (may contain sensitive info)
+        metricsEnabled: true,
+        tracingEnabled: true,
+      },
       defaultCorsPreflightOptions: {
         allowOrigins: [
           'https://next.dctech.events',
@@ -618,6 +650,7 @@ export class InfrastructureStack extends cdk.Stack {
           'HX-Target',
           'HX-Trigger',
         ],
+        allowCredentials: true,
       },
     });
 
@@ -642,7 +675,9 @@ export class InfrastructureStack extends cdk.Stack {
     // ============================================
 
     // Import existing Web ACL (created by CloudFront pricing plan subscription)
-    const webAclArn = 'arn:aws:wafv2:us-east-1:797438674243:global/webacl/CreatedByCloudFront-08f900a2/598f35c6-3323-4a6b-9ae9-9cd73d9e7ca0';
+    // This can be overridden via context: cdk deploy -c webAclArn=arn:...
+    const webAclArn = this.node.tryGetContext('webAclArn') || 
+      `arn:aws:wafv2:us-east-1:${this.account}:global/webacl/CreatedByCloudFront-08f900a2/598f35c6-3323-4a6b-9ae9-9cd73d9e7ca0`;
 
     const distribution = new cloudfront.Distribution(this, 'NextDcTechDistribution', {
       webAclId: webAclArn,
