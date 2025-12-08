@@ -16,6 +16,142 @@ const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
 
 // ============================================
+// Input Validation Functions
+// ============================================
+
+// Validate UUID format (accepts v4 UUIDs)
+function validateUUID(id, paramName = 'ID') {
+  if (!id) {
+    throw new Error(`${paramName} is required`);
+  }
+  // Strict UUID v4 format: version must be 4, variant must be 8/9/a/b
+  const uuidV4Regex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidV4Regex.test(id)) {
+    throw new Error(`Invalid ${paramName} format`);
+  }
+  return id;
+}
+
+// Validate slug format (lowercase alphanumeric with hyphens)
+function validateSlug(slug, paramName = 'slug') {
+  if (!slug) {
+    throw new Error(`${paramName} is required`);
+  }
+  const slugRegex = /^[a-z0-9-]{1,100}$/;
+  if (!slugRegex.test(slug)) {
+    throw new Error(`Invalid ${paramName} format. Use lowercase letters, numbers, and hyphens only.`);
+  }
+  return slug;
+}
+
+// Validate nickname format
+function validateNickname(nickname) {
+  if (!nickname) {
+    throw new Error('Nickname is required');
+  }
+  if (nickname.length < 3 || nickname.length > 30) {
+    throw new Error('Nickname must be 3-30 characters');
+  }
+  const nicknameRegex = /^[a-zA-Z0-9_-]+$/;
+  if (!nicknameRegex.test(nickname)) {
+    throw new Error('Nickname can only contain letters, numbers, underscores, and hyphens');
+  }
+  return nickname;
+}
+
+// Validate email format
+function validateEmail(email) {
+  if (!email) {
+    throw new Error('Email is required');
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    throw new Error('Invalid email format');
+  }
+  return email;
+}
+
+// Validate URL format and prevent SSRF
+function validateURL(url, paramName = 'URL') {
+  if (!url) {
+    throw new Error(`${paramName} is required`);
+  }
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error(`${paramName} must use HTTP or HTTPS protocol`);
+    }
+    
+    // Check for SSRF vulnerabilities - block private IPs and cloud metadata
+    const hostname = parsed.hostname.toLowerCase();
+    
+    // Block common dangerous patterns
+    const dangerousPatterns = [
+      /^localhost$/i,
+      /^127\./,
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[01])\./,
+      /^192\.168\./,
+      /^169\.254\./,  // AWS/Azure metadata service
+      /^::1$/,
+      /^fe80:/i,
+      /^fc00:/i,
+      /^fd[0-9a-f]{2}:/i,
+      /^::ffff:127\./i, // IPv4-mapped IPv6 loopback
+      /^::ffff:10\./i,  // IPv4-mapped IPv6 private
+      /^::ffff:192\.168\./i,
+      /^::ffff:172\.(1[6-9]|2[0-9]|3[01])\./i,
+      /^::ffff:169\.254\./i,
+      /metadata\.google\.internal/i, // GCP metadata
+      /^169\.254\.169\.254$/,  // AWS metadata explicit
+    ];
+    
+    if (dangerousPatterns.some(pattern => pattern.test(hostname))) {
+      throw new Error(`${paramName} cannot point to private/internal/metadata addresses`);
+    }
+    
+    // Additional check: if hostname looks like an IP, validate it's not private
+    const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+    const ipMatch = hostname.match(ipv4Regex);
+    if (ipMatch) {
+      const octets = ipMatch.slice(1, 5).map(Number);
+      // Check if it's a valid IP and not in private ranges
+      if (octets.some(octet => octet > 255)) {
+        throw new Error(`Invalid ${paramName}: Invalid IP address`);
+      }
+      // Additional private range checks
+      if (octets[0] === 0 || octets[0] === 127 || octets[0] === 10 ||
+          (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+          (octets[0] === 192 && octets[1] === 168) ||
+          (octets[0] === 169 && octets[1] === 254)) {
+        throw new Error(`${paramName} cannot point to private addresses`);
+      }
+    }
+    
+    return url;
+  } catch (error) {
+    throw new Error(`Invalid ${paramName}: ${error.message}`);
+  }
+}
+
+// Validate string length
+function validateString(str, minLen, maxLen, paramName = 'Field') {
+  if (!str || typeof str !== 'string') {
+    throw new Error(`${paramName} is required`);
+  }
+  if (str.length < minLen || str.length > maxLen) {
+    throw new Error(`${paramName} must be between ${minLen} and ${maxLen} characters`);
+  }
+  return str.trim();
+}
+
+// SECURITY NOTE: HTML Sanitization Strategy
+// This application uses escapeHtml() for all user-generated content to prevent XSS.
+// Templates use {{variable}} syntax which auto-escapes HTML.
+// If rich HTML content is ever needed, install and use the 'dompurify' or 'sanitize-html' npm package.
+// Do NOT attempt to write custom regex-based HTML sanitizers as they are prone to bypasses.
+
+// ============================================
 // In-Memory Cache for frequently accessed data
 // ============================================
 const cache = {
@@ -327,23 +463,55 @@ async function parseEvent(event) {
   return { path, method, body, pathParams, queryParams, userId, userEmail, isHtmx };
 }
 
+// Helper to get allowed origin for CORS
+function getAllowedOrigin(requestHeaders = {}) {
+  const allowedOrigins = [
+    'https://next.dctech.events',
+    'https://organize.dctech.events',
+    process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : null,
+  ].filter(Boolean);
+
+  const origin = requestHeaders['origin'] || requestHeaders['Origin'] || '';
+  // If origin is in allowed list, return it; otherwise return first allowed origin
+  return allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+}
+
 // Helper to create API response
-function createResponse(statusCode, body, isHtml = false) {
+// requestHeaders parameter is optional - if not provided, will use default origin
+function createResponse(statusCode, body, isHtml = false, requestHeaders = {}) {
   const headers = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': getAllowedOrigin(requestHeaders),
     'Access-Control-Allow-Headers': 'Content-Type,Authorization,HX-Request,HX-Target,HX-Trigger',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    'Access-Control-Allow-Credentials': 'true',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
   };
 
   if (isHtml) {
-    headers['Content-Type'] = 'text/html';
+    headers['Content-Type'] = 'text/html; charset=utf-8';
+    // CSP with unsafe-inline is necessary for htmx inline attributes
+    // TODO: Consider migrating to htmx with external scripts and using nonces
+    headers['Content-Security-Policy'] = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' https://unpkg.com",  // htmx uses inline scripts
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: https:",
+      "connect-src 'self' https://*.amazoncognito.com https://*.amazonaws.com",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join('; ');
     return {
       statusCode,
       headers,
       body: body,
     };
   } else {
-    headers['Content-Type'] = 'application/json';
+    headers['Content-Type'] = 'application/json; charset=utf-8';
     return {
       statusCode,
       headers,
@@ -3324,6 +3492,8 @@ function requiresAuth(path, method) {
 
 exports.handler = async (event) => {
   let isHtmx = false;
+  const requestHeaders = event.headers || {};
+  
   try {
     const site = determineSite(event);
     const { path, method, body, pathParams, queryParams, userId, userEmail, isHtmx: isHtmxRequest } = await parseEvent(event);
@@ -3331,10 +3501,11 @@ exports.handler = async (event) => {
 
     // Handle CORS preflight
     if (method === 'OPTIONS') {
-      return createResponse(200, {});
+      return createResponse(200, {}, false, requestHeaders);
     }
 
     // Route to appropriate site handler
+    // Note: Pass requestHeaders to handlers so they can forward to createResponse
     if (site === 'next') {
       return await handleNextRequest(path, method, userId, isHtmx, event, body);
     }
@@ -3447,12 +3618,23 @@ exports.handler = async (event) => {
       return await convertRSVPsToGroup(pathParams.eventId, userId, body.groupName);
     }
 
-    return createResponse(404, { error: 'Not found' });
+    return createResponse(404, { error: 'Not found' }, false, requestHeaders);
   } catch (error) {
-    console.error('Error:', error);
+    // Log error details for debugging but sanitize for users
+    console.error('Error:', {
+      name: error.name,
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
+    
+    // Generic error message for production
+    const userMessage = process.env.NODE_ENV === 'production'
+      ? 'An unexpected error occurred. Please try again later.'
+      : error.message;
+    
     if (isHtmx) {
-      return createResponse(500, html.error(error.message), true);
+      return createResponse(500, html.error(userMessage), true, requestHeaders);
     }
-    return createResponse(500, { error: error.message });
+    return createResponse(500, { error: userMessage }, false, requestHeaders);
   }
 };
