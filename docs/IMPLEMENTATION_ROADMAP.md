@@ -254,50 +254,53 @@ Phased plan to transform DC Tech Events into the community hub described in `COM
 
 ---
 
-## Phase 8: Moderation
+## Phase 8: Moderation ✅
 
 ### 8.1 Flags Table
 **CDK Changes:**
-- [ ] Create `Flags` table (PK: `targetType#targetId`, SK: `flagId`)
-- [ ] Add GSI: `pendingFlagsIndex`
+- [x] Create `Flags` table (PK: `targetKey`, SK: `flagId`)
+- [x] Add GSI: `pendingFlagsIndex`
 
 ### 8.2 APIs
 **API Changes:**
-- [ ] Add `createFlag()`, `listPendingFlags()`, `resolveFlag()`
-- [ ] Add `status` field to Events (pending/approved)
-- [ ] Modify `createEvent()` to check karma for auto-approval
+- [x] Add `createFlag()`, `listPendingFlags()`, `resolveFlag()`
+- [x] Add `shadowbanUser()` for admin moderation
+- [ ] Add `status` field to Events (pending/approved) — *deferred*
+- [ ] Modify `createEvent()` to check karma for auto-approval — *deferred*
 
 **New Routes:**
-- [ ] `POST /api/flags`
-- [ ] `GET /admin/moderation`
-- [ ] `POST /api/admin/flags/{id}/resolve`
-- [ ] `POST /api/admin/users/{id}/shadowban`
+- [x] `POST /api/flags`
+- [x] `GET /admin/moderation`
+- [x] `GET /api/admin/flags`
+- [x] `POST /api/admin/flags/{id}/resolve`
+- [x] `POST /api/admin/users/{id}/shadowban`
 
 **New Templates:**
-- [ ] Create `admin/moderation.hbs`
+- [x] Admin moderation page (inline HTML with HTMX)
 
 ---
 
-## Phase 9: Email Notifications
+## Phase 9: Email Notifications ✅
 
 ### 9.1 SES Setup
 **CDK Changes:**
-- [ ] Create SES email identity (verify domain)
-- [ ] Add SES permissions to Lambda
+- [x] Create SES email identity (verify domain) — *dctech.events already verified*
+- [x] Add SES permissions to Lambda
 
 ### 9.2 Notification Preferences
 **API Changes:**
-- [ ] Add `emailPrefs` to User schema
-- [ ] Update settings page
+- [x] Add `emailPrefs` to User schema (already exists)
+- [x] Helper functions: `getEmailPrefs()`, `sendEmail()`
+- [x] `sendReplyNotification()` function
 
 ### 9.3 Trigger Lambdas
 **New Lambdas:**
-- [ ] `lambda/notifications/reply.js` — triggered on new reply
-- [ ] `lambda/notifications/digest.js` — daily/weekly digest
-- [ ] `lambda/notifications/reminder.js` — RSVP reminders (24h before)
+- [ ] `lambda/notifications/reply.js` — triggered on new reply — *deferred, inline for now*
+- [ ] `lambda/notifications/digest.js` — daily/weekly digest — *deferred*
+- [ ] `lambda/notifications/reminder.js` — RSVP reminders (24h before) — *deferred*
 
 **CDK Changes:**
-- [ ] EventBridge rules for digest and reminder Lambdas
+- [ ] EventBridge rules for digest and reminder Lambdas — *deferred*
 
 ---
 

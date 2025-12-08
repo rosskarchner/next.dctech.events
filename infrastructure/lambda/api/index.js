@@ -2140,6 +2140,327 @@ async function createReply(threadId, userId, data, isHtmx = false) {
   return createResponse(201, { replyId, ...reply, authorNickname });
 }
 
+// ============================================
+// Phase 8: Moderation Functions
+// ============================================
+
+// Flag content (event, thread, or reply)
+async function createFlag(targetType, targetId, userId, reason, isHtmx = false) {
+  if (!userId) {
+    if (isHtmx) {
+      return createResponse(403, html.error('Please sign in to flag content'), true);
+    }
+    return createResponse(403, { error: 'Authentication required' });
+  }
+
+  const validTargetTypes = ['event', 'thread', 'reply'];
+  if (!validTargetTypes.includes(targetType)) {
+    return createResponse(400, { error: 'Invalid target type' });
+  }
+
+  const flagId = uuidv4();
+  const timestamp = new Date().toISOString();
+  const targetKey = `${targetType}#${targetId}`;
+
+  const flag = {
+    targetKey,
+    flagId,
+    targetType,
+    targetId,
+    flaggedBy: userId,
+    reason: reason?.trim() || 'No reason provided',
+    status: 'pending', // pending, resolved, dismissed
+    createdAt: timestamp,
+  };
+
+  await docClient.send(new PutCommand({
+    TableName: process.env.FLAGS_TABLE,
+    Item: flag,
+  }));
+
+  if (isHtmx) {
+    return createResponse(201, '<div class="status-message success">Thank you for reporting. A moderator will review this content.</div>', true);
+  }
+
+  return createResponse(201, { flagId, message: 'Flag submitted' });
+}
+
+// List pending flags (admin only)
+async function listPendingFlags(userId, isHtmx = false) {
+  const isAdmin = await isUserAdmin(userId);
+  if (!isAdmin) {
+    if (isHtmx) {
+      return createResponse(403, html.error('Admin access required'), true);
+    }
+    return createResponse(403, { error: 'Admin access required' });
+  }
+
+  const result = await docClient.send(new QueryCommand({
+    TableName: process.env.FLAGS_TABLE,
+    IndexName: 'pendingFlagsIndex',
+    KeyConditionExpression: '#status = :pending',
+    ExpressionAttributeNames: { '#status': 'status' },
+    ExpressionAttributeValues: { ':pending': 'pending' },
+    ScanIndexForward: false, // Newest first
+    Limit: 50,
+  }));
+
+  const flags = result.Items || [];
+
+  if (isHtmx) {
+    if (flags.length === 0) {
+      return createResponse(200, '<div class="empty-state">No pending flags. 🎉</div>', true);
+    }
+
+    const flagsHtml = flags.map(f => `
+      <div class="flag-item" id="flag-${f.flagId}">
+        <div class="flag-meta">
+          <strong>${escapeHtml(f.targetType)}</strong>: ${escapeHtml(f.targetId)}
+          <br>Reported ${formatRelativeTime(f.createdAt)}
+        </div>
+        <div class="flag-reason">${escapeHtml(f.reason)}</div>
+        <div class="flag-actions">
+          <button class="btn btn-danger btn-small" 
+                  hx-post="/api/admin/flags/${f.flagId}/resolve"
+                  hx-vals='{"action": "remove"}'
+                  hx-target="#flag-${f.flagId}"
+                  hx-swap="outerHTML">
+            Remove Content
+          </button>
+          <button class="btn btn-secondary btn-small"
+                  hx-post="/api/admin/flags/${f.flagId}/resolve"
+                  hx-vals='{"action": "dismiss"}'
+                  hx-target="#flag-${f.flagId}"
+                  hx-swap="outerHTML">
+            Dismiss
+          </button>
+          <a href="/${f.targetType === 'event' ? 'events' : f.targetType === 'thread' ? 'threads' : 'threads'}/${f.targetId}" 
+             target="_blank" class="btn btn-link btn-small">
+            View →
+          </a>
+        </div>
+      </div>
+    `).join('');
+
+    return createResponse(200, `
+      <div class="flags-list">
+        <h3>${flags.length} Pending Flag${flags.length === 1 ? '' : 's'}</h3>
+        ${flagsHtml}
+      </div>
+    `, true);
+  }
+
+  return createResponse(200, { flags });
+}
+
+// Resolve a flag (admin only)
+async function resolveFlag(flagId, userId, action, isHtmx = false) {
+  const isAdmin = await isUserAdmin(userId);
+  if (!isAdmin) {
+    return createResponse(403, { error: 'Admin access required' });
+  }
+
+  if (!['remove', 'dismiss'].includes(action)) {
+    return createResponse(400, { error: 'Invalid action. Must be "remove" or "dismiss"' });
+  }
+
+  // Find the flag
+  const flagResult = await docClient.send(new ScanCommand({
+    TableName: process.env.FLAGS_TABLE,
+    FilterExpression: 'flagId = :flagId',
+    ExpressionAttributeValues: { ':flagId': flagId },
+  }));
+
+  if (!flagResult.Items || flagResult.Items.length === 0) {
+    return createResponse(404, { error: 'Flag not found' });
+  }
+
+  const flag = flagResult.Items[0];
+  const timestamp = new Date().toISOString();
+
+  // Update flag status
+  await docClient.send(new UpdateCommand({
+    TableName: process.env.FLAGS_TABLE,
+    Key: { targetKey: flag.targetKey, flagId },
+    UpdateExpression: 'SET #status = :status, resolvedAt = :resolvedAt, resolvedBy = :resolvedBy, resolution = :resolution',
+    ExpressionAttributeNames: { '#status': 'status' },
+    ExpressionAttributeValues: {
+      ':status': 'resolved',
+      ':resolvedAt': timestamp,
+      ':resolvedBy': userId,
+      ':resolution': action,
+    },
+  }));
+
+  // If action is 'remove', delete or hide the flagged content
+  if (action === 'remove') {
+    if (flag.targetType === 'event') {
+      // Mark event as removed/hidden
+      await docClient.send(new UpdateCommand({
+        TableName: process.env.EVENTS_TABLE,
+        Key: { eventId: flag.targetId },
+        UpdateExpression: 'SET #status = :removed, removedAt = :removedAt, removedBy = :removedBy',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: {
+          ':removed': 'removed',
+          ':removedAt': timestamp,
+          ':removedBy': userId,
+        },
+      }));
+    } else if (flag.targetType === 'thread') {
+      // Mark thread as removed
+      await docClient.send(new UpdateCommand({
+        TableName: process.env.THREADS_TABLE,
+        Key: { topicSlug: flag.topicSlug || 'unknown', threadId: flag.targetId },
+        UpdateExpression: 'SET #status = :removed',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: { ':removed': 'removed' },
+      }));
+    }
+    // For replies, we could also add similar logic
+  }
+
+  if (isHtmx) {
+    return createResponse(200, `<div class="status-message success">Flag ${action === 'remove' ? 'resolved - content removed' : 'dismissed'}</div>`, true);
+  }
+
+  return createResponse(200, { message: `Flag ${action === 'remove' ? 'resolved' : 'dismissed'}` });
+}
+
+// Shadowban a user (admin only) - their content won't be shown to others
+async function shadowbanUser(targetUserId, adminUserId, isHtmx = false) {
+  const isAdmin = await isUserAdmin(adminUserId);
+  if (!isAdmin) {
+    return createResponse(403, { error: 'Admin access required' });
+  }
+
+  const timestamp = new Date().toISOString();
+
+  await docClient.send(new UpdateCommand({
+    TableName: process.env.USERS_TABLE,
+    Key: { userId: targetUserId },
+    UpdateExpression: 'SET shadowbanned = :true, shadowbannedAt = :at, shadowbannedBy = :by',
+    ExpressionAttributeValues: {
+      ':true': true,
+      ':at': timestamp,
+      ':by': adminUserId,
+    },
+  }));
+
+  if (isHtmx) {
+    return createResponse(200, '<div class="status-message success">User shadowbanned</div>', true);
+  }
+
+  return createResponse(200, { message: 'User shadowbanned' });
+}
+
+// ============================================
+// Phase 9: Email Notification Functions
+// ============================================
+
+// Send email via SES
+async function sendEmail(to, subject, htmlBody, textBody = null) {
+  // Only attempt to send if SES is configured
+  const sourceEmail = process.env.SES_SOURCE_EMAIL;
+  if (!sourceEmail) {
+    console.log('SES_SOURCE_EMAIL not configured, skipping email send');
+    return { success: false, reason: 'SES not configured' };
+  }
+
+  // Dynamically import SES client to avoid errors if not needed
+  const { SESClient, SendEmailCommand } = await import('@aws-sdk/client-ses');
+  const sesClient = new SESClient({});
+
+  try {
+    const params = {
+      Source: sourceEmail,
+      Destination: {
+        ToAddresses: Array.isArray(to) ? to : [to],
+      },
+      Message: {
+        Subject: {
+          Data: subject,
+          Charset: 'UTF-8',
+        },
+        Body: {
+          Html: {
+            Data: htmlBody,
+            Charset: 'UTF-8',
+          },
+        },
+      },
+    };
+
+    // Add text body if provided
+    if (textBody) {
+      params.Message.Body.Text = {
+        Data: textBody,
+        Charset: 'UTF-8',
+      };
+    }
+
+    await sesClient.send(new SendEmailCommand(params));
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to send email:', error);
+    return { success: false, reason: error.message };
+  }
+}
+
+// Get user's email preferences
+async function getEmailPrefs(userId) {
+  const user = await docClient.send(new GetCommand({
+    TableName: process.env.USERS_TABLE,
+    Key: { userId },
+    ProjectionExpression: 'emailPrefs, email',
+  }));
+
+  return user.Item?.emailPrefs || {
+    replyNotifications: true,
+    digestFrequency: 'weekly', // 'daily', 'weekly', 'never'
+    eventReminders: true,
+  };
+}
+
+// Send reply notification email
+async function sendReplyNotification(threadId, replyAuthorNickname, replyBody, threadAuthorId) {
+  // Get thread author's email preferences
+  const prefs = await getEmailPrefs(threadAuthorId);
+  if (!prefs.replyNotifications) {
+    return { success: false, reason: 'User has disabled reply notifications' };
+  }
+
+  // Get thread author's email from Cognito
+  const userResult = await docClient.send(new GetCommand({
+    TableName: process.env.USERS_TABLE,
+    Key: { userId: threadAuthorId },
+  }));
+
+  const userEmail = userResult.Item?.email;
+  if (!userEmail) {
+    return { success: false, reason: 'User email not found' };
+  }
+
+  const subject = `New reply to your discussion on DC Tech Events`;
+  const htmlBody = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #2c3e50;">New Reply to Your Discussion</h2>
+      <p><strong>${escapeHtml(replyAuthorNickname)}</strong> replied to your thread:</p>
+      <blockquote style="border-left: 3px solid #3498db; padding-left: 15px; margin: 15px 0; color: #666;">
+        ${escapeHtml(replyBody.substring(0, 300))}${replyBody.length > 300 ? '...' : ''}
+      </blockquote>
+      <p><a href="https://next.dctech.events/threads/${threadId}" style="color: #3498db;">View the full discussion →</a></p>
+      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+      <p style="color: #999; font-size: 12px;">
+        You're receiving this because you have reply notifications enabled.
+        <a href="https://next.dctech.events/settings" style="color: #999;">Manage your notification preferences</a>
+      </p>
+    </div>
+  `;
+
+  return await sendEmail(userEmail, subject, htmlBody);
+}
+
 // RSVP handlers
 async function listRSVPs(eventId, requestingUserId = null, isHtmx = false) {
   // Get all RSVPs for this event
@@ -3094,6 +3415,95 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     return await createReply(threadId, userId, body, isHtmx);
   }
 
+  // ============================================
+  // Phase 8: Moderation Routes
+  // ============================================
+
+  // POST /api/flags - Create a new flag
+  if (path === '/api/flags' && method === 'POST') {
+    const { targetType, targetId, reason } = parsedBody || {};
+    return await createFlag(targetType, targetId, userId, reason, isHtmx);
+  }
+
+  // GET /admin/moderation - Moderation queue page (admin only)
+  if ((path === '/admin/moderation' || path === '/admin/moderation/') && method === 'GET') {
+    if (!userId) {
+      return {
+        statusCode: 302,
+        headers: { 'Location': cognitoLoginUrl('/admin/moderation') },
+        body: '',
+      };
+    }
+    const isAdmin = await isUserAdmin(userId);
+    if (!isAdmin) {
+      return createResponse(403, '<h1>Access Denied</h1><p>Admin access required.</p>', true);
+    }
+
+    // Get pending flags for the moderation queue
+    const flagsResult = await listPendingFlags(userId, true);
+
+    // Wrap in admin template
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moderation Queue - DC Tech Events</title>
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        .moderation-container { max-width: 900px; margin: 0 auto; }
+        .flag-item { 
+            background: white; 
+            border: 1px solid var(--color-border); 
+            border-radius: 8px; 
+            padding: var(--spacing-lg); 
+            margin-bottom: var(--spacing-md);
+        }
+        .flag-meta { color: var(--color-text-light); font-size: 0.875rem; margin-bottom: var(--spacing-sm); }
+        .flag-reason { margin-bottom: var(--spacing-md); }
+        .flag-actions { display: flex; gap: var(--spacing-sm); flex-wrap: wrap; }
+        .btn-small { padding: 6px 12px; font-size: 0.875rem; }
+    </style>
+</head>
+<body>
+    {{> header}}
+    <main class="container">
+        <div class="moderation-container">
+            <h1>Moderation Queue</h1>
+            <p>Review and resolve reported content.</p>
+            <div id="flags-container" hx-get="/api/admin/flags" hx-trigger="load" hx-swap="innerHTML">
+                Loading...
+            </div>
+        </div>
+    </main>
+    {{> footer}}
+</body>
+</html>`;
+
+    return createResponse(200, renderTemplate('layouts/base', { content: flagsResult.body, pageTitle: 'Moderation Queue' }), true);
+  }
+
+  // GET /api/admin/flags - List pending flags (admin only)
+  if (path === '/api/admin/flags' && method === 'GET') {
+    return await listPendingFlags(userId, isHtmx);
+  }
+
+  // POST /api/admin/flags/{id}/resolve - Resolve a flag (admin only)
+  if (path.match(/^\/api\/admin\/flags\/[a-f0-9-]+\/resolve\/?$/) && method === 'POST') {
+    const flagId = path.match(/^\/api\/admin\/flags\/([a-f0-9-]+)\/resolve/)[1];
+    const { action } = parsedBody || {};
+    return await resolveFlag(flagId, userId, action, isHtmx);
+  }
+
+  // POST /api/admin/users/{id}/shadowban - Shadowban a user (admin only)
+  if (path.match(/^\/api\/admin\/users\/[^\/]+\/shadowban\/?$/) && method === 'POST') {
+    const targetUserId = path.match(/^\/api\/admin\/users\/([^\/]+)\/shadowban/)[1];
+    return await shadowbanUser(targetUserId, userId, isHtmx);
+  }
+
   // GET /my-feed - Personalized feed page
   if ((path === '/my-feed' || path === '/my-feed/') && method === 'GET') {
     if (!userId) {
@@ -3155,6 +3565,22 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
         'Content-Type': 'application/xml',
       },
       body: sitemap,
+    };
+  }
+
+  // GET /robots.txt - Block search engine indexing (this is a staging site)
+  if (path === '/robots.txt' && method === 'GET') {
+    const robotsTxt = `# next.dctech.events - Development/Staging Site
+# Do not index this site - production is at dctech.events
+User-agent: *
+Disallow: /
+`;
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'text/plain',
+      },
+      body: robotsTxt,
     };
   }
 

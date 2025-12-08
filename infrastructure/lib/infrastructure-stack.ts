@@ -353,6 +353,27 @@ export class InfrastructureStack extends cdk.Stack {
       sortKey: { name: 'createdAt', type: dynamodb.AttributeType.STRING },
     });
 
+    // ============================================
+    // Phase 8: Moderation Tables
+    // ============================================
+
+    // Flags table (for content moderation)
+    const flagsTable = new dynamodb.Table(this, 'FlagsTable', {
+      tableName: 'organize-flags',
+      partitionKey: { name: 'targetKey', type: dynamodb.AttributeType.STRING }, // Format: targetType#targetId
+      sortKey: { name: 'flagId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    });
+
+    // Add GSI for getting pending flags (for moderation queue)
+    flagsTable.addGlobalSecondaryIndex({
+      indexName: 'pendingFlagsIndex',
+      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'createdAt', type: dynamodb.AttributeType.STRING },
+    });
+
 
     // ============================================
     // S3 Bucket for Static Website and Exports
@@ -429,6 +450,7 @@ export class InfrastructureStack extends cdk.Stack {
       EVENT_UPVOTES_TABLE: eventUpvotesTable.tableName,
       THREADS_TABLE: threadsTable.tableName,
       REPLIES_TABLE: repliesTable.tableName,
+      FLAGS_TABLE: flagsTable.tableName,
       USER_POOL_ID: userPool.userPoolId,
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
       USER_POOL_REGION: cdk.Stack.of(this).region,
@@ -436,6 +458,8 @@ export class InfrastructureStack extends cdk.Stack {
       WEBSITE_BUCKET: websiteBucket.bucketName,
       NEXT_DCTECH_DOMAIN: this.node.tryGetContext('nextDomain') || 'next.dctech.events',
       GITHUB_REPO: this.node.tryGetContext('githubRepo') || 'rosskarchner/dctech.events',
+      // Phase 9: Email Notifications
+      SES_SOURCE_EMAIL: 'outgoing@dctech.events',
     };
 
 
@@ -473,6 +497,18 @@ export class InfrastructureStack extends cdk.Stack {
     eventUpvotesTable.grantReadWriteData(apiFunction);
     threadsTable.grantReadWriteData(apiFunction);
     repliesTable.grantReadWriteData(apiFunction);
+    flagsTable.grantReadWriteData(apiFunction);
+
+    // Phase 9: Grant SES permissions for email notifications
+    apiFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+        resources: [
+          `arn:aws:ses:${this.region}:${this.account}:identity/dctech.events`,
+          `arn:aws:ses:${this.region}:${this.account}:identity/outgoing@dctech.events`,
+        ],
+      })
+    );
 
 
     // Grant Cognito permissions

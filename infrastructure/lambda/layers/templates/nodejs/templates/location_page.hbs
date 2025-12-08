@@ -1,13 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{#if city}}{{city}}, {{/if}}{{state}} Events - DC Tech Events</title>
   <meta name="description" content="Tech events in {{#if city}}{{city}}, {{/if}}{{state}}">
+  <meta name="robots" content="noindex, nofollow">
   <link rel="stylesheet" href="/static/css/main.css">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 </head>
+
 <body>
   {{> header}}
 
@@ -17,10 +20,10 @@
         <a href="/">Home</a> /
         <a href="/locations/">Locations</a> /
         {{#if city}}
-          <a href="/locations/{{state}}/">{{state}}</a> /
-          <span>{{city}}</span>
+        <a href="/locations/{{state}}/">{{state}}</a> /
+        <span>{{city}}</span>
         {{else}}
-          <span>{{state}}</span>
+        <span>{{state}}</span>
         {{/if}}
       </nav>
       <h1>Events in {{#if city}}{{city}}, {{/if}}{{state}}</h1>
@@ -29,7 +32,7 @@
       <div class="city-filter">
         <strong>Cities:</strong>
         {{#each cities}}
-          <a href="/locations/{{../state}}/{{this}}/" class="tag">{{this}}</a>
+        <a href="/locations/{{../state}}/{{this}}/" class="tag">{{this}}</a>
         {{/each}}
       </div>
       {{/if}}
@@ -42,4 +45,5 @@
 
   {{> footer}}
 </body>
+
 </html>

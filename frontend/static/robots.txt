@@ -1,0 +1,4 @@
+# next.dctech.events - Development/Staging Site
+# Do not index this site - production is at dctech.events
+User-agent: *
+Disallow: /
