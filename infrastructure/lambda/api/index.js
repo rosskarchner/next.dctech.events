@@ -3079,17 +3079,9 @@ ${urls.map(url => `  <url>
   return xml;
 };
 
-// Cognito login URL helper
-const cognitoLoginUrl = (redirectPath) => {
-  const domain = process.env.COGNITO_DOMAIN;
-  const region = process.env.USER_POOL_REGION || 'us-east-1';
-  const clientId = process.env.USER_POOL_CLIENT_ID;
-
-  // Construct full Cognito URL
-  const cognitoUrl = `https://${domain}.auth.${region}.amazoncognito.com`;
-  const redirectUri = encodeURIComponent(`https://next.dctech.events/callback`);
-
-  return `${cognitoUrl}/login?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&state=${encodeURIComponent(redirectPath)}`;
+// Custom login URL helper - redirects to branded auth page instead of Cognito Hosted UI
+const customLoginUrl = (redirectPath) => {
+  return `/auth.html?redirect=${encodeURIComponent(redirectPath)}`;
 };
 
 // Cognito logout URL helper
@@ -3118,7 +3110,7 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
   // Skip this check for: login, callback, profile setup itself, static assets, API routes
   const exemptPaths = [
     '/login', '/callback', '/profile/setup', '/api/',
-    '/static/', '/sitemap.xml', '/newsletter.html'
+    '/static/', '/sitemap.xml', '/newsletter.html', '/auth', '/auth.html'
   ];
   const isExemptPath = exemptPaths.some(p => path.startsWith(p) || path === p.replace('/', ''));
 
@@ -3188,25 +3180,41 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     return createResponse(200, html, true);
   }
 
-  // GET /login - Redirect to Cognito login
+  // GET /login - Redirect to custom auth page
   if ((path === '/login' || path === '/login/') && method === 'GET') {
     return {
       statusCode: 302,
-      headers: { 'Location': cognitoLoginUrl('/') },
+      headers: { 'Location': customLoginUrl('/') },
       body: '',
     };
   }
 
-  // GET /logout - Clear session and redirect to Cognito logout
+  // GET /auth or /auth.html - Branded sign in/sign up page
+  if ((path === '/auth' || path === '/auth.html') && method === 'GET') {
+    const html = renderTemplate('auth', {
+      cognitoUserPoolId: process.env.USER_POOL_ID,
+      cognitoClientId: process.env.USER_POOL_CLIENT_ID,
+      isAuthenticated: !!userId,
+    });
+    return createResponse(200, html, true);
+  }
+
+  // GET /logout - Client-side logout page that clears tokens
   if ((path === '/logout' || path === '/logout/') && method === 'GET') {
+    const html = renderTemplate('logout', {
+      cognitoUserPoolId: process.env.USER_POOL_ID,
+      cognitoClientId: process.env.USER_POOL_CLIENT_ID,
+      isAuthenticated: false,
+    });
+
+    // Set cookie expiry header along with the page
     return {
-      statusCode: 302,
+      statusCode: 200,
       headers: {
-        'Location': cognitoLogoutUrl(),
-        // Clear the auth cookie
+        'Content-Type': 'text/html; charset=utf-8',
         'Set-Cookie': 'idToken=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Secure; SameSite=Lax',
       },
-      body: '',
+      body: html,
     };
   }
 
@@ -3430,7 +3438,7 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     if (!userId) {
       return {
         statusCode: 302,
-        headers: { 'Location': cognitoLoginUrl('/admin/moderation') },
+        headers: { 'Location': customLoginUrl('/admin/moderation') },
         body: '',
       };
     }
@@ -3509,7 +3517,7 @@ const handleNextRequest = async (path, method, userId, isHtmx, event, parsedBody
     if (!userId) {
       return {
         statusCode: 302,
-        headers: { 'Location': cognitoLoginUrl('/my-feed') },
+        headers: { 'Location': customLoginUrl('/my-feed') },
         body: '',
       };
     }
@@ -3643,7 +3651,7 @@ Disallow: /
       return {
         statusCode: 302,
         headers: {
-          'Location': cognitoLoginUrl('/submit/'),
+          'Location': customLoginUrl('/submit/'),
         },
         body: '',
       };
@@ -3728,7 +3736,7 @@ Disallow: /
       return {
         statusCode: 302,
         headers: {
-          'Location': cognitoLoginUrl('/submit-group/'),
+          'Location': customLoginUrl('/submit-group/'),
         },
         body: '',
       };
@@ -3806,7 +3814,7 @@ Disallow: /
     if (!userId) {
       return {
         statusCode: 302,
-        headers: { 'Location': cognitoLoginUrl('/profile/setup') },
+        headers: { 'Location': customLoginUrl('/profile/setup') },
         body: '',
       };
     }
@@ -3852,7 +3860,7 @@ Disallow: /
     if (!userId) {
       return {
         statusCode: 302,
-        headers: { 'Location': cognitoLoginUrl('/settings') },
+        headers: { 'Location': customLoginUrl('/settings') },
         body: '',
       };
     }

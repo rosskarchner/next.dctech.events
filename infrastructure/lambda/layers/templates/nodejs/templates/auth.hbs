@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In - DC Tech Events</title>
+    <meta name="description"
+        content="Sign in to DC Tech Events to submit events, join groups, and connect with the local tech community.">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script
+        src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.7/dist/amazon-cognito-identity.min.js"></script>
+    <style>
+        .auth-container {
+            max-width: 400px;
+            margin: 60px auto;
+            padding: var(--spacing-xl);
+        }
+
+        .auth-card {
+            background: white;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: var(--spacing-xl);
+        }
+
+        .auth-card h1 {
+            margin-top: 0;
+            font-size: 1.5rem;
+            text-align: center;
+        }
+
+        .auth-card p {
+            color: var(--color-text-light);
+            text-align: center;
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .form-group {
+            margin-bottom: var(--spacing-md);
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: var(--spacing-xs);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px var(--spacing-sm);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: var(--spacing-xs);
+            color: var(--color-text-light);
+            font-size: 0.875rem;
+        }
+
+        .btn {
+            padding: 12px var(--spacing-lg);
+            border: none;
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .btn-primary {
+            background-color: var(--color-primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--color-primary-hover);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .message {
+            padding: var(--spacing-sm);
+            border-radius: var(--border-radius);
+            margin-bottom: var(--spacing-md);
+            text-align: center;
+        }
+
+        .message.error {
+            background-color: #fef2f2;
+            border: 1px solid #fca5a5;
+            color: #991b1b;
+        }
+
+        .message.success {
+            background-color: #f0fdf4;
+            border: 1px solid #86efac;
+            color: #166534;
+        }
+
+        .auth-tabs {
+            display: flex;
+            margin-bottom: var(--spacing-lg);
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .auth-tab {
+            flex: 1;
+            padding: var(--spacing-sm);
+            text-align: center;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--color-text-light);
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+        }
+
+        .auth-tab:hover {
+            color: var(--color-primary);
+        }
+
+        .auth-tab.active {
+            color: var(--color-primary);
+            border-bottom-color: var(--color-primary);
+        }
+
+        .auth-form {
+            display: none;
+        }
+
+        .auth-form.active {
+            display: block;
+        }
+
+        .form-footer {
+            margin-top: var(--spacing-lg);
+            text-align: center;
+            padding-top: var(--spacing-md);
+            border-top: 1px solid var(--color-border);
+        }
+
+        .form-footer a {
+            color: var(--color-primary);
+            text-decoration: none;
+        }
+
+        .form-footer a:hover {
+            text-decoration: underline;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    {{> header}}
+
+    <main class="container">
+        <div class="auth-container">
+            <div class="auth-card">
+                <div class="auth-tabs">
+                    <button class="auth-tab active" onclick="showTab('signin')">Sign In</button>
+                    <button class="auth-tab" onclick="showTab('signup')">Sign Up</button>
+                </div>
+
+                <!-- Sign In Form -->
+                <div id="signin-form" class="auth-form active">
+                    <div id="signin-message"></div>
+                    <form onsubmit="handleSignIn(event)">
+                        <div class="form-group">
+                            <label for="signin-email">Email</label>
+                            <input type="email" id="signin-email" required autocomplete="email">
+                        </div>
+                        <div class="form-group">
+                            <label for="signin-password">Password</label>
+                            <input type="password" id="signin-password" required autocomplete="current-password">
+                        </div>
+                        <button type="submit" id="signin-btn" class="btn btn-primary">Sign In</button>
+                    </form>
+                </div>
+
+                <!-- Sign Up Form -->
+                <div id="signup-form" class="auth-form">
+                    <div id="signup-message"></div>
+                    <form onsubmit="handleSignUp(event)">
+                        <div class="form-group">
+                            <label for="signup-email">Email</label>
+                            <input type="email" id="signup-email" required autocomplete="email">
+                        </div>
+                        <div class="form-group">
+                            <label for="signup-password">Password</label>
+                            <input type="password" id="signup-password" required minlength="8"
+                                autocomplete="new-password">
+                            <small>Minimum 8 characters, must include uppercase, lowercase, and number</small>
+                        </div>
+                        <button type="submit" id="signup-btn" class="btn btn-primary">Create Account</button>
+                    </form>
+                </div>
+
+                <!-- Verification Form (hidden initially) -->
+                <div id="verify-form" class="auth-form">
+                    <h2 style="margin-top: 0; text-align: center;">Verify Your Email</h2>
+                    <p>Please check your email for a verification code.</p>
+                    <div id="verify-message"></div>
+                    <form onsubmit="handleVerify(event)">
+                        <div class="form-group">
+                            <label for="verify-code">Verification Code</label>
+                            <input type="text" id="verify-code" required autocomplete="one-time-code" pattern="[0-9]{6}"
+                                maxlength="6">
+                        </div>
+                        <button type="submit" id="verify-btn" class="btn btn-primary">Verify Email</button>
+                    </form>
+                    <div class="form-footer">
+                        <a href="#" onclick="resendCode(event)">Resend verification code</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    {{> footer}}
+
+    <script>
+        // Cognito configuration
+        const poolData = {
+            UserPoolId: '{{cognitoUserPoolId}}',
+            ClientId: '{{cognitoClientId}}'
+        };
+        const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
+
+        // Get redirect URL from query params
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectUrl = urlParams.get('redirect') || '/';
+
+        let pendingEmail = '';
+
+        // Tab switching
+        function showTab(tab) {
+            document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+
+            if (tab === 'signin') {
+                document.querySelectorAll('.auth-tab')[0].classList.add('active');
+                document.getElementById('signin-form').classList.add('active');
+            } else if (tab === 'signup') {
+                document.querySelectorAll('.auth-tab')[1].classList.add('active');
+                document.getElementById('signup-form').classList.add('active');
+            }
+        }
+
+        function showMessage(elementId, message, isError = true) {
+            const el = document.getElementById(elementId);
+            el.innerHTML = `<div class="message ${isError ? 'error' : 'success'}">${message}</div>`;
+        }
+
+        function setLoading(btnId, isLoading, text = '') {
+            const btn = document.getElementById(btnId);
+            if (isLoading) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="loading-spinner"></span>' + text;
+            } else {
+                btn.disabled = false;
+                btn.textContent = text;
+            }
+        }
+
+        // Sign In
+        function handleSignIn(event) {
+            event.preventDefault();
+            const email = document.getElementById('signin-email').value;
+            const password = document.getElementById('signin-password').value;
+
+            setLoading('signin-btn', true, 'Signing in...');
+
+            const authDetails = new AmazonCognitoIdentity.AuthenticationDetails({
+                Username: email,
+                Password: password
+            });
+
+            const cognitoUser = new AmazonCognitoIdentity.CognitoUser({
+                Username: email,
+                Pool: userPool
+            });
+
+            cognitoUser.authenticateUser(authDetails, {
+                onSuccess: function (result) {
+                    showMessage('signin-message', 'Signed in successfully! Redirecting...', false);
+                    // Store the ID token in a cookie for server-side auth
+                    const idToken = result.getIdToken().getJwtToken();
+                    document.cookie = `idToken=${idToken}; path=/; secure; samesite=lax; max-age=3600`;
+                    setTimeout(() => {
+                        window.location.href = redirectUrl;
+                    }, 500);
+                },
+                onFailure: function (err) {
+                    setLoading('signin-btn', false, 'Sign In');
+                    showMessage('signin-message', err.message || 'Sign in failed');
+                },
+                newPasswordRequired: function (userAttributes, requiredAttributes) {
+                    // Handle new password requirement (for admin-created users)
+                    setLoading('signin-btn', false, 'Sign In');
+                    showMessage('signin-message', 'Please contact support to set up your password.');
+                }
+            });
+        }
+
+        // Sign Up
+        function handleSignUp(event) {
+            event.preventDefault();
+            const email = document.getElementById('signup-email').value;
+            const password = document.getElementById('signup-password').value;
+
+            setLoading('signup-btn', true, 'Creating account...');
+            pendingEmail = email;
+
+            const attributeList = [
+                new AmazonCognitoIdentity.CognitoUserAttribute({
+                    Name: 'email',
+                    Value: email
+                })
+            ];
+
+            userPool.signUp(email, password, attributeList, null, function (err, result) {
+                setLoading('signup-btn', false, 'Create Account');
+                if (err) {
+                    showMessage('signup-message', err.message || 'Sign up failed');
+                    return;
+                }
+
+                // Show verification form
+                showMessage('signup-message', 'Account created! Check your email for a verification code.', false);
+                setTimeout(() => {
+                    document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+                    document.getElementById('verify-form').classList.add('active');
+                    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+                }, 1500);
+            });
+        }
+
+        // Verify Email
+        function handleVerify(event) {
+            event.preventDefault();
+            const code = document.getElementById('verify-code').value;
+
+            setLoading('verify-btn', true, 'Verifying...');
+
+            const cognitoUser = new AmazonCognitoIdentity.CognitoUser({
+                Username: pendingEmail,
+                Pool: userPool
+            });
+
+            cognitoUser.confirmRegistration(code, true, function (err, result) {
+                setLoading('verify-btn', false, 'Verify Email');
+                if (err) {
+                    showMessage('verify-message', err.message || 'Verification failed');
+                    return;
+                }
+
+                showMessage('verify-message', 'Email verified! You can now sign in.', false);
+                setTimeout(() => {
+                    document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+                    document.getElementById('signin-form').classList.add('active');
+                    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.auth-tab')[0].classList.add('active');
+                    document.getElementById('signin-email').value = pendingEmail;
+                }, 1500);
+            });
+        }
+
+        // Resend verification code
+        function resendCode(event) {
+            event.preventDefault();
+
+            const cognitoUser = new AmazonCognitoIdentity.CognitoUser({
+                Username: pendingEmail,
+                Pool: userPool
+            });
+
+            cognitoUser.resendConfirmationCode(function (err, result) {
+                if (err) {
+                    showMessage('verify-message', err.message || 'Failed to resend code');
+                    return;
+                }
+                showMessage('verify-message', 'A new verification code has been sent to your email.', false);
+            });
+        }
+
+        // Check if already authenticated
+        const cognitoUser = userPool.getCurrentUser();
+        if (cognitoUser) {
+            cognitoUser.getSession(function (err, session) {
+                if (!err && session && session.isValid()) {
+                    // Already logged in, redirect
+                    window.location.href = redirectUrl;
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>
