@@ -161,13 +161,15 @@ class NextSiteGeneratorStack(cdk.Stack):
             )
         )
 
-        # 4-hour safety-net schedule aligned with the aggregator cadence
+        # Daily safety-net rebuild at 4 AM EST (09:00 UTC; 5 AM during EDT).
+        # Real content changes rebuild within ~90s via the streams trigger,
+        # so this only catches anything the trigger missed.
         events.Rule(
             self,
             "NextSiteBuildSchedule",
-            schedule=events.Schedule.rate(cdk.Duration.hours(4)),
+            schedule=events.Schedule.expression("cron(0 9 * * ? *)"),
             targets=[targets.CodeBuildProject(self.project)],
-            description="Safety-net rebuild of next.dctech.events every 4 hours",
+            description="Daily safety-net rebuild of next.dctech.events (4 AM EST)",
         )
 
         cdk.CfnOutput(self, "NextSiteGeneratorProject", value=self.project.project_name)
