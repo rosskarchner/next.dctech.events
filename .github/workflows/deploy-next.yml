@@ -1,0 +1,88 @@
+name: Deploy next.dctech.events
+
+# workflow_dispatch-only for now — this is an in-development parallel stack;
+# don't redeploy it on every unrelated push.
+on:
+  workflow_dispatch:
+    inputs:
+      run_site_build:
+        description: Trigger a CodeBuild site build after deploy
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  DEPLOY_ROLE_ARN: arn:aws:iam::797438674243:role/NextGithubActionsDeployRole
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # calgen is built from a sibling checkout by build_lambdas.sh
+      - uses: actions/checkout@v4
+        with:
+          repository: rosskarchner/calgen
+          path: .calgen-checkout
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: next-github-actions-deploy
+
+      - name: Point build at the calgen checkout
+        run: |
+          mkdir -p "$HOME/projects"
+          ln -s "$GITHUB_WORKSPACE/.calgen-checkout" "$HOME/projects/calgen"
+
+      - name: Build Lambda assets
+        run: |
+          cd cdk_next
+          uv venv .venv
+          uv pip install -p .venv/bin/python aws-cdk-lib constructs boto3 pyyaml
+          ./build_lambdas.sh
+
+      - name: CDK deploy (all stacks)
+        run: |
+          cd cdk_next
+          npx aws-cdk@latest deploy --all --require-approval never --concurrency 2
+
+      - name: SES setup (idempotent)
+        run: |
+          TOPIC_ARN=$(aws cloudformation describe-stacks --stack-name NextNewsletterStack \
+            --query "Stacks[0].Outputs[?OutputKey=='NextNewsletterFeedbackTopicArn'].OutputValue" --output text)
+          cdk_next/.venv/bin/python cdk_next/scripts/setup_ses_next.py --feedback-topic-arn "$TOPIC_ARN"
+
+      - name: Deploy templated edit UI
+        run: scripts/deploy_edit_ui.sh
+
+      - name: Site build (CodeBuild, trigger and wait)
+        if: ${{ inputs.run_site_build }}
+        run: |
+          BUILD_ID=$(aws codebuild start-build --project-name dctech-events-next-site-generator \
+            --query 'build.id' --output text)
+          echo "Started $BUILD_ID"
+          while true; do
+            STATUS=$(aws codebuild batch-get-builds --ids "$BUILD_ID" \
+              --query 'builds[0].buildStatus' --output text)
+            [ "$STATUS" != "IN_PROGRESS" ] && break
+            sleep 20
+          done
+          echo "Build finished: $STATUS"
+          [ "$STATUS" = "SUCCEEDED" ]

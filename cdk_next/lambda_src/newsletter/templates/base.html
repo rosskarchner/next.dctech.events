@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{% block title %}DC Tech Events Newsletter{% endblock %}</title>
+    <meta name="robots" content="noindex, nofollow">
+
+    <style>
+        .success-message {
+            color: #155724;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+        .error-message {
+            color: #721c24;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+    </style>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+</head>
+<body>
+    {% block content %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">My Submissions - DC Tech Events</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+</head>
+<body>
+    <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px;">
+      <div style="display:flex; align-items: center; gap: 2rem;">
+        <a href="index.html" class="nav-brand" id="nav-brand">DC Tech Events Edit</a>
+        <ul class="nav-links" data-auth="admin" class="hidden">
+          <li><a href="queue.html">Queue</a></li>
+        </ul>
+      </div>
+      <div class="nav-right">
+        <span data-auth="logged-in" class="hidden">
+          <span data-user="name"></span>
+          <button class="btn-sign-out" onclick="DctechAuth.logout()">Sign Out</button>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h2 id="page-h2">My Submissions</h2>
+    <p id="page-subtitle">Events and groups you have submitted.</p>
+
+    <div id="loading-indicator" class="htmx-indicator" style="text-align: center; padding: 2rem;">
+      <span class="spinner"></span> Loading your submissions...
+    </div>
+
+    <div id="submissions-list"></div>
+
+    <noscript>
+      <div class="message message-info">
+        <p>JavaScript is required to view your submissions.</p>
+      </div>
+    </noscript>
+  </main>
+
+  <script src="/edit/js/config.js"></script>
+  <script src="/edit/js/auth.js"></script>
+  <script src="/edit/js/my-submissions.js"></script>
+  <script>
+    function updateSiteBranding() {
+      const host = window.location.hostname;
+      const onStemSite = host === 'dc.localstem.events' || host === 'www.dc.localstem.events';
+      
+      if (onStemSite) {
+        document.getElementById('page-title').textContent = 'My Submissions - DC STEM Events';
+        document.getElementById('nav-brand').textContent = 'DC STEM Events Edit';
+        document.getElementById('page-h2').textContent = 'My Submissions';
+        document.getElementById('page-subtitle').textContent = 'Events and groups you have submitted.';
+      }
+    }
+    document.addEventListener('DOMContentLoaded', updateSiteBranding);
+    DctechMySubmissionsPage.init();
+  </script>
+</body>
+</html>

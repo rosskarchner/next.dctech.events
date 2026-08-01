@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">Submit an Event - DC Tech Events</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+  <link rel="stylesheet" href="/edit/css/front-suggest.css">
+  <style>
+    /* Override some front-suggest styles to work with unified header */
+    header { display: none; } /* We use the nav below instead */
+    .container { max-width: 800px; }
+    .nav-links.hidden { display: none !important; }
+    [data-auth].hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px; padding: 0.5rem 1rem;">
+      <div style="display:flex; align-items: center; gap: 2rem;">
+        <a href="index.html" class="nav-brand" id="nav-brand" style="font-weight: bold; text-decoration: none; color: inherit;">DC Tech Events Edit</a>
+        <ul class="nav-links" data-auth="admin" style="display:flex; list-style: none; gap: 1rem; margin: 0; padding: 0;">
+          <li><a href="queue.html">Queue</a></li>
+        </ul>
+      </div>
+      <div class="nav-right">
+        <span data-auth="logged-in" class="hidden">
+          <span data-user="name"></span>
+          <button class="btn-sign-out" onclick="DctechAuth.logout()" style="margin-left: 1rem; cursor: pointer;">Sign Out</button>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h2 id="page-h2">Submit events to DC Tech Events</h2>
+    <p id="page-subtitle">To submit an event, you'll need to sign in. Don't have an account? Just email the info to ross@karchner.com.</p>
+
+    <div id="auth-section">
+      <div class="auth-status" id="auth-status" data-auth="logged-out">
+        <p>Not signed in</p>
+        <button class="btn btn-primary" onclick="DctechAuth.login()">Sign In</button>
+      </div>
+    </div>
+
+    <div id="form-response" class="response-area"></div>
+
+    <form id="event-form" class="hidden" data-auth="logged-in">
+      <input type="hidden" name="type" value="event">
+      <input type="hidden" name="site" id="site-field" value="dctech">
+
+      <div class="event-section">
+        <h3>Event Details</h3>
+
+        <div class="form-group">
+          <label for="title">Event Title <span class="required">*</span></label>
+          <input type="text" id="title" name="title" required maxlength="200"
+                 placeholder="e.g., Python User Group Monthly Meetup">
+        </div>
+
+        <div class="form-group">
+          <label for="url">Event URL <span class="required">*</span></label>
+          <input type="url" id="url" name="url" required
+                 placeholder="https://example.com/event">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="date">Date <span class="required">*</span></label>
+            <input type="date" id="date" name="date" required>
+          </div>
+
+          <div class="form-group">
+            <label>Event Timing <span class="required">*</span></label>
+            <div class="timing-options">
+              <label class="timing-option">
+                <input type="radio" name="timing" value="specific" checked>
+                <span class="timing-label">Specific Time</span>
+                <div class="time-selector">
+                  <select id="time-hour" name="time_hour">
+                    <option value="">Hour</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                    <option value="9">9</option>
+                    <option value="10">10</option>
+                    <option value="11">11</option>
+                    <option value="12">12</option>
+                  </select>
+                  <select id="time-minute" name="time_minute">
+                    <option value="">Min</option>
+                    <option value="00">00</option>
+                    <option value="15">15</option>
+                    <option value="30">30</option>
+                    <option value="45">45</option>
+                  </select>
+                  <select id="time-ampm" name="time_ampm">
+                    <option value="">AM/PM</option>
+                    <option value="AM">AM</option>
+                    <option value="PM">PM</option>
+                  </select>
+                </div>
+              </label>
+
+              <label class="timing-option">
+                <input type="radio" name="timing" value="allday">
+                <span class="timing-label">All-Day Event</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="city">City <span class="required">*</span></label>
+            <input type="text" id="city" name="city" required maxlength="100"
+                   placeholder="e.g., Arlington" value="Washington">
+          </div>
+
+          <div class="form-group">
+            <label for="state">State <span class="required">*</span></label>
+            <select id="state" name="state" required>
+              <option value="DC" selected>DC</option>
+              <option value="MD">Maryland</option>
+              <option value="VA">Virginia</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="location">Location</label>
+          <input type="text" id="location" name="location"
+                 placeholder="e.g., WeWork White House, 1440 G St NW, Washington, DC">
+          <small>Physical address or "Online" for virtual events</small>
+        </div>
+
+        <div class="form-group">
+          <label>Categories</label>
+          <div id="category-checkboxes" class="checkbox-group">
+            <span class="loading">Loading categories...</span>
+          </div>
+        </div>
+
+        <details class="optional-details">
+          <summary>Optional Details</summary>
+          <div class="optional-fields">
+            <div class="form-group">
+              <label for="description">Description</label>
+              <textarea id="description" name="description"
+                        placeholder="Brief description of the event..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="end_date">End Date</label>
+              <input type="date" id="end_date" name="end_date">
+              <small>For multi-day events</small>
+            </div>
+
+            <div class="form-group">
+              <label for="cost">Cost</label>
+              <input type="text" id="cost" name="cost" maxlength="100"
+                     placeholder="e.g., Free, $10, $5-$15">
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" id="submit-btn" class="btn btn-primary">
+          <span class="htmx-indicator" id="submit-indicator"><span class="spinner"></span></span>
+          Submit Event
+        </button>
+      </div>
+    </form>
+  </main>
+
+  <script src="/edit/js/config.js"></script>
+  <script src="/edit/js/auth.js"></script>
+  <script src="/edit/js/submission.js"></script>
+  <script>
+    function updateSiteBranding() {
+      const host = window.location.hostname;
+      const onStemSite = host === 'dc.localstem.events' || host === 'www.dc.localstem.events';
+      
+      if (onStemSite) {
+        document.getElementById('page-title').textContent = 'Submit an Event - DC STEM Events';
+        document.getElementById('nav-brand').textContent = 'DC STEM Events Edit';
+        document.getElementById('page-h2').textContent = 'Submit events to DC STEM Events';
+        document.getElementById('page-subtitle').textContent = 'To submit an event, you\'ll need to sign in. Don\'t have an account? Just email the info to ross@karchner.com.';
+      }
+    }
+    document.addEventListener('DOMContentLoaded', updateSiteBranding);
+    DctechSubmissionPage.init();
+  </script>
+</body>
+</html>

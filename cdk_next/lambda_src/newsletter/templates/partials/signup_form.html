@@ -1,0 +1,7 @@
+<form id="signup-form" hx-post="{{ base_path }}/signup" hx-swap="outerHTML">
+    <input type="email" name="email" placeholder="Enter your email" required>
+    <input type="hidden" name="newsletters" value="dctech">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="temp_id" value="{{ temp_id }}">
+    <button type="submit">Subscribe</button>
+</form>

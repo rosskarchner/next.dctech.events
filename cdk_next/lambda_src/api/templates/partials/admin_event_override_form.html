@@ -1,0 +1,53 @@
+{% set current_title = override.title if override.title else event.title | default('') %}
+{% set current_location = override.location if override.location else event.location | default('') %}
+{% set current_cats = override.categories if override.categories else event.categories or [] %}
+<tr id="event-row-{{ guid }}">
+  <td colspan="6">
+    <p style="font-size:0.8rem;color:#888;margin:0 0 0.5rem;">
+      iCal-sourced event — saves an override (title, location, categories only).
+    </p>
+    <form hx-put="/admin/events/{{ guid }}"
+          hx-target="closest tr"
+          hx-swap="outerHTML"
+          style="padding: 0.5rem 0;">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.75rem;">
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:0.85rem;">
+          Title
+          <input type="text" name="title" value="{{ current_title }}" class="form-control form-control-sm">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:0.85rem;">
+          Location
+          <input type="text" name="location" value="{{ current_location }}" class="form-control form-control-sm">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:0.85rem;">
+          Duplicate of (GUID)
+          <input type="text" name="duplicate_of" value="{{ override.duplicate_of | default('') }}" class="form-control form-control-sm">
+        </label>
+        <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;cursor:pointer;margin-top:1.2rem;">
+          <input type="checkbox" name="hidden" value="true" {% if override.hidden %}checked{% endif %}>
+          Hidden
+        </label>
+      </div>
+      <fieldset style="border:1px solid #ddd;border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.75rem;">
+        <legend style="font-size:0.85rem;font-weight:600;padding:0 0.25rem;">Categories</legend>
+        <div style="display:flex;flex-wrap:wrap;gap:0.4rem 1rem;">
+          {% for slug in all_categories | sort %}
+          {% set cat = all_categories[slug] %}
+          <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" name="categories" value="{{ slug }}"
+              {% if slug in current_cats %}checked{% endif %}>
+            {{ cat.name or slug }}
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div style="display:flex;gap:0.5rem;">
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        <button type="button" class="btn btn-sm"
+          hx-get="/admin/events"
+          hx-target="#events-table"
+          hx-swap="innerHTML">Cancel</button>
+      </div>
+    </form>
+  </td>
+</tr>

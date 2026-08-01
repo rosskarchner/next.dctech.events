@@ -1,0 +1,19 @@
+# CDK / Python build artifacts
+cdk_next/build/
+cdk_next/cdk.out/
+cdk_next/.venv/
+__pycache__/
+*.pyc
+
+# calgen site build artifacts (never committed; site data lives in DynamoDB)
+site/_cache/
+site/_data/
+site/_groups/
+site/_categories/
+site/_single_events/
+site/_recurring_events/
+site/_overlay/
+site/build/
+
+node_modules/
+.DS_Store

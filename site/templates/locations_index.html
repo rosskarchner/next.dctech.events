@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Locations - {{ site_name }}{% endblock %}
+
+{% block content %}
+<div class="home-container">
+    <section class="events-section">
+        <h2>Events by Region</h2>
+        
+        <ul>
+            {% for loc in locations %}
+                <li>
+                    <a href="/locations/{{ loc.state }}/">
+                        {{ loc.name }}
+                    </a> ({{ loc.count }} events)
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+</div>
+{% endblock %}

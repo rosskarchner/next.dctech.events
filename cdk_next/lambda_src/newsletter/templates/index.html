@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>DC Tech Events Newsletter</h1>
+<p>Subscribe to stay updated on tech events in DC.</p>
+{% include "partials/signup_form.html" %}
+<div id="message"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+<script>
+// Fallback for non-HTMX browsers
+document.addEventListener('DOMContentLoaded', function() {
+    if (!window.htmx) {
+        const form = document.getElementById('signup-form');
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const email = form.email.value;
+            const newsletterValue = form.querySelector('input[name="newsletters"]')?.value;
+            const newsletters = newsletterValue ? [newsletterValue] : [];
+            const message = document.getElementById('message');
+
+            if (newsletters.length === 0) {
+                message.className = 'error-message';
+                message.textContent = 'No newsletter selected';
+                return;
+            }
+
+            fetch('{{ base_path }}/signup', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({email: email, newsletters: newsletters})
+            })
+            .then(response => response.json())
+            .then(data => {
+                message.className = data.error ? 'error-message' : 'success-message';
+                message.textContent = data.message || data.error;
+                if (!data.error) form.reset();
+            })
+            .catch(error => {
+                message.className = 'error-message';
+                message.textContent = 'An error occurred. Please try again.';
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

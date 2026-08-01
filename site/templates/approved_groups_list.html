@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Tech Groups in DC - DC Tech Events{% endblock %}
+
+{% block content %}
+<h1>Tech Groups in DC</h1>
+<div class="groups-container">
+<div class="suggest-group">
+    <p>Don't see your group?
+        <a href="https://github.com/rosskarchner/dctech.events/issues">Open an issue</a> or <a href="{{ add_events_link }}">suggest a group</a>.
+    </p>
+</div>
+
+    {% if groups %}
+    <ul>
+        {% for group in groups %}
+            <li class="group-card">
+                <a href="{{ group.website }}">{{ group.name }}</a>
+
+            </li>
+        {% endfor %}
+        
+        </ul>
+  
+    {% endif %}
+</div>
+
+
+{% endblock %}
+
+{% block extra_head %}
+<style>
+    .pagination-controls {
+        margin-top: 20px;
+        text-align: center;
+    }
+    
+    .load-more-btn {
+        display: inline-block;
+        padding: 10px 20px;
+        background-color: #0066cc;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        font-weight: bold;
+    }
+    
+    .load-more-btn:hover {
+        background-color: #0055aa;
+    }
+</style>
+{% endblock %}

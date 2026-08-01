@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Confirm your subscription to DC Tech Events Weekly</h1>
+<p>Please confirm that you want to receive the DC Tech Events Weekly newsletter at {{ email }}.</p>
+<form id="confirm-form" method="POST" action="{{ base_path }}/confirm">
+    <input type="hidden" name="email" value="{{ email }}">
+    <input type="hidden" name="timestamp" value="{{ timestamp }}">
+    <input type="hidden" name="signature" value="{{ signature }}">
+    <input type="hidden" name="newsletters" value="{{ newsletters }}">
+    <button type="submit">Yes! Sign me up!</button>
+</form>
+<p id="message"></p>
+{% endblock %}

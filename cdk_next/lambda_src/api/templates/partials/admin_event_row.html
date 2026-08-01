@@ -1,0 +1,53 @@
+<tr id="event-row-{{ event.guid }}" {% if event.hidden or event.duplicate_of %}style="opacity: 0.6;"{% endif %}>
+  <td class="col-check">
+    <input type="checkbox" name="guids" value="{{ event.guid }}" class="event-checkbox">
+  </td>
+  <td class="col-title">
+    <div style="font-weight: 600; margin-bottom: 0.25rem;">
+      {% if event.url %}<a href="{{ event.url }}" target="_blank">{{ event.title | default('Untitled') }}</a>
+      {% else %}{{ event.title | default('Untitled') }}{% endif %}
+    </div>
+    <div style="display:flex; flex-wrap:wrap; gap:4px;">
+      {% if event.hidden %}
+        <span class="badge badge-hidden">Hidden</span>
+      {% endif %}
+      {% if event.duplicate_of %}
+        <span class="badge badge-merged" title="Merged into: {{ event.duplicate_of }}">Merged</span>
+      {% endif %}
+      {% if event.categories %}
+        {% for cat in event.categories %}
+          <span class="badge badge-tag">{{ cat }}</span>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </td>
+  <td class="col-date">
+    <div style="font-weight: 500;">{{ event.date | default('') }}</div>
+    {% if event.end_date and event.end_date != event.date %}
+      <div style="font-size: 0.75rem; color: var(--color-text-muted);">to {{ event.end_date }}</div>
+    {% endif %}
+  </td>
+  <td class="col-time">
+    {% if event.time is mapping %}
+      {% for d, t in event.time.items() %}
+        <div style="font-size: 0.75rem; white-space: nowrap;">{{ d }}: {{ t }}</div>
+      {% endfor %}
+    {% else %}
+      {{ event.time | default('All day') }}
+    {% endif %}
+  </td>
+  <td class="col-loc">
+    <div style="font-size: 0.8rem;">
+      {{ event.location | default('') }}{% if not event.location %}{{ event.city | default('') }}{% if event.state %}, {{ event.state }}{% endif %}{% endif %}
+    </div>
+  </td>
+  <td class="col-src">
+    <span class="badge badge-tag" style="font-weight: 500;">{{ event.source | default('manual') }}</span>
+  </td>
+  <td class="col-actions">
+    <button class="btn btn-sm btn-outline"
+      hx-get="/admin/events/{{ event.guid }}/edit"
+      hx-target="closest tr"
+      hx-swap="outerHTML">Edit</button>
+  </td>
+</tr>

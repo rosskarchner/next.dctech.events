@@ -1,0 +1,712 @@
+"""
+DynamoDB CRUD operations for the next-stack config table (dctech-events-next).
+
+Forked nearly verbatim from dctech.events/backend/db.py, with the additions
+described in next-architecture-plan.md:
+  - table defaults to dctech-events-next
+  - EVENT items carry review_status (GSI5) and source may be ical/recurring
+  - RECURRING#{slug} entities for recurring-event definitions
+  - ICAL#{group_id} cache entities replacing calgen's _cache/ical files
+  - a generic put_event() used by migration, the iCal aggregator, and MCP
+"""
+
+import os
+import time
+import uuid
+from datetime import date as _date_type, datetime, timedelta, timezone as _tz
+from decimal import Decimal
+
+import boto3
+from boto3.dynamodb.conditions import Key, Attr
+
+CONFIG_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'dctech-events-next')
+
+REVIEW_STATUSES = (
+    'pending_qa', 'approved', 'flagged', 'pending_discovery_review', 'discovered',
+)
+
+_table = None
+
+
+def is_safe_url(url):
+    """
+    Check if a URL is safe to render in an href.
+    Only allows http:// and https:// schemes.
+    """
+    if not url:
+        return True  # Empty is fine
+    url = str(url).strip().lower()
+    return url.startswith('http://') or url.startswith('https://')
+
+
+def _normalize_draft_status(status):
+    """Normalize draft statuses for storage and querying."""
+    return str(status or '').strip().lower()
+
+
+def _get_table():
+    global _table
+    if _table is None:
+        dynamodb = boto3.resource('dynamodb')
+        _table = dynamodb.Table(CONFIG_TABLE_NAME)
+    return _table
+
+
+def _query_all(table, **kwargs):
+    response = table.query(**kwargs)
+    items = response.get('Items', [])
+    while 'LastEvaluatedKey' in response:
+        response = table.query(**kwargs, ExclusiveStartKey=response['LastEvaluatedKey'])
+        items.extend(response.get('Items', []))
+    return items
+
+
+def _scan_all(table, **kwargs):
+    response = table.scan(**kwargs)
+    items = response.get('Items', [])
+    while 'LastEvaluatedKey' in response:
+        kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
+        response = table.scan(**kwargs)
+        items.extend(response.get('Items', []))
+    return items
+
+
+def _to_plain(val):
+    if isinstance(val, Decimal):
+        return int(val) if val == int(val) else float(val)
+    if isinstance(val, list):
+        return [_to_plain(v) for v in val]
+    if isinstance(val, dict):
+        return {k: _to_plain(v) for k, v in val.items()}
+    return val
+
+
+def _from_plain(val):
+    """Convert floats to Decimal for DynamoDB storage."""
+    if isinstance(val, float):
+        return Decimal(str(val))
+    if isinstance(val, list):
+        return [_from_plain(v) for v in val]
+    if isinstance(val, dict):
+        return {k: _from_plain(v) for k, v in val.items()}
+    return val
+
+
+# ─── DRAFT operations ─────────────────────────────────────────────
+
+def create_draft(draft_type, data, submitter_email, submitter_id=None):
+    """Create a new DRAFT entity (pending submission)."""
+    table = _get_table()
+    draft_id = str(uuid.uuid4())[:8]
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    status = _normalize_draft_status('pending')
+
+    # Sanitize URLs if present
+    sanitized_data = data.copy()
+    for field in ['url', 'website', 'ical', 'ical_url', 'fallback_url']:
+        if field in sanitized_data and not is_safe_url(sanitized_data[field]):
+            sanitized_data[field] = ''
+
+    # We use sub (submitter_id) for indexing if available, otherwise email
+    user_id = submitter_id or submitter_email
+
+    item = {
+        'PK': f'DRAFT#{draft_id}',
+        'SK': 'META',
+        'GSI1PK': f'STATUS#{status}',
+        'GSI1SK': now,
+        'GSI3PK': f'USER#{user_id}',  # For querying by submitter
+        'GSI3SK': now,  # Sort by creation time
+        'draft_type': draft_type,
+        'submitter_email': submitter_email,
+        'submitter_id': submitter_id,
+        'created_at': now,
+        'status': status,
+        **{k: _from_plain(v) for k, v in sanitized_data.items() if v is not None},
+    }
+
+    table.put_item(Item=item)
+    return draft_id
+
+
+def get_drafts_by_status(status='pending'):
+    """Get all drafts with a given status."""
+    table = _get_table()
+    normalized_status = _normalize_draft_status(status)
+
+    items = _query_all(table, IndexName='GSI1', KeyConditionExpression=Key('GSI1PK').eq(f'STATUS#{normalized_status}'), ScanIndexForward=False)
+
+    return [_draft_item_to_dict(item) for item in items]
+
+
+def get_drafts_by_submitter(user_id):
+    """Get all drafts submitted by a specific user (by sub or email)."""
+    if not user_id:
+        return []
+    table = _get_table()
+
+    # Use GSI3 to efficiently query by user identifier
+    items = _query_all(table, IndexName='GSI3', KeyConditionExpression=Key('GSI3PK').eq(f'USER#{user_id}'), ScanIndexForward=False)
+
+    return [_draft_item_to_dict(item) for item in items]
+
+
+def get_draft(draft_id):
+    """Get a single draft by ID."""
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'DRAFT#{draft_id}', 'SK': 'META'})
+    item = response.get('Item')
+    return _draft_item_to_dict(item) if item else None
+
+
+def update_draft_status(draft_id, new_status, reviewer_email=None, commit_url=None):
+    """Update draft status (approve/reject)."""
+    table = _get_table()
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    normalized_status = _normalize_draft_status(new_status)
+
+    update_expr = 'SET #status = :status, GSI1PK = :gsi1pk, updated_at = :now'
+    expr_values = {
+        ':status': normalized_status,
+        ':gsi1pk': f'STATUS#{normalized_status}',
+        ':now': now,
+    }
+    expr_names = {'#status': 'status'}
+
+    if reviewer_email:
+        update_expr += ', reviewer_email = :reviewer'
+        expr_values[':reviewer'] = reviewer_email
+
+    if commit_url:
+        update_expr += ', commit_url = :commit_url'
+        expr_values[':commit_url'] = commit_url
+
+    table.update_item(
+        Key={'PK': f'DRAFT#{draft_id}', 'SK': 'META'},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues=expr_values,
+        ExpressionAttributeNames=expr_names,
+    )
+
+
+def _draft_item_to_dict(item):
+    """Convert a DynamoDB DRAFT item to a dict."""
+    draft_id = item['PK'].split('#', 1)[1]
+    result = {'id': draft_id}
+    for field in ['draft_type', 'status', 'submitter_email', 'reviewer_email',
+                  'created_at', 'updated_at', 'title', 'date', 'time',
+                  'location', 'url', 'cost', 'description', 'group_name',
+                  'name', 'website', 'ical', 'ical_url', 'categories',
+                  'commit_url']:
+        if field in item:
+            result[field] = _to_plain(item[field])
+    return result
+
+
+# ─── GROUP operations ──────────────────────────────────────────────
+
+def get_all_groups():
+    """Get all groups (active and inactive)."""
+    table = _get_table()
+    items = []
+
+    for active_flag in ['ACTIVE#1', 'ACTIVE#0']:
+        items += _query_all(table, IndexName='GSI1', KeyConditionExpression=Key('GSI1PK').eq(active_flag))
+
+    return [_group_item_to_dict(item) for item in items]
+
+
+def get_group(slug):
+    """Get a single group by slug."""
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'GROUP#{slug}', 'SK': 'META'})
+    item = response.get('Item')
+    return _group_item_to_dict(item) if item else None
+
+
+def put_group(slug, data):
+    """Create or update a GROUP entity."""
+    table = _get_table()
+    active = data.get('active', True)
+    name = data.get('name', '')
+
+    # Sanitize URLs
+    sanitized_data = data.copy()
+    for field in ['website', 'ical', 'fallback_url', 'url_override']:
+        if field in sanitized_data and not is_safe_url(sanitized_data[field]):
+            sanitized_data[field] = ''
+
+    item = {
+        'PK': f'GROUP#{slug}',
+        'SK': 'META',
+        'GSI1PK': f'ACTIVE#{1 if active else 0}',
+        'GSI1SK': f'NAME#{name}',
+        **{k: _from_plain(v) for k, v in sanitized_data.items() if v is not None},
+    }
+
+    categories = data.get('categories', [])
+    if categories:
+        item['GSI2PK'] = f'CATEGORY#{categories[0]}'
+        item['GSI2SK'] = f'GROUP#{slug}'
+
+    table.put_item(Item=item)
+
+
+def delete_group(slug):
+    """Delete a GROUP entity."""
+    table = _get_table()
+    table.delete_item(Key={'PK': f'GROUP#{slug}', 'SK': 'META'})
+
+
+def _group_item_to_dict(item):
+    """Convert a DynamoDB GROUP item to a dict."""
+    slug = item['PK'].split('#', 1)[1]
+    group = {'id': slug, 'name': item.get('name', ''), 'active': item.get('active', True)}
+    for field in ['website', 'ical', 'fallback_url', 'categories',
+                  'suppress_urls', 'suppress_guid', 'scan_for_metadata', 'url_override']:
+        if field in item:
+            group[field] = _to_plain(item[field])
+    return group
+
+
+# ─── EVENT operations ──────────────────────────────────────────────
+
+EVENT_FIELDS = ['title', 'date', 'time', 'end_date', 'end_time', 'location',
+                'url', 'cost', 'description', 'group', 'group_id',
+                'group_website', 'categories', 'city', 'state', 'all_day',
+                'location_type', 'slug', 'submitted_by', 'hidden',
+                'duplicate_of', 'overrides', 'review_status', 'createdAt']
+
+
+def put_event(guid, data, source='manual', review_status='approved', created_at=None):
+    """Create or replace an EVENT#{guid} entity with full GSI wiring.
+
+    Used by the migration script, the iCal aggregator, and MCP tools.
+    """
+    table = _get_table()
+    now = created_at or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    date_val = str(data.get('date', '') or '')
+    time_val = data.get('time') or '00:00'
+    if isinstance(time_val, dict):  # multi-day events can carry per-date times
+        time_val = next(iter(time_val.values()), '00:00') or '00:00'
+
+    item = {
+        'PK': f'EVENT#{guid}',
+        'SK': 'META',
+        'GSI1PK': f'DATE#{date_val}',
+        'GSI1SK': f'TIME#{time_val}',
+        'GSI3PK': f'CREATED#{now[:7]}',
+        'GSI3SK': now,
+        'source': source,
+        'status': 'ACTIVE',
+        'createdAt': now,
+        'review_status': review_status,
+        'GSI5PK': f'REVIEW#{review_status}',
+        'GSI5SK': f'{date_val}#{time_val}',
+    }
+    if date_val:
+        item['GSI4PK'] = 'EVT#ACTIVE'
+        item['GSI4SK'] = f'{date_val}#{time_val}' if time_val else date_val
+
+    for field in EVENT_FIELDS:
+        if field in data and data[field] is not None:
+            val = data[field]
+            if field == 'url' and not is_safe_url(val):
+                val = ''
+            item[field] = _from_plain(val)
+
+    table.put_item(Item=item)
+    return guid
+
+
+def get_events_by_date(date_prefix=None):
+    """Get events, optionally filtered by date prefix (e.g. '2026-02')."""
+    table = _get_table()
+
+    # GSI1PK stores full dates like DATE#2026-02-19, so we scan with a filter
+    # for prefix matching (begins_with is not supported on partition keys in queries)
+    scan_kwargs = {
+        'FilterExpression': Attr('PK').begins_with('EVENT#') & Attr('SK').eq('META'),
+    }
+    if date_prefix:
+        scan_kwargs['FilterExpression'] = (
+            Attr('GSI1PK').begins_with(f'DATE#{date_prefix}') & Attr('SK').eq('META')
+        )
+
+    items = _scan_all(table, **scan_kwargs)
+
+    return [_event_item_to_dict(item) for item in items]
+
+
+def _event_item_to_dict(item):
+    """Convert a DynamoDB EVENT item to a dict."""
+    guid = item['PK'].split('#', 1)[1]
+    event = {'guid': guid, 'id': guid}
+    for field in EVENT_FIELDS + ['status']:
+        if field in item:
+            event[field] = _to_plain(item[field])
+    return event
+
+
+def get_all_events(date_prefix=None, filter_type=None, include_past=False):
+    """Query config table for active events via GSI4, optionally filtered by YYYY-MM prefix."""
+    table = _get_table()
+
+    if date_prefix:
+        year, month = date_prefix.split('-')
+        start = f"{year}-{month}-01"
+        next_month = int(month) + 1
+        if next_month > 12:
+            end = f"{int(year) + 1}-01-01"
+        else:
+            end = f"{year}-{next_month:02d}-01"
+        kce = Key('GSI4PK').eq('EVT#ACTIVE') & Key('GSI4SK').between(start, end)
+    elif include_past:
+        kce = Key('GSI4PK').eq('EVT#ACTIVE')
+    else:
+        today = _date_type.today().isoformat()
+        kce = Key('GSI4PK').eq('EVT#ACTIVE') & Key('GSI4SK').gte(today)
+
+    items = _query_all(table, IndexName='GSI4', KeyConditionExpression=kce)
+
+    results = [_config_event_to_dict(item) for item in items]
+
+    if filter_type == 'uncategorized':
+        results = [e for e in results if not e.get('categories')]
+
+    return sorted(
+        results,
+        key=lambda x: (str(x.get('date', '') or ''), str(x.get('time', '') or '')),
+    )
+
+
+def _config_event_to_dict(item):
+    """Convert a config table EVENT item to a dict suitable for templates."""
+    guid = item['PK'].split('#', 1)[1]
+    event = {'guid': guid, 'eventId': guid}
+    for field in ['title', 'date', 'time', 'end_date', 'url',
+                  'location', 'cost', 'source', 'group', 'group_website',
+                  'group_id', 'categories', 'city', 'state', 'all_day',
+                  'hidden', 'duplicate_of', 'createdAt', 'review_status',
+                  'overrides', 'description', 'location_type', 'slug']:
+        if field in item:
+            event[field] = _to_plain(item[field])
+    return event
+
+
+def get_events_by_review_status(review_status, limit=None):
+    """Query GSI5 for events awaiting QA / discovery review."""
+    table = _get_table()
+    kwargs = {
+        'IndexName': 'GSI5',
+        'KeyConditionExpression': Key('GSI5PK').eq(f'REVIEW#{review_status}'),
+    }
+    if limit:
+        kwargs['Limit'] = limit
+    items = _query_all(table, **kwargs)
+    return [_event_item_to_dict(item) for item in items]
+
+
+def set_event_review_status(guid, review_status):
+    """Update an event's review_status and its GSI5 keys."""
+    event = get_event_from_config(guid)
+    if not event:
+        return None
+    table = _get_table()
+    date_val = str(event.get('date', '') or '')
+    time_val = event.get('time') or '00:00'
+    table.update_item(
+        Key={'PK': f'EVENT#{guid}', 'SK': 'META'},
+        UpdateExpression='SET review_status = :rs, GSI5PK = :pk, GSI5SK = :sk',
+        ExpressionAttributeValues={
+            ':rs': review_status,
+            ':pk': f'REVIEW#{review_status}',
+            ':sk': f'{date_val}#{time_val}',
+        },
+    )
+    return guid
+
+
+def get_materialized_event(guid):
+    """Get a single event from the config table by GUID."""
+    return get_event_from_config(guid)
+
+
+def get_event_from_config(guid):
+    """Get an EVENT#{guid} entity from the config table, or None if not found."""
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'EVENT#{guid}', 'SK': 'META'})
+    item = response.get('Item')
+    return _event_item_to_dict(item) if item else None
+
+
+def update_event(guid, data, overrides=None):
+    """Update an EVENT#{guid} entity in the config table with the given fields."""
+    table = _get_table()
+    date = data.get('date', '')
+    time_val = data.get('time', '00:00')
+
+    update_parts = ['GSI1PK = :gsi1pk', 'GSI1SK = :gsi1sk']
+    expr_values = {
+        ':gsi1pk': f'DATE#{date}',
+        ':gsi1sk': f'TIME#{time_val}',
+    }
+    expr_names = {}
+
+    updatable_fields = ['title', 'url', 'date', 'time', 'end_date', 'cost',
+                        'city', 'state', 'all_day', 'categories', 'location',
+                        'hidden', 'duplicate_of']
+    for field in updatable_fields:
+        if field in data and data[field] is not None:
+            val = data[field]
+            if field == 'url' and not is_safe_url(val):
+                val = ''
+
+            safe_key = f'#f_{field}'
+            expr_names[safe_key] = field
+            update_parts.append(f'{safe_key} = :{field}')
+            expr_values[f':{field}'] = _from_plain(val)
+
+    if overrides is not None:
+        expr_names['#f_overrides'] = 'overrides'
+        update_parts.append('#f_overrides = :overrides')
+        expr_values[':overrides'] = _from_plain(overrides)
+
+    update_expr = 'SET ' + ', '.join(update_parts)
+    kwargs = {
+        'Key': {'PK': f'EVENT#{guid}', 'SK': 'META'},
+        'UpdateExpression': update_expr,
+        'ExpressionAttributeValues': expr_values,
+    }
+    if expr_names:
+        kwargs['ExpressionAttributeNames'] = expr_names
+    table.update_item(**kwargs)
+
+
+def promote_draft_to_event(draft):
+    """Promote an approved event draft to an EVENT entity in the config table.
+
+    Unlike production, there is no git-commit hop — the Static Site Generator
+    reads DynamoDB directly, so writing the item is the whole promotion.
+    """
+    guid = draft['id']
+    data = {k: draft.get(k) for k in
+            ['title', 'url', 'date', 'time', 'end_date', 'cost', 'city',
+             'state', 'all_day', 'categories', 'location', 'description']
+            if draft.get(k) is not None}
+    data['submitted_by'] = draft.get('submitter_email', '')
+    put_event(guid, data, source='submitted', review_status='approved')
+    return guid
+
+
+def bulk_delete_events(guids, actor_email):
+    """Hide multiple events (manual/submitted records only)."""
+    for guid in guids:
+        manual = get_event_from_config(guid)
+        if manual:
+            update_event(guid, {'hidden': True})
+
+
+def bulk_hard_delete_events(guids, actor_email):
+    """Permanently delete multiple events (manual/submitted records only)."""
+    table = _get_table()
+    for guid in guids:
+        table.delete_item(Key={'PK': f'EVENT#{guid}', 'SK': 'META'})
+
+
+def delete_event(guid):
+    """Permanently delete a single event."""
+    table = _get_table()
+    table.delete_item(Key={'PK': f'EVENT#{guid}', 'SK': 'META'})
+
+
+def bulk_set_category(guids, category_slug, actor_email):
+    """Add a category to multiple events (manual/submitted records only)."""
+    for guid in guids:
+        event = get_event_from_config(guid)
+        if event:
+            cats = list(event.get('categories', []))
+            if category_slug not in cats:
+                cats.append(category_slug)
+                update_event(guid, {'categories': cats})
+
+
+def bulk_combine_events(guids, target_guid, actor_email):
+    """Mark multiple events as duplicates of a target event (manual/submitted records only)."""
+    if target_guid in guids:
+        guids = [g for g in guids if g != target_guid]
+
+    for guid in guids:
+        manual = get_event_from_config(guid)
+        if manual:
+            update_event(guid, {'duplicate_of': target_guid})
+
+
+# ─── RECURRING EVENT operations ───────────────────────────────────
+
+def put_recurring_event(slug, data):
+    """Create or update a RECURRING#{slug} entity (rrule-based definition)."""
+    table = _get_table()
+    item = {
+        'PK': f'RECURRING#{slug}',
+        'SK': 'META',
+        'GSI1PK': 'RECURRING',
+        'GSI1SK': slug,
+        **{k: _from_plain(v) for k, v in data.items() if v is not None},
+    }
+    if 'url' in item and not is_safe_url(item.get('url')):
+        item['url'] = ''
+    table.put_item(Item=item)
+    return slug
+
+
+def get_recurring_event(slug):
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'RECURRING#{slug}', 'SK': 'META'})
+    item = response.get('Item')
+    return _recurring_item_to_dict(item) if item else None
+
+
+def get_all_recurring_events():
+    table = _get_table()
+    items = _query_all(table, IndexName='GSI1',
+                       KeyConditionExpression=Key('GSI1PK').eq('RECURRING'))
+    return [_recurring_item_to_dict(item) for item in items]
+
+
+def delete_recurring_event(slug):
+    table = _get_table()
+    table.delete_item(Key={'PK': f'RECURRING#{slug}', 'SK': 'META'})
+
+
+def _recurring_item_to_dict(item):
+    slug = item['PK'].split('#', 1)[1]
+    result = {'id': slug}
+    for k, v in item.items():
+        if k in ('PK', 'SK') or k.startswith('GSI'):
+            continue
+        result[k] = _to_plain(v)
+    return result
+
+
+# ─── ICAL CACHE operations ────────────────────────────────────────
+# Replaces calgen's filesystem _cache/ical/{group_id}.json + .meta files.
+
+ICAL_CACHE_TTL_DAYS = 30
+
+
+def put_ical_cache(group_id, events, meta=None):
+    """Store fetched iCal events + fetch metadata for a group."""
+    table = _get_table()
+    now = datetime.now(_tz.utc)
+    item = {
+        'PK': f'ICAL#{group_id}',
+        'SK': 'META',
+        'events': _from_plain(events),
+        'meta': _from_plain(meta or {}),
+        'updated_at': now.isoformat(),
+        'ttl': int((now + timedelta(days=ICAL_CACHE_TTL_DAYS)).timestamp()),
+    }
+    table.put_item(Item=item)
+
+
+def get_ical_cache(group_id):
+    """Return {'events': [...], 'meta': {...}} for a group, or None."""
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'ICAL#{group_id}', 'SK': 'META'})
+    item = response.get('Item')
+    if not item:
+        return None
+    return {
+        'group_id': group_id,
+        'events': _to_plain(item.get('events', [])),
+        'meta': _to_plain(item.get('meta', {})),
+        'updated_at': item.get('updated_at'),
+    }
+
+
+def get_all_ical_caches():
+    """Scan all ICAL# cache items (used by the site-generator export)."""
+    table = _get_table()
+    items = _scan_all(
+        table,
+        FilterExpression=Attr('PK').begins_with('ICAL#') & Attr('SK').eq('META'),
+    )
+    return [{
+        'group_id': item['PK'].split('#', 1)[1],
+        'events': _to_plain(item.get('events', [])),
+        'meta': _to_plain(item.get('meta', {})),
+        'updated_at': item.get('updated_at'),
+    } for item in items]
+
+
+# ─── CANDIDATE operations (Discovery agent scaffold) ──────────────
+
+def put_candidate(candidate_hash, data):
+    """Store a discovered-event candidate (never pollutes real EVENT# records)."""
+    table = _get_table()
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    item = {
+        'PK': f'CANDIDATE#{candidate_hash}',
+        'SK': 'META',
+        'GSI5PK': 'REVIEW#pending_discovery_review',
+        'GSI5SK': now,
+        'created_at': now,
+        **{k: _from_plain(v) for k, v in data.items() if v is not None},
+    }
+    table.put_item(Item=item)
+    return candidate_hash
+
+
+def get_candidates():
+    table = _get_table()
+    items = _query_all(
+        table, IndexName='GSI5',
+        KeyConditionExpression=Key('GSI5PK').eq('REVIEW#pending_discovery_review'))
+    results = []
+    for item in items:
+        if not item['PK'].startswith('CANDIDATE#'):
+            continue
+        result = {'id': item['PK'].split('#', 1)[1]}
+        for k, v in item.items():
+            if k in ('PK', 'SK') or k.startswith('GSI'):
+                continue
+            result[k] = _to_plain(v)
+        results.append(result)
+    return results
+
+
+# ─── CATEGORY operations ──────────────────────────────────────────
+
+def get_all_categories():
+    """Get all categories."""
+    table = _get_table()
+
+    items = _scan_all(table, FilterExpression=Attr('PK').begins_with('CATEGORY#') & Attr('SK').eq('META'))
+
+    categories = {}
+    for item in items:
+        slug = item['PK'].split('#', 1)[1]
+        categories[slug] = {
+            'slug': slug,
+            'name': item.get('name', ''),
+            'description': item.get('description', ''),
+        }
+    return categories
+
+
+def put_category(slug, data):
+    """Create or update a CATEGORY entity."""
+    table = _get_table()
+    item = {
+        'PK': f'CATEGORY#{slug}',
+        'SK': 'META',
+        **{k: _from_plain(v) for k, v in data.items() if v is not None},
+    }
+    table.put_item(Item=item)
+
+
+def delete_category(slug):
+    """Delete a CATEGORY entity."""
+    table = _get_table()
+    table.delete_item(Key={'PK': f'CATEGORY#{slug}', 'SK': 'META'})

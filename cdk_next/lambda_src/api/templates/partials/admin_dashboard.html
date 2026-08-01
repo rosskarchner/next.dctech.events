@@ -1,0 +1,19 @@
+<div class="admin-dashboard">
+  <h2>Admin Dashboard</h2>
+  <p>Welcome, {{ user_email }}</p>
+  <div class="stats">
+    <div class="stat-card">
+      <span class="stat-number">{{ pending_count }}</span>
+      <span class="stat-label">Pending Submissions</span>
+      <a href="/queue.html">Review Queue</a>
+    </div>
+    <div class="stat-card">
+      <span class="stat-number">{{ groups_count }}</span>
+      <span class="stat-label">Groups</span>
+      <a href="/groups.html">Manage Groups</a>
+    </div>
+    <div class="stat-card">
+      <a href="/overrides.html">Manage Overrides</a>
+    </div>
+  </div>
+</div>

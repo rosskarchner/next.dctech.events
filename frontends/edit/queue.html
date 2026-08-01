@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">Pending Submissions - DC Tech Events Admin</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+  <script src="/edit/js/config.js"></script>
+  <script src="/edit/js/auth.js"></script>
+</head>
+<body>
+    <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px;">
+      <div style="display:flex; align-items: center; gap: 2rem;">
+        <a href="index.html" class="nav-brand" id="nav-brand">DC Tech Events Edit</a>
+        <ul class="nav-links" data-auth="admin">
+          <li><a href="queue.html">Queue</a></li>
+        </ul>
+      </div>
+      <div class="nav-right">
+        <span data-auth="logged-in" class="hidden">
+          <span data-user="name"></span>
+          <button class="btn-sign-out" onclick="DctechAuth.logout()">Sign Out</button>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div class="page-header flex justify-between items-center">
+      <div>
+        <h1>Pending Submissions</h1>
+        <p>Review and approve or reject user-submitted events.</p>
+      </div>
+      <button class="btn btn-outline" id="queue-refresh">
+        Refresh
+      </button>
+    </div>
+
+    <div class="card">
+      <div id="queue-loading" class="htmx-indicator">
+        <span class="spinner"></span> Loading queue...
+      </div>
+
+      <div id="queue-list"></div>
+    </div>
+  </main>
+
+  <script src="/edit/js/queue.js"></script>
+  <script>
+    function updateSiteBranding() {
+      const host = window.location.hostname;
+      const onStemSite = host === 'dc.localstem.events' || host === 'www.dc.localstem.events';
+      
+      if (onStemSite) {
+        document.getElementById('page-title').textContent = 'Pending Submissions - DC STEM Events Admin';
+        document.getElementById('nav-brand').textContent = 'DC STEM Events Edit';
+      }
+    }
+    document.addEventListener('DOMContentLoaded', updateSiteBranding);
+    DctechQueuePage.init();
+  </script>
+</body>
+</html>
