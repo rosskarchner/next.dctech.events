@@ -274,7 +274,7 @@ def _group_item_to_dict(item):
 EVENT_FIELDS = ['title', 'date', 'time', 'end_date', 'end_time', 'location',
                 'url', 'cost', 'description', 'group', 'group_id',
                 'group_website', 'categories', 'city', 'state', 'all_day',
-                'location_type', 'slug', 'submitted_by', 'hidden',
+                'location_type', 'slug', 'submitted_by', 'source', 'hidden',
                 'duplicate_of', 'overrides', 'review_status', 'createdAt']
 
 
@@ -309,6 +309,8 @@ def put_event(guid, data, source='manual', review_status='approved', created_at=
         item['GSI4SK'] = f'{date_val}#{time_val}' if time_val else date_val
 
     for field in EVENT_FIELDS:
+        if field == 'source':
+            continue  # the `source` parameter is authoritative, set above
         if field in data and data[field] is not None:
             val = data[field]
             if field == 'url' and not is_safe_url(val):

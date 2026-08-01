@@ -72,6 +72,9 @@ def _persist_jsonld_cache():
                 continue
     import time as _time
     table = db._get_table()
+    current = table.get_item(Key=JSONLD_CACHE_KEY).get('Item')
+    if current and db._to_plain(current.get('entries', {})) == entries:
+        return  # unchanged — skip the (large) rewrite
     table.put_item(Item={
         **JSONLD_CACHE_KEY,
         'entries': db._from_plain(entries),
@@ -87,7 +90,19 @@ def _persist_group(group, events):
     if os.path.exists(meta_file):
         with open(meta_file) as f:
             meta = json.load(f)
-    db.put_ical_cache(gid, events, meta)
+
+    # Compare before writing: every DynamoDB put emits a stream record even
+    # when the item is unchanged, and the site-build trigger listens for
+    # ICAL#/EVENT# records — so a quiet feed must produce zero writes or
+    # every aggregator run forces a no-op rebuild. Skipping the cache write
+    # also skips persisting fresh fetch meta (etag/last_fetch), which only
+    # means the next run re-fetches — the run cadence already matches
+    # calgen's 4-hour throttle, so nothing is lost.
+    writes = 0
+    existing_cache = db.get_ical_cache(gid)
+    if existing_cache is None or existing_cache.get('events') != events:
+        db.put_ical_cache(gid, events, meta)
+        writes += 1
 
     today = date_type.today().isoformat()
     suppress = group.get('suppress_urls') or []
@@ -114,10 +129,14 @@ def _persist_group(group, events):
             for keep in ('overrides', 'hidden', 'duplicate_of', 'review_status'):
                 if existing.get(keep) is not None:
                     data.setdefault(keep, existing[keep])
+            if (existing.get('source') == 'ical'
+                    and all(existing.get(k) == v for k, v in data.items())):
+                continue  # identical item — don't rewrite, don't wake the trigger
         db.put_event(guid, data, source='ical',
                      review_status=data.get('review_status', 'approved'),
                      created_at=(existing or {}).get('createdAt'))
-    return fresh_guids
+        writes += 1
+    return fresh_guids, writes
 
 
 def _prune_stale_ical_events(processed_group_ids, fresh_guids):
@@ -147,6 +166,7 @@ def lambda_handler(event, context):
 
     processed = set()
     all_fresh = set()
+    total_writes = 0
     errors = []
     for group in groups:
         if context and context.get_remaining_time_in_millis() < 60_000:
@@ -156,7 +176,9 @@ def lambda_handler(event, context):
             events = fetch_ical_and_extract_events(group['ical'], group['id'], group)
             if events is None:
                 continue  # fetch failed with no cache — nothing to persist
-            all_fresh |= _persist_group(group, events)
+            fresh, writes = _persist_group(group, events)
+            all_fresh |= fresh
+            total_writes += writes
             processed.add(group['id'])
         except Exception as e:
             errors.append(f"{group['id']}: {e}")
@@ -171,7 +193,8 @@ def lambda_handler(event, context):
 
     result = {
         'groups_processed': len(processed),
-        'events_persisted': len(all_fresh),
+        'events_fresh': len(all_fresh),
+        'items_written': total_writes,
         'stale_pruned': pruned,
         'errors': errors[:20],
     }
