@@ -2,6 +2,8 @@
 cdk_next/build/
 cdk_next/cdk.out/
 cdk_next/.venv/
+packages/calgen/dist/
+*.egg-info/
 __pycache__/
 *.pyc
 

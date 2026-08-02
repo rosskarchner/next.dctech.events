@@ -24,12 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # calgen is built from a sibling checkout by build_lambdas.sh
-      - uses: actions/checkout@v4
-        with:
-          repository: rosskarchner/calgen
-          path: .calgen-checkout
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -45,11 +39,6 @@ jobs:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: next-github-actions-deploy
-
-      - name: Point build at the calgen checkout
-        run: |
-          mkdir -p "$HOME/projects"
-          ln -s "$GITHUB_WORKSPACE/.calgen-checkout" "$HOME/projects/calgen"
 
       - name: Build Lambda assets
         run: |

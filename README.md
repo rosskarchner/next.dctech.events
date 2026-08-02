@@ -9,6 +9,14 @@ behind it.
 
 ## Layout
 
+This is a monorepo: calgen (the static site generator) lives here rather than
+being installed from a separate repo, so a single checkout builds everything.
+
+- `packages/calgen/` — the calgen SSG, vendored from
+  `github.com/rosskarchner/calgen`. Lambda bundles and the CodeBuild wheel are
+  built from this path. Its rendering logic is used as-is by the site
+  generator, the iCal aggregator, and the newsletter renderer — only the data
+  source (DynamoDB instead of git YAML) differs.
 - `cdk_next/` — Python CDK app (nine `Next*` stacks, fully decoupled from the
   production TypeScript CDK app; existing resources referenced by literal
   ID/ARN only)
@@ -32,7 +40,7 @@ behind it.
 ```sh
 cd cdk_next
 uv venv .venv && uv pip install -p .venv/bin/python aws-cdk-lib constructs boto3 pyyaml
-./build_lambdas.sh          # requires a calgen checkout at ~/projects/calgen
+./build_lambdas.sh          # builds calgen from packages/calgen
 npx aws-cdk@latest deploy --all --require-approval never
 .venv/bin/python scripts/setup_ses_next.py --feedback-topic-arn <NextNewsletterFeedbackTopicArn>
 ../scripts/deploy_edit_ui.sh

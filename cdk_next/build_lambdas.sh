@@ -6,6 +6,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# calgen lives in this repo (packages/calgen) — no external checkout needed.
+CALGEN="$(cd ../packages/calgen && pwd)"
+
 PY_VERSION=3.12
 PLATFORM=x86_64-manylinux_2_17
 UV_ARGS=(--python-platform "$PLATFORM" --python-version "$PY_VERSION" --link-mode=copy --only-binary python-crfsuite --only-binary pydantic-core --only-binary regex)
@@ -29,9 +32,9 @@ if [ -d lambda_src/ical_aggregator ] && [ -e lambda_src/ical_aggregator/handler.
   mkdir -p build/ical_aggregator
   cp -r lambda_src/ical_aggregator/. build/ical_aggregator/
   cp lambda_src/api/db.py lambda_src/api/event_utils.py build/ical_aggregator/
-  # calgen imported directly (no fork) + its runtime deps
+  # calgen imported directly (never forked) + its runtime deps
   uv pip install "${UV_ARGS[@]}" --target build/ical_aggregator \
-    "$HOME/projects/calgen" requests icalendar pytz recurring-ical-events \
+    "$CALGEN" requests icalendar pytz recurring-ical-events \
     beautifulsoup4 pyyaml python-dateutil dateparser usaddress
 fi
 
@@ -43,7 +46,7 @@ if [ -d lambda_src/newsletter ] && [ -e lambda_src/newsletter/app.py ]; then
   # render.py rebuilds the calgen site in /tmp from DynamoDB
   cp lambda_src/site_generator/export_dynamo_to_calgen.py build/newsletter/
   cp -r ../site build/newsletter/site
-  uv pip install "${UV_ARGS[@]}" --target build/newsletter "$HOME/projects/calgen"
+  uv pip install "${UV_ARGS[@]}" --target build/newsletter "$CALGEN"
 fi
 
 # ── qa_agent / discovery_agent (stub scaffolds, no deps) ────────────
@@ -65,6 +68,6 @@ fi
 mkdir -p build/site_src/wheels
 cp -r ../site build/site_src/site
 cp lambda_src/site_generator/export_dynamo_to_calgen.py build/site_src/
-uv build --quiet --wheel "$HOME/projects/calgen" --out-dir build/site_src/wheels
+uv build --quiet --wheel "$CALGEN" --out-dir build/site_src/wheels
 
 echo "Lambda assets built under cdk_next/build/"
