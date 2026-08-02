@@ -60,6 +60,25 @@ def are_events_duplicates(e1, e2):
             e1.get('time') == e2.get('time'))
 
 
+def _credit_duplicate(parent, event):
+    """Record who else published this event, if they are actually named.
+
+    Manual and recurring events carry no group, so crediting them rendered
+    a literal "Also published by None" on the site. A group-less duplicate
+    still gets merged away — it just contributes no attribution.
+    """
+    group = event.get('group')
+    if not group:
+        return
+    credits = parent.setdefault('also_published_by', [])
+    if any(c.get('group') == group for c in credits):
+        return
+    credits.append({
+        'group': group,
+        'group_website': event.get('group_website'),
+    })
+
+
 def remove_duplicates(events):
     guid_index = {}
     for i, e in enumerate(events):
@@ -74,10 +93,7 @@ def remove_duplicates(events):
         dup_of = event.get('duplicate_of')
         if dup_of and dup_of in guid_index:
             parent = events[guid_index[dup_of]]
-            parent.setdefault('also_published_by', []).append({
-                'group': event.get('group'),
-                'group_website': event.get('group_website'),
-            })
+            _credit_duplicate(parent, event)
             explicit_children.add(i)
 
     for i, event in enumerate(events):
@@ -86,10 +102,7 @@ def remove_duplicates(events):
         duplicate_found = False
         for j in range(len(result)):
             if are_events_duplicates(result[j], event):
-                result[j].setdefault('also_published_by', []).append({
-                    'group': event.get('group'),
-                    'group_website': event.get('group_website'),
-                })
+                _credit_duplicate(result[j], event)
                 duplicate_found = True
                 break
         if not duplicate_found:
