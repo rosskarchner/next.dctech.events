@@ -135,24 +135,30 @@ class NextHostingStack(cdk.Stack):
                 comment=f"IPv6 record for {domain} pointing to CloudFront",
             )
 
-        # Serve the newsletter signup/confirm app under /newsletter* from the
+        # Serve the newsletter signup/confirm app under /newsletter from the
         # same origin as the site, so the homepage's HTMX "Subscribe today"
         # swap and the emailed confirmation links both use dctech.events.
         # No directory-index function here — these are API paths, not objects.
-        self.distribution.add_behavior(
-            "/newsletter*",
-            origins.HttpOrigin(
-                f"{newsletter_api.rest_api_id}.execute-api.{self.region}.amazonaws.com",
-                origin_path=f"/{newsletter_api.deployment_stage.stage_name}",
-                protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
-            ),
-            viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-            allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
-            cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
-            # Forwards everything except Host — API Gateway must see its own
-            # hostname or it can't match the request to a stage.
-            origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        #
+        # Deliberately two exact-ish patterns rather than "/newsletter*": the
+        # wildcard form also captures calgen's generated /newsletter.html and
+        # /newsletter.txt, which must keep coming from S3.
+        newsletter_origin = origins.HttpOrigin(
+            f"{newsletter_api.rest_api_id}.execute-api.{self.region}.amazonaws.com",
+            origin_path=f"/{newsletter_api.deployment_stage.stage_name}",
+            protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
         )
+        for pattern in ("/newsletter", "/newsletter/*"):
+            self.distribution.add_behavior(
+                pattern,
+                newsletter_origin,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                # Forwards everything except Host — API Gateway must see its
+                # own hostname or it can't match the request to a stage.
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            )
 
         cdk.CfnOutput(self, "NextSiteBucketName", value=self.bucket.bucket_name)
         cdk.CfnOutput(self, "NextDistributionId", value=self.distribution.distribution_id)
