@@ -1,7 +1,9 @@
-# next.dctech.events
+# dctech.events
 
-Parallel Python CDK stack for [dctech.events](https://dctech.events), live at
-**https://next.dctech.events**. DynamoDB is the hub: the submission UI, four
+Python CDK stack serving **https://dctech.events** (and `www`). Built as a
+parallel stack at `next.dctech.events`, it took over the main domain at
+cutover; the repo keeps its original name. DynamoDB is the hub: the
+submission UI, four
 agents (iCal aggregator, QA, discovery, newsletter sender), and the static
 site generator all read/write the `dctech-events-next` table. See
 `next-architecture-plan.md` for the full design and the scope decisions
@@ -47,16 +49,21 @@ npx aws-cdk@latest deploy --all --require-approval never
 aws codebuild start-build --project-name dctech-events-next-site-generator
 ```
 
-## Shared vs. isolated
+## Shared with the older stack
 
-Shared with production (account-level singletons, referenced read-only or
-additively): Cognito user pool `us-east-1_8Ay4dTt8j` (+ hosted UI
-`login.dctech.events`; this stack has its own app client), Route53 zone
-`dctech.events`, SES domain identity, GitHub OIDC provider, and — because SES
-allows exactly one contact list per account — the `newsletters` contact list
-(this stack isolates via its own topic `dctech-next`, template, and
-configuration set).
+The previous TypeScript CDK app (in the `dctech.events` repo) still owns some
+account-level resources this stack references read-only or additively:
+Cognito user pool `us-east-1_8Ay4dTt8j` (+ hosted UI `login.dctech.events`;
+this stack has its own app client), Route53 zone `dctech.events`, the SES
+domain identity and its `newsletters` contact list — SES allows exactly one
+per account — plus the GitHub OIDC provider. Newsletter subscribers live on
+that list's long-standing `dctech` topic, so they carried over at cutover.
 
-Isolated: DynamoDB table `dctech-events-next`, S3/CloudFront, ACM cert, API
-Gateways, KMS HMAC key, CSRF secret, SNS feedback topic, CodeBuild project,
-all Lambdas/schedules/roles.
+Owned by this stack: DynamoDB table `dctech-events-next`, S3/CloudFront, ACM
+cert, API Gateways, KMS HMAC key, CSRF secret, SES template/configuration
+set, SNS feedback topic, CodeBuild project, all Lambdas/schedules/roles.
+
+The old site is still built and published to GitHub Pages by the other repo,
+but nothing points at it: its weekly newsletter schedule
+(`dctech-newsletter-dev-scheduled_newsletter-event`) was disabled at cutover
+to avoid double-sending to the shared subscriber list.

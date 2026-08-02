@@ -20,11 +20,13 @@ from botocore.exceptions import ClientError
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# SES allows exactly ONE contact list per account, and production already
-# owns it ('newsletters'). Like the shared Cognito pool, we share that
-# account-level singleton and isolate via our own topic instead.
+# SES allows exactly ONE contact list per account. We use the long-standing
+# list and topic so existing subscribers carry over; only the template and
+# configuration set below belong to this stack.
 CONTACT_LIST_NAME = 'newsletters'
-TOPIC_NAME = 'dctech-next'
+TOPIC_NAME = 'dctech'
+# Topic created for the parallel next.dctech.events build, retired at cutover.
+RETIRED_TOPIC_NAME = 'dctech-next'
 TEMPLATE_NAME = 'dctech-events-next-newsletter'
 CONFIGURATION_SET_NAME = 'dctech-events-next'
 
@@ -51,26 +53,30 @@ class SESSetup:
             raise
 
     def setup_contact_list(self):
-        """Add the dctech-next topic to the shared contact list, preserving
-        every existing topic and the list's description untouched."""
-        new_topic = {
-            'TopicName': TOPIC_NAME,
-            'DisplayName': 'DC Tech Events Weekly (next)',
-            'Description': 'Weekly newsletter about DC tech events (next.dctech.events parallel stack)',
-            'DefaultSubscriptionStatus': 'OPT_IN',
-        }
+        """Verify the subscription topic exists and drop the retired one.
+
+        The topic itself predates this stack, so this never creates it —
+        it only removes `dctech-next`, whose presence would otherwise show
+        subscribers a phantom option on the SES preference page.
+        """
         existing = self.ses_client.get_contact_list(ContactListName=CONTACT_LIST_NAME)
         topics = existing.get('Topics', [])
-        if any(t['TopicName'] == TOPIC_NAME for t in topics):
-            logger.info(f"Topic '{TOPIC_NAME}' already exists on '{CONTACT_LIST_NAME}'.")
-            return
-        topics.append(new_topic)
-        logger.info(f"Adding topic '{TOPIC_NAME}' to shared contact list "
-                    f"'{CONTACT_LIST_NAME}' (existing topics preserved)...")
-        self.ses_client.update_contact_list(
-            ContactListName=CONTACT_LIST_NAME,
-            Description=existing.get('Description', ''),
-            Topics=topics)
+        names = [t['TopicName'] for t in topics]
+
+        if TOPIC_NAME not in names:
+            raise RuntimeError(
+                f"Topic '{TOPIC_NAME}' not found on contact list "
+                f"'{CONTACT_LIST_NAME}' (found: {names}). Refusing to create "
+                f"it — subscribers are expected to already be on this topic.")
+        logger.info(f"Topic '{TOPIC_NAME}' present on '{CONTACT_LIST_NAME}'.")
+
+        if RETIRED_TOPIC_NAME in names:
+            remaining = [t for t in topics if t['TopicName'] != RETIRED_TOPIC_NAME]
+            logger.info(f"Removing retired topic '{RETIRED_TOPIC_NAME}'...")
+            self.ses_client.update_contact_list(
+                ContactListName=CONTACT_LIST_NAME,
+                Description=existing.get('Description', ''),
+                Topics=remaining)
 
     def setup_email_template(self):
         if self._exists(self.ses_client.get_email_template, TemplateName=TEMPLATE_NAME):

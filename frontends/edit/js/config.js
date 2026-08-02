@@ -3,9 +3,9 @@
   // by scripts/deploy_edit_ui.sh — see next-architecture-plan.md.
   const EXECUTE_API_BASE = '{{API_BASE}}';
   const host = window.location.hostname;
-  const onNextSite = host === 'next.dctech.events';
-  const appBasePath = onNextSite ? '/edit/' : '/';
-  const apiBaseUrl = onNextSite ? EXECUTE_API_BASE : '';
+  const onMainSite = host === 'dctech.events' || host === 'www.dctech.events';
+  const appBasePath = onMainSite ? '/edit/' : '/';
+  const apiBaseUrl = onMainSite ? EXECUTE_API_BASE : '';
 
   function ensureLeadingSlash(path) {
     return path.startsWith('/') ? path : `/${path}`;

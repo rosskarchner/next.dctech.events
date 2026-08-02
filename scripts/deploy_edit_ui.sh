@@ -30,4 +30,4 @@ aws s3 sync "$STAGING/" "s3://$BUCKET/edit/" --delete
 aws cloudfront create-invalidation --distribution-id "$DIST_ID" \
   --paths '/edit/*' >/dev/null
 
-echo "Deployed edit UI to https://next.dctech.events/edit/"
+echo "Deployed edit UI to https://dctech.events/edit/"

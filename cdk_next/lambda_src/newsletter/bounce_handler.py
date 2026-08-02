@@ -13,7 +13,7 @@ import boto3
 
 ses = boto3.client('sesv2')
 
-CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'dctech-events-next-newsletter')
+CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
 
 
 def _delete_contact(email):

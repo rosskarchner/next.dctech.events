@@ -28,8 +28,8 @@ secrets = boto3.client('secretsmanager')
 
 FROM_EMAIL = os.environ.get('FROM_EMAIL', 'outbound@dctech.events')
 REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'ross@karchner.com')
-CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'dctech-events-next-newsletter')
-TOPIC_NAME = os.environ.get('TOPIC_NAME', 'dctech-next')
+CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
+TOPIC_NAME = os.environ.get('TOPIC_NAME', 'dctech')
 CONFIRMATION_KEY_ID = os.environ.get('CONFIRMATION_KEY_ID')
 CSRF_SECRET_NAME = os.environ.get('CSRF_SECRET_NAME', 'dctech-events-next/newsletter-csrf')
 BASE_URL = os.environ.get('BASE_URL', '')  # public URL of this API, no trailing slash
@@ -38,15 +38,15 @@ BASE_URL = os.environ.get('BASE_URL', '')  # public URL of this API, no trailing
 PATH_PREFIX = os.environ.get('PATH_PREFIX', '').rstrip('/')
 CSRF_SECRET = None
 
-# The one newsletter this stack serves (prod's multi-newsletter config
-# collapses to a single entry with the isolated -next resources).
+# The one newsletter this stack serves, on the long-standing SES contact
+# list and topic so existing subscribers carry over.
 NEWSLETTERS = {
-    'dctech-next': {
+    'dctech': {
         'contact_list_name': CONTACT_LIST_NAME,
         'topic_name': TOPIC_NAME,
     },
 }
-DEFAULT_NEWSLETTERS = ['dctech-next']
+DEFAULT_NEWSLETTERS = ['dctech']
 
 
 def _now_ts():
@@ -55,8 +55,8 @@ def _now_ts():
 
 def filter_signup_newsletters(newsletters):
     """Return newsletter slugs that currently accept new subscriptions."""
-    # Accept prod's slug too so shared forms keep working.
-    normalized = ['dctech-next' if n == 'dctech' else n for n in newsletters]
+    # Accept the retired parallel-stack slug so any stale form still works.
+    normalized = ['dctech' if n == 'dctech-next' else n for n in newsletters]
     return [slug for slug in normalized if slug in NEWSLETTERS]
 
 
@@ -265,7 +265,7 @@ def route_signup(event):
 def route_confirm_link(event, encoded_email, encoded_timestamp, signature):
     try:
         query_params = event.get('queryStringParameters') or {}
-        newsletters_param = query_params.get('newsletters', 'dctech-next')
+        newsletters_param = query_params.get('newsletters', 'dctech')
         newsletters = [n.strip() for n in newsletters_param.split(',')]
 
         padded_email = encoded_email + '=' * (-len(encoded_email) % 4)
@@ -295,7 +295,7 @@ def route_confirm_post(event):
         email = data.get('email', [''])[0]
         timestamp = data.get('timestamp', [''])[0]
         signature = data.get('signature', [''])[0]
-        newsletters_str = data.get('newsletters', ['dctech-next'])[0]
+        newsletters_str = data.get('newsletters', ['dctech'])[0]
         newsletters = [n.strip() for n in newsletters_str.split(',')]
 
         if not all([email, timestamp, signature]):

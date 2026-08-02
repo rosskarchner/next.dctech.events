@@ -56,12 +56,13 @@ class NextHostingStack(cdk.Stack):
             zone_name=config.ZONE_NAME,
         )
 
-        # New cert for next.dctech.events only — deliberately not the TS-owned
+        # Our own cert for the apex + www — deliberately not the TS-owned
         # *.dctech.events wildcard, so the two apps' lifecycles stay decoupled.
         self.certificate = acm.Certificate(
             self,
-            "NextCertificate",
+            "NextSiteCertificate",
             domain_name=config.DOMAIN,
+            subject_alternative_names=[config.WWW_DOMAIN],
             validation=acm.CertificateValidation.from_dns(hosted_zone),
         )
 
@@ -79,7 +80,7 @@ class NextHostingStack(cdk.Stack):
             self,
             "NextDirectoryIndexFunction",
             code=cloudfront.FunctionCode.from_inline(DIRECTORY_INDEX_FN),
-            comment="Rewrite directory URLs to index.html for next.dctech.events",
+            comment="Rewrite directory URLs to index.html for dctech.events",
             function_name=f"{config.PREFIX}-directory-index",
         )
 
@@ -99,38 +100,44 @@ class NextHostingStack(cdk.Stack):
                 ],
             ),
             default_root_object="index.html",
-            domain_names=[config.DOMAIN],
+            domain_names=[config.DOMAIN, config.WWW_DOMAIN],
             certificate=self.certificate,
             http_version=cloudfront.HttpVersion.HTTP2_AND_3,
             enable_ipv6=True,
             minimum_protocol_version=cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
         )
 
-        route53.ARecord(
-            self,
-            "NextARecord",
-            zone=hosted_zone,
-            record_name=config.DOMAIN,
-            target=route53.RecordTarget.from_alias(
-                route53_targets.CloudFrontTarget(self.distribution)
-            ),
-            comment="IPv4 record for next.dctech.events pointing to CloudFront",
+        # Apex and www both alias to the distribution, matching how GitHub
+        # Pages served them before the cutover. `delete_existing` clears the
+        # old GitHub Pages A/AAAA records, which were not managed here.
+        # (The pre-existing old.dctech.events records still point at GitHub
+        # Pages, so the previous site stays reachable there.)
+        alias_target = route53.RecordTarget.from_alias(
+            route53_targets.CloudFrontTarget(self.distribution)
         )
-
-        route53.AaaaRecord(
-            self,
-            "NextAAAARecord",
-            zone=hosted_zone,
-            record_name=config.DOMAIN,
-            target=route53.RecordTarget.from_alias(
-                route53_targets.CloudFrontTarget(self.distribution)
-            ),
-            comment="IPv6 record for next.dctech.events pointing to CloudFront",
-        )
+        for label, domain in (("Apex", config.DOMAIN), ("Www", config.WWW_DOMAIN)):
+            route53.ARecord(
+                self,
+                f"SiteARecord{label}",
+                zone=hosted_zone,
+                record_name=domain,
+                target=alias_target,
+                delete_existing=True,
+                comment=f"IPv4 record for {domain} pointing to CloudFront",
+            )
+            route53.AaaaRecord(
+                self,
+                f"SiteAAAARecord{label}",
+                zone=hosted_zone,
+                record_name=domain,
+                target=alias_target,
+                delete_existing=True,
+                comment=f"IPv6 record for {domain} pointing to CloudFront",
+            )
 
         # Serve the newsletter signup/confirm app under /newsletter* from the
         # same origin as the site, so the homepage's HTMX "Subscribe today"
-        # swap and the emailed confirmation links both use next.dctech.events.
+        # swap and the emailed confirmation links both use dctech.events.
         # No directory-index function here — these are API paths, not objects.
         self.distribution.add_behavior(
             "/newsletter*",

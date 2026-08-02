@@ -3,7 +3,8 @@
 import json as _json
 
 ALLOWED_ORIGINS = [
-    'https://next.dctech.events',
+    'https://dctech.events',
+    'https://www.dctech.events',
     'http://localhost:5000',
 ]
 

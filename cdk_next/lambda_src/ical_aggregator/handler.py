@@ -23,7 +23,7 @@ os.makedirs(SITE_DIR, exist_ok=True)
 if not os.path.exists(os.path.join(SITE_DIR, 'config.yaml')):
     with open(os.path.join(SITE_DIR, 'config.yaml'), 'w') as f:
         f.write('site_name: DC Tech Events\n'
-                'base_url: https://next.dctech.events\n'
+                'base_url: https://dctech.events\n'
                 'timezone: US/Eastern\n')
 os.environ['CALGEN_SITE_DIR'] = SITE_DIR
 os.chdir(SITE_DIR)

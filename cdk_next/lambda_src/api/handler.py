@@ -24,7 +24,8 @@ jinja_env = Environment(
 
 # List of allowed origins for CORS
 ALLOWED_ORIGINS = [
-    'https://next.dctech.events',
+    'https://dctech.events',
+    'https://www.dctech.events',
     'http://localhost:5000',
 ]
 

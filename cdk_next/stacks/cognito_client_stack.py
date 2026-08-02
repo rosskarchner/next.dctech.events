@@ -38,10 +38,12 @@ class NextCognitoClientStack(cdk.Stack):
                 ],
                 callback_urls=[
                     f"{config.BASE_URL}/edit/auth/callback.html",
+                    f"https://{config.WWW_DOMAIN}/edit/auth/callback.html",
                     "http://localhost:5000/auth/callback",
                 ],
                 logout_urls=[
                     f"{config.BASE_URL}/edit/",
+                    f"https://{config.WWW_DOMAIN}/edit/",
                     "http://localhost:5000/",
                 ],
             ),

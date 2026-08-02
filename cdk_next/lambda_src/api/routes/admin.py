@@ -21,7 +21,7 @@ from db import (
 )
 
 CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
-NEWSLETTER_TOPIC = os.environ.get('NEWSLETTER_TOPIC', 'dctech-next')
+NEWSLETTER_TOPIC = os.environ.get('NEWSLETTER_TOPIC', 'dctech')
 CODEBUILD_PROJECT_NAME = os.environ.get('CODEBUILD_PROJECT_NAME', '')
 
 
@@ -298,7 +298,7 @@ def get_subscribers_json(event, jinja_env):
         sesv2 = boto3.client('sesv2', region_name='us-east-1')
         contacts = []
         # The contact list is the account-wide shared one; filter to this
-        # stack's own topic so only next.dctech.events subscribers show.
+        # stack's own topic so only newsletter subscribers show.
         kwargs = {
             'ContactListName': CONTACT_LIST_NAME,
             'Filter': {

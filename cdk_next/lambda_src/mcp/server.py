@@ -20,7 +20,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 import db
 
-USER_AGENT = 'dctech-events-next/1.0 (+https://next.dctech.events)'
+USER_AGENT = 'dctech-events/1.0 (+https://dctech.events)'
 CODEBUILD_PROJECT_NAME = os.environ.get('CODEBUILD_PROJECT_NAME', '')
 
 # Stateless + JSON responses: required for Lambda (no long-lived SSE streams).

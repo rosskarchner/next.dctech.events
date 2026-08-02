@@ -1,15 +1,17 @@
-"""Shared configuration for the next.dctech.events parallel stack.
+"""Shared configuration for the dctech.events stack.
 
-All references to existing production resources are by literal ID/ARN —
-never CloudFormation cross-stack import/export — so this app stays fully
-decoupled from the TypeScript CDK app in dctech.events/infrastructure.
+This app began as a parallel build at next.dctech.events and now serves
+production. References to resources owned by the older TypeScript CDK app
+are by literal ID/ARN — never CloudFormation cross-stack import/export.
 """
 
 ACCOUNT = "797438674243"
 REGION = "us-east-1"  # CloudFront-attached ACM certs must live in us-east-1
 
-# New parallel site
-DOMAIN = "next.dctech.events"
+# Public site. www is served identically, matching the previous GitHub Pages
+# setup; the old site stays reachable at old.dctech.events.
+DOMAIN = "dctech.events"
+WWW_DOMAIN = f"www.{DOMAIN}"
 BASE_URL = f"https://{DOMAIN}"
 
 # Existing production resources (referenced read-only, by literal ID)
@@ -22,11 +24,10 @@ COGNITO_HOSTED_UI_DOMAIN = "login.dctech.events"
 TABLE_NAME = "dctech-events-next"
 PREFIX = "dctech-events-next"  # resource-name prefix for all new resources
 
-# Newsletter. SES allows one contact list per account, so the production
-# 'newsletters' list is shared (like the Cognito pool) — isolation comes
-# from this stack's own topic, template, and configuration set.
+# Newsletter. Uses the long-standing SES contact list and topic so existing
+# subscribers carry over; only the template and configuration set are ours.
 NEWSLETTER_CONTACT_LIST = "newsletters"
-NEWSLETTER_TOPIC = "dctech-next"
+NEWSLETTER_TOPIC = "dctech"
 NEWSLETTER_FROM_EMAIL = "newsletter@dctech.events"
 NEWSLETTER_ADMIN_EMAIL = "ross@karchner.com"
 
