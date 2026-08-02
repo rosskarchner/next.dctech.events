@@ -5,11 +5,14 @@ Fully decoupled from the production TypeScript CDK app: all resources use
 Next*/dctech-events-next* naming and existing resources are referenced by
 literal ID/ARN only (no CloudFormation cross-stack imports/exports).
 """
+import os
+
 import aws_cdk as cdk
 
 import config
 from stacks.hosting_stack import NextHostingStack
 from stacks.dynamodb_stack import NextDynamoDBStack
+from stacks.cognito_stack import NextCognitoStack
 from stacks.cognito_client_stack import NextCognitoClientStack
 from stacks.api_stack import NextApiStack
 from stacks.site_generator_stack import NextSiteGeneratorStack
@@ -32,7 +35,9 @@ newsletter = NextNewsletterStack(
 hosting = NextHostingStack(
     app, "NextHostingStack", newsletter_api=newsletter.api, env=env
 )
+cognito = NextCognitoStack(app, "NextCognitoStack", env=env)
 cognito_client = NextCognitoClientStack(app, "NextCognitoClientStack", env=env)
+cognito_client.add_dependency(cognito)
 api = NextApiStack(
     app,
     "NextApiStack",
@@ -62,7 +67,15 @@ discovery_agent = NextDiscoveryAgentStack(
 
 cicd = NextCicdStack(app, "NextCicdStack", env=env)
 
-for key, value in config.TAGS.items():
-    cdk.Tags.of(app).add(key, value)
+# Tags cannot be added during `cdk import`; NextCognitoStack picks them up
+# on the ordinary deploy that follows.
+_import_mode = os.environ.get("CDK_IMPORT_MODE") == "1"
+for _stack in app.node.children:
+    if not isinstance(_stack, cdk.Stack):
+        continue
+    if _import_mode and _stack.stack_name == "NextCognitoStack":
+        continue
+    for key, value in config.TAGS.items():
+        cdk.Tags.of(_stack).add(key, value)
 
 app.synth()

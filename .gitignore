@@ -25,3 +25,6 @@ node_modules/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Pre-decommission backups (contains Cognito user emails — never commit)
+.backup-predecom-*/
