@@ -17,6 +17,9 @@ import os
 import aws_cdk as cdk
 from aws_cdk import (
     aws_cognito as cognito,
+    aws_iam as iam,
+    aws_lambda as lambda_,
+    aws_logs as logs,
     aws_route53 as route53,
 )
 from constructs import Construct
@@ -28,6 +31,8 @@ import config
 # Set CDK_IMPORT_MODE=1 only while running `cdk import` (see module docstring).
 IMPORT_MODE = os.environ.get("CDK_IMPORT_MODE") == "1"
 
+BUILD_DIR = os.path.join(os.path.dirname(__file__), "..", "build")
+
 HOSTED_UI_CERTIFICATE_ARN = (
     "arn:aws:acm:us-east-1:797438674243:certificate/013bf7ee-a628-4806-9ddd-ac51ef7b5391"
 )
@@ -36,6 +41,37 @@ HOSTED_UI_CERTIFICATE_ARN = (
 class NextCognitoStack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # Rejects automated sign-ups before Cognito sends a verification
+        # email. Lives here rather than in NextOpsStack so the pool and the
+        # trigger guarding it deploy as one unit.
+        self.pre_signup_function = lambda_.Function(
+            self,
+            "NextPreSignUpCheck",
+            function_name=f"{config.PREFIX}-pre-signup-check",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            architecture=lambda_.Architecture.X86_64,
+            handler="pre_signup.lambda_handler",
+            code=lambda_.Code.from_asset(os.path.join(BUILD_DIR, "ops")),
+            timeout=cdk.Duration.seconds(5),
+            environment={
+                # Audit first: log verdicts without blocking anyone. Flip to
+                # "true" once the logs show no legitimate sign-ups caught.
+                "ENFORCE": "false",
+            },
+            log_group=logs.LogGroup(
+                self,
+                "NextPreSignUpLogGroup",
+                retention=logs.RetentionDays.ONE_MONTH,
+                removal_policy=cdk.RemovalPolicy.DESTROY,
+            ),
+        )
+        self.pre_signup_function.add_permission(
+            "AllowCognitoInvoke",
+            principal=iam.ServicePrincipal("cognito-idp.amazonaws.com"),
+            source_arn=(f"arn:aws:cognito-idp:{self.region}:{self.account}"
+                        f":userpool/{config.USER_POOL_ID}"),
+        )
 
         self.user_pool = cognito.CfnUserPool(
             self,
@@ -98,6 +134,9 @@ class NextCognitoStack(cdk.Stack):
             ],
             # CloudFormation forbids adding tags during an import; they are
             # applied by the ordinary deploy that follows it.
+            lambda_config=cognito.CfnUserPool.LambdaConfigProperty(
+                pre_sign_up=self.pre_signup_function.function_arn,
+            ),
             user_pool_tags=None if IMPORT_MODE else {
                 "component": "authentication",
                 "managedBy": "CDK",
