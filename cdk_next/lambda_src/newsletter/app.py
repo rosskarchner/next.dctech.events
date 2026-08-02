@@ -33,6 +33,9 @@ TOPIC_NAME = os.environ.get('TOPIC_NAME', 'dctech-next')
 CONFIRMATION_KEY_ID = os.environ.get('CONFIRMATION_KEY_ID')
 CSRF_SECRET_NAME = os.environ.get('CSRF_SECRET_NAME', 'dctech-events-next/newsletter-csrf')
 BASE_URL = os.environ.get('BASE_URL', '')  # public URL of this API, no trailing slash
+# When served through the CloudFront /newsletter* behavior, API Gateway sees
+# paths that still carry this prefix; strip it before routing.
+PATH_PREFIX = os.environ.get('PATH_PREFIX', '').rstrip('/')
 CSRF_SECRET = None
 
 # The one newsletter this stack serves (prod's multi-newsletter config
@@ -366,6 +369,8 @@ def lambda_handler(event, context):
 
     method = event.get('httpMethod', 'GET')
     path = event.get('path', '/') or '/'
+    if PATH_PREFIX and path.startswith(PATH_PREFIX):
+        path = path[len(PATH_PREFIX):] or '/'
 
     if method == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': ''}

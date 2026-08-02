@@ -7,6 +7,7 @@ site and /edit/*.
 """
 import aws_cdk as cdk
 from aws_cdk import (
+    aws_apigateway as apigateway,
     aws_certificatemanager as acm,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
@@ -38,7 +39,14 @@ function handler(event) {
 
 
 class NextHostingStack(cdk.Stack):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        newsletter_api: apigateway.RestApi,
+        **kwargs,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
@@ -118,6 +126,25 @@ class NextHostingStack(cdk.Stack):
                 route53_targets.CloudFrontTarget(self.distribution)
             ),
             comment="IPv6 record for next.dctech.events pointing to CloudFront",
+        )
+
+        # Serve the newsletter signup/confirm app under /newsletter* from the
+        # same origin as the site, so the homepage's HTMX "Subscribe today"
+        # swap and the emailed confirmation links both use next.dctech.events.
+        # No directory-index function here — these are API paths, not objects.
+        self.distribution.add_behavior(
+            "/newsletter*",
+            origins.HttpOrigin(
+                f"{newsletter_api.rest_api_id}.execute-api.{self.region}.amazonaws.com",
+                origin_path=f"/{newsletter_api.deployment_stage.stage_name}",
+                protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+            ),
+            viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+            cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+            # Forwards everything except Host — API Gateway must see its own
+            # hostname or it can't match the request to a stage.
+            origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
         )
 
         cdk.CfnOutput(self, "NextSiteBucketName", value=self.bucket.bucket_name)

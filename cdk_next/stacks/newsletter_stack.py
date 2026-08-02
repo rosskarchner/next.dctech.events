@@ -79,6 +79,11 @@ class NextNewsletterStack(cdk.Stack):
             "CONFIRMATION_KEY_ID": confirmation_key.key_id,
             "CSRF_SECRET_NAME": csrf_secret.secret_name,
             "DYNAMODB_TABLE_NAME": table.table_name,
+            # Served same-origin through the CloudFront /newsletter* behavior,
+            # so forms, redirects, and emailed confirmation links all use the
+            # public site URL rather than the raw execute-api hostname.
+            "BASE_URL": f"{config.BASE_URL}/newsletter",
+            "PATH_PREFIX": "/newsletter",
         }
 
         # 1. Signup/confirm web app
@@ -160,7 +165,7 @@ class NextNewsletterStack(cdk.Stack):
                 )
             )
 
-        api = apigateway.LambdaRestApi(
+        self.api = apigateway.LambdaRestApi(
             self,
             "NextNewsletterApi",
             rest_api_name=f"{config.PREFIX}-newsletter",
@@ -168,6 +173,7 @@ class NextNewsletterStack(cdk.Stack):
             proxy=True,
             deploy_options=apigateway.StageOptions(stage_name="prod"),
         )
+        api = self.api
 
         events.Rule(
             self,

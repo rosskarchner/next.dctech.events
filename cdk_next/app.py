@@ -22,8 +22,16 @@ from stacks.cicd_stack import NextCicdStack
 app = cdk.App()
 env = cdk.Environment(account=config.ACCOUNT, region=config.REGION)
 
-hosting = NextHostingStack(app, "NextHostingStack", env=env)
 db = NextDynamoDBStack(app, "NextDynamoDBStack", env=env)
+
+# Newsletter is built before hosting: the CloudFront distribution proxies
+# /newsletter* to this API so the signup app is served same-origin.
+newsletter = NextNewsletterStack(
+    app, "NextNewsletterStack", table=db.table, env=env
+)
+hosting = NextHostingStack(
+    app, "NextHostingStack", newsletter_api=newsletter.api, env=env
+)
 cognito_client = NextCognitoClientStack(app, "NextCognitoClientStack", env=env)
 api = NextApiStack(
     app,
@@ -45,9 +53,6 @@ site_generator = NextSiteGeneratorStack(
 
 ical_aggregator = NextIcalAggregatorStack(
     app, "NextIcalAggregatorStack", table=db.table, env=env
-)
-newsletter = NextNewsletterStack(
-    app, "NextNewsletterStack", table=db.table, env=env
 )
 
 qa_agent = NextQaAgentStack(app, "NextQaAgentStack", table=db.table, env=env)
