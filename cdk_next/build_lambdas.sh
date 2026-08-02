@@ -52,6 +52,13 @@ if [ -d lambda_src/newsletter ] && [ -e lambda_src/newsletter/app.py ]; then
   uv pip install "${UV_ARGS[@]}" "${CALGEN_FRESH[@]}" --target build/newsletter "$CALGEN"
 fi
 
+# ── ops (scheduled maintenance: cognito pruning, queue email) ───────
+if [ -d lambda_src/ops ]; then
+  mkdir -p build/ops
+  cp -r lambda_src/ops/. build/ops/
+  cp lambda_src/api/db.py build/ops/
+fi
+
 # ── qa_agent / discovery_agent (stub scaffolds, no deps) ────────────
 for agent in qa_agent discovery_agent; do
   if [ -e "lambda_src/$agent/handler.py" ]; then
