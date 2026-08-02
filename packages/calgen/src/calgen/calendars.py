@@ -17,6 +17,7 @@ import re
 import recurring_ical_events
 
 from calgen.site_config import get_config
+from calgen.event_utils import _normalize_title
 
 config = get_config()
 timezone_name = config.get('timezone', 'US/Eastern')
@@ -30,6 +31,10 @@ DATA_DIR = '_data'
 CACHE_DIR = '_cache'
 ICAL_CACHE_DIR = os.path.join(CACHE_DIR, 'ical')
 JSON_LD_CACHE_DIR = os.path.join(CACHE_DIR, 'json-ld')
+
+# How far ahead to keep events. Feeds routinely publish recurring series
+# years out; without a bound the site listed events into 2029.
+HORIZON_DAYS = 180
 
 
 def _ensure_dirs():
@@ -155,7 +160,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
             group_name = str(cal.get('x-wr-calname', '')) or None
 
         start_dt = datetime.now(timezone.utc)
-        recurring_end_dt = start_dt + timedelta(days=90)
+        end_dt = start_dt + timedelta(days=HORIZON_DAYS)
 
         events = []
 
@@ -163,7 +168,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
             dtstart = event.get('dtstart').dt
             if isinstance(dtstart, datetime):
                 dtstart_utc = dtstart.astimezone(timezone.utc)
-                if dtstart_utc < start_dt:
+                if dtstart_utc < start_dt or dtstart_utc > end_dt:
                     return
                 dt_local = dtstart.astimezone(local_tz)
                 date_str = dt_local.strftime('%Y-%m-%d')
@@ -171,7 +176,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
                 if time_str == '00:00':
                     time_str = ''
             else:
-                if dtstart < start_dt.date():
+                if dtstart < start_dt.date() or dtstart > end_dt.date():
                     return
                 date_str = dtstart.strftime('%Y-%m-%d')
                 time_str = ''
@@ -188,7 +193,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
                 else:
                     end_date_str = dtend.strftime('%Y-%m-%d')
 
-            title = str(event.get('summary', 'Untitled Event'))
+            title = _normalize_title(str(event.get('summary', 'Untitled Event')))
             url_field = event.get('url')
             if url_field:
                 event_url = str(url_field)
@@ -206,7 +211,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
                     print(f"  Skipping cancelled event: {title}")
                     return
                 if ld_data.get('title'):
-                    title = ld_data['title']
+                    title = _normalize_title(ld_data['title'])
                 is_virtual = ld_data.get('is_virtual', False)
                 if not ical_location and ld_data.get('location'):
                     resolved_location = ld_data['location']
@@ -254,7 +259,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
             if vevent.get('rrule'):
                 recurring_cal = icalendar.Calendar()
                 recurring_cal.add_component(vevent)
-                for expanded_event in recurring_ical_events.of(recurring_cal).between(start_dt, recurring_end_dt):
+                for expanded_event in recurring_ical_events.of(recurring_cal).between(start_dt, end_dt):
                     _append_event_data(expanded_event)
             else:
                 _append_event_data(vevent)

@@ -8,6 +8,9 @@ cd "$(dirname "$0")"
 
 # calgen lives in this repo (packages/calgen) — no external checkout needed.
 CALGEN="$(cd ../packages/calgen && pwd)"
+# calgen's version never changes, so uv happily reuses a cached wheel built
+# from older source and silently ships stale code. Always rebuild it.
+CALGEN_FRESH=(--refresh-package calgen --reinstall-package calgen)
 
 PY_VERSION=3.12
 PLATFORM=x86_64-manylinux_2_17
@@ -34,7 +37,7 @@ if [ -d lambda_src/ical_aggregator ] && [ -e lambda_src/ical_aggregator/handler.
   cp lambda_src/api/db.py lambda_src/api/event_utils.py build/ical_aggregator/
   # calgen imported directly (never forked) + its runtime deps
   uv pip install "${UV_ARGS[@]}" --target build/ical_aggregator \
-    "$CALGEN" requests icalendar pytz recurring-ical-events \
+    "${CALGEN_FRESH[@]}" "$CALGEN" requests icalendar pytz recurring-ical-events \
     beautifulsoup4 pyyaml python-dateutil dateparser usaddress
 fi
 
@@ -46,7 +49,7 @@ if [ -d lambda_src/newsletter ] && [ -e lambda_src/newsletter/app.py ]; then
   # render.py rebuilds the calgen site in /tmp from DynamoDB
   cp lambda_src/site_generator/export_dynamo_to_calgen.py build/newsletter/
   cp -r ../site build/newsletter/site
-  uv pip install "${UV_ARGS[@]}" --target build/newsletter "$CALGEN"
+  uv pip install "${UV_ARGS[@]}" "${CALGEN_FRESH[@]}" --target build/newsletter "$CALGEN"
 fi
 
 # ── qa_agent / discovery_agent (stub scaffolds, no deps) ────────────
@@ -68,6 +71,6 @@ fi
 mkdir -p build/site_src/wheels
 cp -r ../site build/site_src/site
 cp lambda_src/site_generator/export_dynamo_to_calgen.py build/site_src/
-uv build --quiet --wheel "$CALGEN" --out-dir build/site_src/wheels
+uv build --quiet --no-cache --wheel "$CALGEN" --out-dir build/site_src/wheels
 
 echo "Lambda assets built under cdk_next/build/"

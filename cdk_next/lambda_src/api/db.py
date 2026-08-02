@@ -263,7 +263,8 @@ def _group_item_to_dict(item):
     slug = item['PK'].split('#', 1)[1]
     group = {'id': slug, 'name': item.get('name', ''), 'active': item.get('active', True)}
     for field in ['website', 'ical', 'fallback_url', 'categories',
-                  'suppress_urls', 'suppress_guid', 'scan_for_metadata', 'url_override']:
+                  'suppress_urls', 'suppress_guid', 'scan_for_metadata',
+                  'url_override', 'skip_phrases']:
         if field in item:
             group[field] = _to_plain(item[field])
     return group
