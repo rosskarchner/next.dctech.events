@@ -1,12 +1,11 @@
-from flask import Flask, render_template, request, Response, send_from_directory
-from jinja2 import ChoiceLoader, FileSystemLoader
+from flask import Flask, render_template, Response, send_from_directory
+from jinja2 import FileSystemLoader
 from datetime import date, datetime, timedelta, time
 import os
 import yaml
 import pytz
 import calendar
 import json
-from pathlib import Path
 from urllib.parse import urlparse
 from icalendar import Calendar, Event as ICalEvent
 import hashlib
@@ -41,26 +40,22 @@ def create_app(site_dir=None):
     """
     Create and return a configured Flask application.
 
-    site_dir: path to the site directory (defaults to CWD). Templates in
-    {site_dir}/templates/ override the package defaults.
+    site_dir: path to the site directory (defaults to CWD). Templates and
+    static files are read from {site_dir}.
     """
     if site_dir is None:
         site_dir = os.getcwd()
     site_dir = os.path.abspath(site_dir)
-
-    package_templates = os.path.join(os.path.dirname(__file__), 'templates')
-    loaders = []
-    local_templates = os.path.join(site_dir, 'templates')
-    if os.path.exists(local_templates):
-        loaders.append(FileSystemLoader(local_templates))
-    loaders.append(FileSystemLoader(package_templates))
 
     static_dir = os.path.join(site_dir, 'static')
     app = Flask(
         __name__,
         static_folder=static_dir if os.path.exists(static_dir) else None,
     )
-    app.jinja_loader = ChoiceLoader(loaders)
+    # Templates live in the site directory only. calgen used to ship a
+    # fallback set, but every one of them was shadowed by site/templates,
+    # which made edits to the packaged copies silently do nothing.
+    app.jinja_loader = FileSystemLoader(os.path.join(site_dir, 'templates'))
     app.region_plugin = load_region_plugin(site_dir)
 
     _register_routes(app)

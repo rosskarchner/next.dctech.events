@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""Fetch iCal feeds for all groups and write per-group JSON caches."""
+"""Fetch a group's iCal feed and extract its events.
+
+The iCal Aggregator Lambda calls fetch_ical_and_extract_events directly,
+seeding the cache files below from DynamoDB first and persisting the results
+back afterwards. There is no site-wide refresh entry point here — the
+aggregator owns iteration over groups.
+"""
 import os
-import yaml
 import icalendar
 import requests
 import json
 import pytz
 import hashlib
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 import re
-from pathlib import Path
-import sys
 import recurring_ical_events
 
-from calgen.location_utils import extract_location_info
 from calgen.site_config import get_config
-from calgen.event_utils import calculate_event_hash
 
 config = get_config()
 timezone_name = config.get('timezone', 'US/Eastern')
@@ -29,9 +30,6 @@ DATA_DIR = '_data'
 CACHE_DIR = '_cache'
 ICAL_CACHE_DIR = os.path.join(CACHE_DIR, 'ical')
 JSON_LD_CACHE_DIR = os.path.join(CACHE_DIR, 'json-ld')
-REFRESH_FLAG_FILE = os.path.join(DATA_DIR, '.refreshed')
-GROUPS_DIR = '_groups'
-CATEGORIES_DIR = '_categories'
 
 
 def _ensure_dirs():
@@ -282,70 +280,3 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
         return None
 
 
-def get_groups():
-    groups = []
-    if not os.path.exists(GROUPS_DIR):
-        return groups
-    for filename in os.listdir(GROUPS_DIR):
-        if filename.endswith('.yaml'):
-            slug = filename[:-5]
-            with open(os.path.join(GROUPS_DIR, filename), 'r') as f:
-                group = yaml.safe_load(f)
-                group['id'] = slug
-                groups.append(group)
-    return groups
-
-
-def generate_categories_json():
-    """Write static/categories.json for use by the edit UI (if present)."""
-    categories = {}
-    if os.path.exists(CATEGORIES_DIR):
-        for filename in os.listdir(CATEGORIES_DIR):
-            if filename.endswith('.yaml'):
-                slug = filename[:-5]
-                with open(os.path.join(CATEGORIES_DIR, filename), 'r') as f:
-                    cat = yaml.safe_load(f)
-                    categories[slug] = {
-                        'slug': slug,
-                        'name': cat.get('name', slug),
-                        'description': cat.get('description', '')
-                    }
-    output_file = os.path.join('static', 'categories.json')
-    os.makedirs('static', exist_ok=True)
-    with open(output_file, 'w') as f:
-        json.dump(categories, f, indent=2)
-    print(f"Generated {output_file} with {len(categories)} categories")
-
-
-def refresh_calendars():
-    _ensure_dirs()
-    print("Refreshing calendars...")
-    groups = get_groups()
-    updated = False
-
-    for group in groups:
-        if not group.get('active', True):
-            continue
-        if group.get('ical'):
-            events = fetch_ical_and_extract_events(group['ical'], group['id'], group)
-            if events is not None:
-                updated = True
-
-    if updated:
-        with open(REFRESH_FLAG_FILE, 'w') as f:
-            f.write(datetime.now().isoformat())
-        print("Calendars refreshed successfully")
-    else:
-        print("No calendar updates needed")
-
-    generate_categories_json()
-    return updated
-
-
-def main():
-    refresh_calendars()
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
