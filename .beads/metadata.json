@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "next_dctech_events",
+  "project_id": "d221ac71-d4a7-4827-81aa-c86f0062d835"
+}
