@@ -38,7 +38,7 @@ hosting = NextHostingStack(
 )
 cognito = NextCognitoStack(app, "NextCognitoStack", env=env)
 cognito_client = NextCognitoClientStack(app, "NextCognitoClientStack", env=env)
-cognito_client.add_dependency(cognito)
+cognito_client.add_stack_dependency(cognito)
 api = NextApiStack(
     app,
     "NextApiStack",

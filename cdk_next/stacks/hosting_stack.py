@@ -108,8 +108,12 @@ class NextHostingStack(cdk.Stack):
         )
 
         # Apex and www both alias to the distribution, matching how GitHub
-        # Pages served them before the cutover. `delete_existing` clears the
-        # old GitHub Pages A/AAAA records, which were not managed here.
+        # Pages served them before the cutover. These records carried
+        # `delete_existing=True` to clear the old GitHub Pages A/AAAA records
+        # on the 2026-08-01 cutover; that is done, this stack owns them now,
+        # and CFN writes them with UPSERT anyway — so the flag is dropped
+        # rather than carried as a live custom resource that could delete
+        # production DNS if a later deploy fails.
         # (The pre-existing old.dctech.events records still point at GitHub
         # Pages, so the previous site stays reachable there.)
         alias_target = route53.RecordTarget.from_alias(
@@ -122,7 +126,6 @@ class NextHostingStack(cdk.Stack):
                 zone=hosted_zone,
                 record_name=domain,
                 target=alias_target,
-                delete_existing=True,
                 comment=f"IPv4 record for {domain} pointing to CloudFront",
             )
             route53.AaaaRecord(
@@ -131,7 +134,6 @@ class NextHostingStack(cdk.Stack):
                 zone=hosted_zone,
                 record_name=domain,
                 target=alias_target,
-                delete_existing=True,
                 comment=f"IPv6 record for {domain} pointing to CloudFront",
             )
 
