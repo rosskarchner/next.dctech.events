@@ -45,9 +45,9 @@
 {
   "@context": "https://schema.org",
   "@type": "WebSite",
-  "name": "{{ site_name }}",
-  "description": "{{ tagline }}",
-  "url": "{{ base_url }}"
+  "name": {{ site_name | tojson }},
+  "description": {{ tagline | tojson }},
+  "url": {{ base_url | tojson }}
 }
 </script>
 
@@ -57,7 +57,7 @@
   "@context": "https://schema.org",
   "@type": "ItemList",
   "name": "Upcoming Tech Events in DC",
-  "description": "{{ tagline }}",
+  "description": {{ tagline | tojson }},
   "numberOfItems": {{ stats.upcoming_events }},
   "itemListElement": [
     {% set event_count = namespace(value=0) %}
@@ -72,23 +72,23 @@
                 "position": {{ event_count.value + 1 }},
                 "item": {
                   "@type": "Event",
-                  "name": "{{ event.title | replace('"', '\\"') }}",
-                  "url": "{{ event.url }}",
+                  "name": {{ event.title | tojson }},
+                  "url": {{ event.url | tojson }},
                   {% if event.time %}
                   "startDate": "{{ day.date }}T{{ event.time }}",
                   {% endif %}
                   {% if event.location %}
                   "location": {
                     "@type": "Place",
-                    "name": "{{ event.location | replace('"', '\\"') }}"
+                    "name": {{ event.location | tojson }}
                   },
                   {% endif %}
                   {% if event.group %}
                   "organizer": {
                     "@type": "Organization",
-                    "name": "{{ event.group | replace('"', '\\"') }}"
+                    "name": {{ event.group | tojson }}
                     {% if event.group_website %}
-                    ,"url": "{{ event.group_website }}"
+                    ,"url": {{ event.group_website | tojson }}
                     {% endif %}
                   },
                   {% endif %}
