@@ -6,7 +6,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# calgen lives in this repo (packages/calgen) — no external checkout needed.
+# calgen lives in this repo (packages/calgen) and is maintained here — there is
+# no upstream to pull from, so no external checkout is needed or possible.
 CALGEN="$(cd ../packages/calgen && pwd)"
 # calgen's version never changes, so uv happily reuses a cached wheel built
 # from older source and silently ships stale code. Always rebuild it.
@@ -35,7 +36,7 @@ if [ -d lambda_src/ical_aggregator ] && [ -e lambda_src/ical_aggregator/handler.
   mkdir -p build/ical_aggregator
   cp -r lambda_src/ical_aggregator/. build/ical_aggregator/
   cp lambda_src/api/db.py lambda_src/api/event_utils.py build/ical_aggregator/
-  # calgen imported directly (never forked) + its runtime deps
+  # calgen imported directly from packages/calgen (not re-implemented) + deps
   uv pip install "${UV_ARGS[@]}" --target build/ical_aggregator \
     "${CALGEN_FRESH[@]}" "$CALGEN" requests icalendar pytz recurring-ical-events \
     beautifulsoup4 pyyaml python-dateutil dateparser usaddress

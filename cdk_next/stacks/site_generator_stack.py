@@ -3,8 +3,9 @@
 CodeBuild (not Lambda) because calgen/Frozen-Flask needs a real writable
 directory tree and produces thousands of files. Source is a CDK S3 asset
 containing the site source (templates/static/config), the DynamoDB export
-script, and a locally-built calgen wheel — calgen's rendering logic is never
-forked, only its data source changes.
+script, and a locally-built calgen wheel (from packages/calgen, calgen's only
+maintained copy) — one shared rendering implementation, only its data source
+changes.
 
 Triggers: DynamoDB-Streams-fed debounced Lambda (near-real-time rebuilds
 after admin approvals) + a fixed 4-hour schedule aligned with the iCal

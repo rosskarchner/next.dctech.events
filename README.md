@@ -14,11 +14,15 @@ behind it.
 This is a monorepo: calgen (the static site generator) lives here rather than
 being installed from a separate repo, so a single checkout builds everything.
 
-- `packages/calgen/` — the calgen SSG, vendored from
-  `github.com/rosskarchner/calgen`. Lambda bundles and the CodeBuild wheel are
-  built from this path. Its rendering logic is used as-is by the site
-  generator, the iCal aggregator, and the newsletter renderer — only the data
-  source (DynamoDB instead of git YAML) differs.
+- `packages/calgen/` — the calgen SSG. **This is calgen's canonical home and
+  the only maintained copy — there is no upstream.** The standalone
+  `github.com/rosskarchner/calgen` repo is archived and read-only; nothing is
+  synced from it, and it should not be treated as a source of truth. Fix
+  calgen bugs here, directly. Lambda bundles and the CodeBuild wheel are built
+  from this path. Its rendering logic is shared as-is by the site generator,
+  the iCal aggregator, and the newsletter renderer — only the data source
+  (DynamoDB instead of git YAML) differs, so change it in this one place
+  rather than copying diverging variants into individual Lambdas.
 - `cdk_next/` — Python CDK app (nine `Next*` stacks, fully decoupled from the
   production TypeScript CDK app; existing resources referenced by literal
   ID/ARN only)

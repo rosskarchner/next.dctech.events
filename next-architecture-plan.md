@@ -1,5 +1,20 @@
 # Parallel Python CDK Stack for next.dctech.events
 
+> **Status note (2026-08-06).** This is the original planning document, kept as
+> a record of the design and the reasoning behind it. It describes the world as
+> it was *before* the build, so parts of it are deliberately out of date — most
+> of all, the stack it plans is now live and serves production `dctech.events`.
+>
+> One point matters enough to correct inline, because the plan states it as a
+> standing constraint: **calgen is no longer an external, pip-installed package
+> with an upstream.** It lives in this repo at `packages/calgen`, which is its
+> only maintained copy; the standalone `github.com/rosskarchner/calgen` repo is
+> archived and read-only. Where this plan says calgen "must not be forked,"
+> read that as its actual intent — there is one shared calgen implementation
+> and it should stay that way — not as a rule against editing `packages/calgen`,
+> which is now the correct place to fix calgen bugs. See `README.md` for the
+> current layout.
+
 ## Context
 
 dctech.events currently runs on a TypeScript CDK app (`infrastructure/`) with a hybrid,
@@ -57,7 +72,7 @@ Three scope decisions were made with the user before designing this:
   HMAC-signed (`HMAC_SHA_512`) confirmation links, CSRF via a Secrets Manager secret, SES contact
   list `newsletters`/topic `dctech` (created by `setup_ses.py`), and a weekly
   `cron(0 11 ? * MON *)` Lambda that HTTP-GETs `https://dctech.events/newsletter.html`/`.txt` and
-  sends via an SES template — those two files are calgen-rendered (`calgen/src/calgen/app.py`
+  sends via an SES template — those two files are calgen-rendered (`packages/calgen/src/calgen/app.py`
   `/newsletter.html`/`/newsletter.txt` routes, `prepare_newsletter_titles`, and
   `pipeline.remove_duplicates` for the "also published by" duplicate-merge logic).
 - `frontends/edit/js/config.js` **and** `frontends/edit/js/auth.js` both hardcode the production
@@ -275,8 +290,8 @@ provider (import read-only by ARN — OIDC providers are account-level singleton
 ## Critical files
 
 - `backend/db.py` — DynamoDB key-schema/CRUD conventions to mirror in `cdk_next/lambda_src/api/db.py`
-- `calgen/src/calgen/pipeline.py`, `calendars.py`, `mcp_server.py` — reuse patterns/functions, don't fork
-- `calgen/src/calgen/app.py` (`/newsletter.html`, `/newsletter.txt`, `prepare_newsletter_titles`) — newsletter render context to port into `render.py`
+- `packages/calgen/src/calgen/pipeline.py`, `calendars.py`, `mcp_server.py` — reuse patterns/functions, keep one shared implementation (path was `calgen/…` when this plan was written, before calgen moved into this repo)
+- `packages/calgen/src/calgen/app.py` (`/newsletter.html`, `/newsletter.txt`, `prepare_newsletter_titles`) — newsletter render context to port into `render.py`
 - `infrastructure/lib/dynamodb-stack.ts`, `cognito-stack.ts`, `lambda-api-stack.ts`, `frontend-stack.ts`, `config.ts` — resource shapes/conventions to mirror in Python
 - `dctech-newsletter/app.py`, `setup_ses.py` — newsletter logic and SES resource setup to port
 - `frontends/edit/js/config.js`, `js/auth.js` — the two files needing deploy-time templated Cognito client ID / API base
