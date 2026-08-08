@@ -12,6 +12,7 @@ from aws_cdk import (
     aws_cognito as cognito,
     aws_dynamodb as dynamodb,
     aws_iam as iam,
+    aws_kms as kms,
     aws_lambda as lambda_,
     aws_logs as logs,
 )
@@ -37,6 +38,21 @@ class NextApiStack(cdk.Stack):
 
         stage_name = "prod"
 
+        # HMAC key backing magic-link submission tokens. Its own key rather
+        # than the newsletter's: sharing one would couple this stack to
+        # NextNewsletterStack, and rotating either purpose's key
+        # independently is worth more than one fewer resource.
+        self.submit_key = kms.Key(
+            self,
+            "NextSubmitLinkKey",
+            description="HMAC key for dctech.events magic-link event submission",
+            key_spec=kms.KeySpec.HMAC_512,
+            key_usage=kms.KeyUsage.GENERATE_VERIFY_MAC,
+            # Destroying it invalidates every outstanding submission link,
+            # which is recoverable (users request a new one) but rude.
+            removal_policy=cdk.RemovalPolicy.RETAIN,
+        )
+
         common_env = {
             "DYNAMODB_TABLE_NAME": table.table_name,
             "COGNITO_USER_POOL_ID": config.USER_POOL_ID,
@@ -45,6 +61,10 @@ class NextApiStack(cdk.Stack):
             "CONTACT_LIST_NAME": config.NEWSLETTER_CONTACT_LIST,
             "NEWSLETTER_TOPIC": config.NEWSLETTER_TOPIC,
             "STAGE": stage_name,
+            "SUBMIT_KEY_ID": self.submit_key.key_id,
+            "BASE_URL": config.BASE_URL,
+            "FROM_EMAIL": "outbound@dctech.events",
+            "REPLY_TO_EMAIL": config.NEWSLETTER_ADMIN_EMAIL,
         }
 
         self.api_function = lambda_.Function(
@@ -89,10 +109,19 @@ class NextApiStack(cdk.Stack):
             table.grant_read_write_data(fn)
             fn.add_to_role_policy(
                 iam.PolicyStatement(
-                    actions=["ses:ListContacts"],
+                    actions=[
+                        "ses:ListContacts",
+                        # Magic-link emails, plus the newsletter opt-in on the
+                        # submission form (create/get/update contact).
+                        "ses:SendEmail",
+                        "ses:CreateContact",
+                        "ses:GetContact",
+                        "ses:UpdateContact",
+                    ],
                     resources=["*"],
                 )
             )
+            self.submit_key.grant(fn, "kms:GenerateMac", "kms:VerifyMac")
             # trigger_rebuild / POST /api/admin/rebuild (project name wired in
             # by the site-generator stack once it exists)
             fn.add_to_role_policy(
@@ -144,8 +173,14 @@ class NextApiStack(cdk.Stack):
         api_res.add_resource("events").add_method("GET", integration)
         api_res.add_resource("categories").add_method("GET", integration)
 
+        # Event submission is deliberately unauthenticated at the gateway:
+        # submitters authenticate with an emailed magic link that the Lambda
+        # verifies itself (routes/submit.py). Attaching the Cognito authorizer
+        # here would reject link-holders before Lambda ever sees the token.
+        api_res.add_resource("submit-link").add_method("POST", integration)
+        api_res.add_resource("submissions").add_method("POST", integration)
+
         # Authenticated JSON API
-        api_res.add_resource("submissions").add_method("POST", integration, **authed)
         api_res.add_resource("my-submissions").add_method("GET", integration, **authed)
         api_res.add_resource("admin").add_proxy(
             default_integration=integration,

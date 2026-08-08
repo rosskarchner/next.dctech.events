@@ -34,18 +34,31 @@
 
   <main class="container">
     <h2 id="page-h2">Submit events to DC Tech Events</h2>
-    <p id="page-subtitle">To submit an event, you'll need to sign in. Don't have an account? Just email the info to ross@karchner.com.</p>
+    <p id="page-subtitle">No account needed — tell us your email and we'll send you a link to submit your event.</p>
 
-    <div id="auth-section">
-      <div class="auth-status" id="auth-status" data-auth="logged-out">
-        <p>Not signed in</p>
-        <button class="btn btn-primary" onclick="DctechAuth.login()">Sign In</button>
-      </div>
+    <div id="link-request" class="hidden">
+      <form id="link-form" class="card" style="padding: 1.25rem;">
+        <div class="form-group">
+          <label for="link-email">Your email <span class="required">*</span></label>
+          <input type="email" id="link-email" name="email" required
+                 autocomplete="email" placeholder="you@example.com">
+          <p class="hint" style="font-size: 0.9em; color: #666; margin-top: 0.35rem;">
+            We use it to send your submission link, and so we can follow up
+            about the event. It is not published.
+          </p>
+        </div>
+        <button type="submit" id="link-btn" class="btn btn-primary">Email me a submission link</button>
+      </form>
+      <p style="margin-top: 1rem; font-size: 0.9em; color: #666;">
+        Already have an account? <a href="#" onclick="DctechAuth.login(); return false;">Sign in instead</a>.
+      </p>
     </div>
 
     <div id="form-response" class="response-area"></div>
 
-    <form id="event-form" class="hidden" data-auth="logged-in">
+    <div id="submitting-as" class="hidden" style="margin-bottom: 1rem; font-size: 0.95em; color: #666;"></div>
+
+    <form id="event-form" class="hidden">
       <input type="hidden" name="type" value="event">
       <input type="hidden" name="site" id="site-field" value="dctech">
 
@@ -170,6 +183,15 @@
         </details>
       </div>
 
+      <div class="form-group" style="margin-top: 1rem;">
+        <label style="font-weight: normal; display: flex; gap: 0.5rem; align-items: flex-start;">
+          <input type="checkbox" id="newsletter-optin" name="newsletter_optin" value="true"
+                 style="margin-top: 0.25rem;">
+          <span>Sign me up for the weekly DC Tech Events newsletter — a roundup
+                of the week's events, every Monday.</span>
+        </label>
+      </div>
+
       <div class="form-actions">
         <button type="submit" id="submit-btn" class="btn btn-primary">
           <span class="htmx-indicator" id="submit-indicator"><span class="spinner"></span></span>
@@ -191,7 +213,7 @@
         document.getElementById('page-title').textContent = 'Submit an Event - DC STEM Events';
         document.getElementById('nav-brand').textContent = 'DC STEM Events Edit';
         document.getElementById('page-h2').textContent = 'Submit events to DC STEM Events';
-        document.getElementById('page-subtitle').textContent = 'To submit an event, you\'ll need to sign in. Don\'t have an account? Just email the info to ross@karchner.com.';
+        document.getElementById('page-subtitle').textContent = 'No account needed — tell us your email and we\'ll send you a link to submit your event.';
       }
     }
     document.addEventListener('DOMContentLoaded', updateSiteBranding);

@@ -767,3 +767,85 @@ def _post_item_to_dict(item):
         if field in item and field != 'slug':
             post[field] = _to_plain(item[field])
     return post
+
+
+# ─── Magic-link rate limiting ─────────────────────────────────────
+
+# /api/submit-link is unauthenticated and sends mail to whatever address it
+# is given, so without a limit it is an open relay for filling a stranger's
+# inbox. One record per address, self-expiring via the table's `ttl`.
+MAGIC_LINK_COOLDOWN_SECONDS = 60
+MAGIC_LINK_MAX_PER_DAY = 6
+
+
+def check_and_record_link_request(email, now=None):
+    """Consume one magic-link send for `email`.
+
+    Returns (allowed, retry_after_seconds). Records the send when allowed.
+    """
+    now = int(now if now is not None else time.time())
+    table = _get_table()
+    key = {'PK': f'MAGICLINK#{email}', 'SK': 'META'}
+
+    item = (table.get_item(Key=key).get('Item') or {})
+    window_start = int(item.get('window_start', 0))
+    sent = int(item.get('sent', 0))
+    last_sent = int(item.get('last_sent', 0))
+
+    # A day since the window opened resets the allowance.
+    if now - window_start >= 86400:
+        window_start, sent = now, 0
+
+    if last_sent and now - last_sent < MAGIC_LINK_COOLDOWN_SECONDS:
+        return False, MAGIC_LINK_COOLDOWN_SECONDS - (now - last_sent)
+
+    if sent >= MAGIC_LINK_MAX_PER_DAY:
+        return False, (window_start + 86400) - now
+
+    table.put_item(Item={
+        **key,
+        'window_start': window_start,
+        'sent': sent + 1,
+        'last_sent': now,
+        # Outlive the daily window so the counter is not reset early by TTL.
+        'ttl': window_start + 86400 * 2,
+    })
+    return True, 0
+
+
+# ─── Newsletter opt-in (from the submission form) ─────────────────
+
+def subscribe_to_newsletter(email, contact_list, topic):
+    """Opt `email` in to a newsletter topic.
+
+    Called only for addresses already proven — via a magic link or Cognito —
+    to belong to the submitter, so this skips the double opt-in confirmation
+    the public signup form uses. Raises on failure; callers decide whether a
+    newsletter problem should sink the surrounding request.
+    """
+    ses = boto3.client('sesv2')
+    try:
+        ses.create_contact(
+            ContactListName=contact_list,
+            EmailAddress=email,
+            TopicPreferences=[
+                {'TopicName': topic, 'SubscriptionStatus': 'OPT_IN'}],
+        )
+        return 'created'
+    except ses.exceptions.AlreadyExistsException:
+        contact = ses.get_contact(
+            ContactListName=contact_list, EmailAddress=email)
+        preferences = contact.get('TopicPreferences', [])
+        for pref in preferences:
+            if pref['TopicName'] == topic:
+                pref['SubscriptionStatus'] = 'OPT_IN'
+                break
+        else:
+            preferences.append(
+                {'TopicName': topic, 'SubscriptionStatus': 'OPT_IN'})
+        ses.update_contact(
+            ContactListName=contact_list,
+            EmailAddress=email,
+            TopicPreferences=preferences,
+        )
+        return 'updated'

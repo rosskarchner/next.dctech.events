@@ -1,12 +1,27 @@
 """
-Submission routes (authenticated users).
+Submission routes.
+
+Submitting no longer requires a Cognito account: a submitter can prove control
+of an email address by clicking an emailed magic link instead. Cognito claims
+still work, so admins and already-signed-in users are unaffected — see
+`_resolve_submitter`, which accepts either.
 """
 
 import json
+import os
 
+import magic_link
 from auth import get_user_from_event
-from db import create_draft, get_all_categories, get_drafts_by_submitter
+from db import (
+    create_draft, get_all_categories, get_drafts_by_submitter,
+    check_and_record_link_request, subscribe_to_newsletter,
+)
 from routes.responses import html as _html, json as _json_response
+
+CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
+NEWSLETTER_TOPIC = os.environ.get('NEWSLETTER_TOPIC', 'dctech')
+REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'ross@karchner.com')
+FROM_EMAIL = os.environ.get('FROM_EMAIL', 'outbound@dctech.events')
 
 
 def _parse_body(event):
@@ -204,13 +219,11 @@ def my_submissions(event, jinja_env):
 
 def submit_event_json(event, jinja_env):
     """POST /api/submissions — create a draft event or group submission."""
-    claims, err = get_user_from_event(event)
+    data = _parse_body(event)
+    submitter, submitter_id, err = _resolve_submitter(event, data)
     if err:
         return err
 
-    data = _parse_body(event)
-    submitter = claims.get('email')
-    submitter_id = claims.get('sub')
     submission_type = data.get('type', 'event')
 
     if submission_type == 'group':
@@ -218,7 +231,9 @@ def submit_event_json(event, jinja_env):
         if error:
             return _json(400, _error_payload(error), event)
         draft_id = create_draft('group', draft_data, submitter, submitter_id)
-        return _json(201, {'draft_id': draft_id, 'draft_type': 'group'}, event)
+        subscribed = _maybe_subscribe(data, submitter)
+        return _json(201, {'draft_id': draft_id, 'draft_type': 'group',
+                           'subscribed': subscribed}, event)
 
     draft_data, error = _build_event_draft_data(data)
     if error:
@@ -227,7 +242,11 @@ def submit_event_json(event, jinja_env):
     if site:
         draft_data['site'] = site
     draft_id = create_draft('event', draft_data, submitter, submitter_id)
-    return _json(201, {'draft_id': draft_id, 'draft_type': 'event'}, event)
+    # After the draft is safely stored, so a newsletter hiccup cannot cost
+    # the user the submission they just filled in.
+    subscribed = _maybe_subscribe(data, submitter)
+    return _json(201, {'draft_id': draft_id, 'draft_type': 'event',
+                       'subscribed': subscribed}, event)
 
 
 def my_submissions_json(event, jinja_env):
@@ -240,3 +259,113 @@ def my_submissions_json(event, jinja_env):
     user_id = claims.get('sub') or submitter
     drafts = get_drafts_by_submitter(user_id)
     return _json(200, {'submissions': drafts}, event)
+
+
+# ─── Magic-link submission ────────────────────────────────────────
+
+def _resolve_submitter(event, data):
+    """Identify the submitter from a magic link or Cognito claims.
+
+    Returns (submitter_email, submitter_id, error_response). The magic link is
+    checked first so a signed-out submitter never trips the Cognito path; the
+    id falls back to the email because drafts are keyed by submitter id and a
+    link-authenticated user has no Cognito `sub`.
+    """
+    email, timestamp, signature = magic_link.token_from_request(data)
+    if email or timestamp or signature:
+        ok, reason = magic_link.verify_token(email, timestamp, signature)
+        if not ok:
+            return None, None, _json(401, _error_payload(reason), event)
+        return email, f'magiclink:{email}', None
+
+    claims, err = get_user_from_event(event)
+    if err:
+        return None, None, _json(
+            401,
+            _error_payload(
+                'Please request a submission link, or sign in, to submit.'),
+            event,
+        )
+    return claims.get('email'), claims.get('sub'), None
+
+
+def _maybe_subscribe(data, email):
+    """Honor the newsletter opt-in checkbox.
+
+    Never raises: a newsletter problem must not lose an event submission the
+    user already filled in. Worst case they subscribe again from /newsletter.
+    """
+    raw = data.get('newsletter_optin') or data.get('newsletter')
+    opted_in = str(raw).lower() in ('1', 'true', 'on', 'yes')
+    if not opted_in or not email:
+        return False
+
+    try:
+        # The address is already proven — by the magic link or by Cognito —
+        # so this skips the double opt-in the public signup form requires.
+        subscribe_to_newsletter(email, CONTACT_LIST_NAME, NEWSLETTER_TOPIC)
+        return True
+    except Exception as exc:
+        print(f'Newsletter opt-in failed for {email}: {exc}')
+        return False
+
+
+def request_link_json(event, jinja_env):
+    """POST /api/submit-link — email a magic link to submit an event."""
+    import boto3
+
+    data = _parse_body(event)
+    email = magic_link.normalize_email(data.get('email'))
+
+    if not magic_link.is_valid_email(email):
+        return _json(400, _error_payload('Please enter a valid email address.'),
+                     event)
+
+    allowed, retry_after = check_and_record_link_request(email)
+    if not allowed:
+        minutes = max(1, round(retry_after / 60))
+        return _json(429, _error_payload(
+            f'A link was just sent to that address. Please check your inbox, '
+            f'or try again in {minutes} minute{"s" if minutes != 1 else ""}.'
+        ), event)
+
+    try:
+        timestamp, signature = magic_link.generate_token(email)
+        link = magic_link.build_link(email, timestamp, signature)
+        hours = magic_link.TOKEN_TTL_SECONDS // 3600
+
+        ses = boto3.client('sesv2')
+        ses.send_email(
+            FromEmailAddress=FROM_EMAIL,
+            ReplyToAddresses=[REPLY_TO_EMAIL],
+            Destination={'ToAddresses': [email]},
+            Content={'Simple': {
+                'Subject': {'Data': 'Your DC Tech Events submission link'},
+                'Body': {
+                    'Html': {'Data': (
+                        '<p>Use this link to submit your event to '
+                        'DC Tech Events:</p>'
+                        f'<p><a href="{link}">Submit an event</a></p>'
+                        f'<p>The link works for the next {hours} hours. '
+                        'If you did not request it, you can ignore this '
+                        'email — nothing was submitted.</p>'
+                    )},
+                    'Text': {'Data': (
+                        'Use this link to submit your event to '
+                        f'DC Tech Events:\n\n{link}\n\n'
+                        f'The link works for the next {hours} hours. If you '
+                        'did not request it, you can ignore this email — '
+                        'nothing was submitted.\n'
+                    )},
+                },
+            }},
+        )
+    except Exception as exc:
+        print(f'Failed to send magic link to {email}: {exc}')
+        return _json(500, _error_payload(
+            'We could not send that email. Please try again shortly.'), event)
+
+    return _json(200, {
+        'message': ('Check your email — we sent you a link to submit your '
+                    'event. It may take a minute to arrive.'),
+    }, event)

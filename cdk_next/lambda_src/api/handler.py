@@ -109,6 +109,11 @@ def lambda_handler(event, context):
         if path == '/api/categories':
             return add_cors(public.get_categories(event, jinja_env))
 
+        # Magic-link submission: both are public at the gateway and do their
+        # own token checking, so a submitter never needs a Cognito account.
+        if path == '/api/submit-link' and http_method == 'POST':
+            return add_cors(submit.request_link_json(event, jinja_env))
+
         if path == '/api/submissions' and http_method == 'POST':
             return add_cors(submit.submit_event_json(event, jinja_env))
 

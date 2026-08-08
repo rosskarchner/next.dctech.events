@@ -79,8 +79,14 @@ class NextCognitoStack(cdk.Stack):
             user_pool_name="dctech-events-users",
             username_attributes=["email"],
             auto_verified_attributes=["email"],
+            # Public sign-up is closed: event submission now runs on emailed
+            # magic links (see routes/submit.py), so a self-service account
+            # buys a submitter nothing, while the open SignUp endpoint was
+            # taking sustained bot registrations. Admins are created with
+            # AdminCreateUser. Mutable property — existing accounts are
+            # untouched and keep signing in.
             admin_create_user_config=cognito.CfnUserPool.AdminCreateUserConfigProperty(
-                allow_admin_create_user_only=False,
+                allow_admin_create_user_only=True,
             ),
             account_recovery_setting=cognito.CfnUserPool.AccountRecoverySettingProperty(
                 recovery_mechanisms=[
