@@ -60,6 +60,12 @@ if [ -d lambda_src/ops ]; then
   cp lambda_src/api/db.py build/ops/
 fi
 
+# ── updates_publisher (weekly /updates post; stdlib + boto3 only) ───
+if [ -e lambda_src/updates_publisher/app.py ]; then
+  mkdir -p build/updates_publisher
+  cp -r lambda_src/updates_publisher/. build/updates_publisher/
+fi
+
 # ── qa_agent / discovery_agent (stub scaffolds, no deps) ────────────
 for agent in qa_agent discovery_agent; do
   if [ -e "lambda_src/$agent/handler.py" ]; then

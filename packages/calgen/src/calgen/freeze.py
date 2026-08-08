@@ -6,6 +6,7 @@ from calgen.app import (
     create_app, get_events, get_upcoming_weeks, get_categories, get_upcoming_months,
     get_category_month_combos,
 )
+from calgen.updates import get_free_posts, get_update_posts
 from calgen.site_config import get_config
 
 
@@ -95,6 +96,26 @@ def create_freezer(app):
         if plugin:
             for region in plugin.list_regions():
                 yield {'slug': region['slug']}
+
+    @freezer.register_generator
+    def updates_index():
+        yield {}
+
+    @freezer.register_generator
+    def update_post():
+        for post in get_update_posts():
+            yield {'year': post['year'],
+                   'month': post['month'],
+                   'day': post['day']}
+
+    @freezer.register_generator
+    def free_post():
+        for post in get_free_posts():
+            yield {'slug': post['slug']}
+
+    @freezer.register_generator
+    def updates_rss_feed():
+        yield {}
 
     @freezer.register_generator
     def not_found_page():

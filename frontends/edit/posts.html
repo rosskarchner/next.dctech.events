@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">Updates Posts - DC Tech Events Admin</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+  <script src="/edit/js/config.js"></script>
+  <script src="/edit/js/auth.js"></script>
+  <style>
+    .posts-layout {
+      display: grid;
+      grid-template-columns: minmax(240px, 320px) 1fr;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 820px) {
+      .posts-layout { grid-template-columns: 1fr; }
+    }
+    .post-list { list-style: none; margin: 0; padding: 0; }
+    .post-list li {
+      border-bottom: 1px solid var(--color-border, #ddd);
+    }
+    .post-list button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      padding: 0.75rem;
+      cursor: pointer;
+      font: inherit;
+      color: inherit;
+    }
+    .post-list button:hover,
+    .post-list button.selected {
+      background-color: var(--color-bg-secondary, #f5f5f5);
+    }
+    .post-list .post-title { font-weight: 600; display: block; }
+    .post-list .post-meta {
+      font-size: 0.85em;
+      color: var(--color-text-muted, #666);
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.75em;
+      font-weight: 600;
+      padding: 0.1rem 0.4rem;
+      border-radius: 0.25rem;
+      margin-left: 0.35rem;
+      vertical-align: middle;
+    }
+    .badge-draft { background: #fef3c7; color: #92400e; }
+    .badge-published { background: #dcfce7; color: #166534; }
+    .field { margin-bottom: 1rem; }
+    .field label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+    .field input[type="text"],
+    .field input[type="date"],
+    .field select,
+    .field textarea {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid var(--color-border, #ddd);
+      border-radius: 0.25rem;
+      font: inherit;
+    }
+    .field textarea {
+      min-height: 22rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    .field .hint {
+      font-size: 0.85em;
+      color: var(--color-text-muted, #666);
+      margin-top: 0.25rem;
+    }
+    .editor-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 1.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--color-border, #ddd);
+    }
+    .btn-danger {
+      background: none;
+      border: 1px solid #dc2626;
+      color: #dc2626;
+      padding: 0.5rem 1rem;
+      border-radius: 0.25rem;
+      cursor: pointer;
+      font: inherit;
+      margin-left: auto;
+    }
+    .btn-danger:hover { background: #fee2e2; }
+    .empty-state {
+      padding: 2rem;
+      text-align: center;
+      color: var(--color-text-muted, #666);
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px;">
+      <div style="display:flex; align-items: center; gap: 2rem;">
+        <a href="index.html" class="nav-brand" id="nav-brand">DC Tech Events Edit</a>
+        <ul class="nav-links" data-auth="admin" style="display:flex; list-style: none; gap: 1rem; margin: 0; padding: 0;">
+          <li><a href="queue.html">Queue</a></li>
+          <li><a href="posts.html" style="font-weight: bold;">Posts</a></li>
+          <li><a href="subscribers.html">Subscribers</a></li>
+        </ul>
+      </div>
+      <div class="nav-right">
+        <span data-auth="logged-in" class="hidden">
+          <span data-user="name"></span>
+          <button class="btn-sign-out" onclick="DctechAuth.logout()">Sign Out</button>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div class="page-header">
+      <h1>Updates Posts</h1>
+      <p>
+        Write free-form posts for
+        <a href="/updates/" target="_blank" rel="noopener">/updates</a>.
+        Published posts appear on the site after the next rebuild (a few
+        minutes); drafts are only visible here.
+      </p>
+    </div>
+
+    <div id="post-message"></div>
+
+    <div class="posts-layout">
+      <div class="card" style="padding: 0;">
+        <div style="padding: 0.75rem; border-bottom: 1px solid var(--color-border, #ddd);">
+          <button class="btn btn-primary" id="new-post" style="width: 100%;">New post</button>
+        </div>
+        <div id="posts-loading" style="text-align: center; padding: 1.5rem;">
+          <span class="spinner"></span> Loading…
+        </div>
+        <ul class="post-list" id="post-list"></ul>
+      </div>
+
+      <div class="card">
+        <div id="editor-empty" class="empty-state">
+          Select a post to edit, or create a new one.
+        </div>
+
+        <form id="post-form" class="hidden">
+          <div class="field">
+            <label for="post-title">Title</label>
+            <input type="text" id="post-title" name="title" required>
+          </div>
+
+          <div class="field">
+            <label for="post-slug">Slug</label>
+            <input type="text" id="post-slug" name="slug"
+                   pattern="[a-z0-9\-]*"
+                   placeholder="derived from the title">
+            <p class="hint">
+              The URL is <code>/updates/<span id="slug-preview">your-slug</span>/</code>.
+              Changing it on a published post moves the URL and breaks old links.
+            </p>
+          </div>
+
+          <div class="field">
+            <label for="post-date">Published on</label>
+            <input type="date" id="post-date" name="published_on">
+            <p class="hint">Controls where the post sorts on /updates.</p>
+          </div>
+
+          <div class="field">
+            <label for="post-status">Status</label>
+            <select id="post-status" name="status">
+              <option value="draft">Draft — not on the site</option>
+              <option value="published">Published</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="post-summary">Summary <span style="font-weight:normal">(optional)</span></label>
+            <input type="text" id="post-summary" name="summary"
+                   placeholder="Defaults to the first line of the body">
+            <p class="hint">Shown on the index and in the RSS feed.</p>
+          </div>
+
+          <div class="field">
+            <label for="post-body">Body</label>
+            <textarea id="post-body" name="body"
+                      placeholder="Write in Markdown…"></textarea>
+            <p class="hint">Markdown. Rendered when the site rebuilds.</p>
+          </div>
+
+          <div class="editor-actions">
+            <button type="submit" class="btn btn-primary" id="save-post">Save</button>
+            <button type="button" class="btn" id="cancel-edit">Cancel</button>
+            <button type="button" class="btn-danger" id="delete-post">Delete</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <noscript>
+      <div class="message message-warning">
+        <p>JavaScript is required to manage posts.</p>
+      </div>
+    </noscript>
+  </main>
+
+  <script src="/edit/js/posts.js"></script>
+</body>
+</html>

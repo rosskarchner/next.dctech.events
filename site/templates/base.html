@@ -72,6 +72,7 @@
                 {% if request.path == '/locations/va/' %}<span aria-current="page">VA</span>{% else %}<a href="/locations/va/">VA</a>{% endif %} |
                 {% if request.path == '/locations/md/' %}<span aria-current="page">MD</span>{% else %}<a href="/locations/md/">MD</a>{% endif %} |
                 {% if request.path == '/groups/' %}<span aria-current="page">Groups</span>{% else %}<a href="/groups/">Groups</a>{% endif %} |
+                {% if request.path.startswith('/updates/') %}<span aria-current="page">Updates</span>{% else %}<a href="/updates/">Updates</a>{% endif %} |
                 <a href="{{ add_events_link }}">Add an event</a>
             </nav>
         </div>

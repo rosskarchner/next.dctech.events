@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Updates - {{ site_name }}{% endblock %}
+
+{% block description %}Weekly roundups of technology events in and around Washington, DC.{% endblock %}
+
+{% block og_title %}{{ site_name }} Updates{% endblock %}
+{% block og_description %}Weekly roundups of technology events in and around Washington, DC{% endblock %}
+
+{% block twitter_title %}{{ site_name }} Updates{% endblock %}
+{% block twitter_description %}Weekly roundups of technology events in and around Washington, DC{% endblock %}
+
+{% block extra_head %}
+<link rel="alternate" type="application/rss+xml" title="{{ site_name }} Updates" href="/updates/feed.xml">
+<script type="application/ld+json">
+{{ {
+  "@context": "https://schema.org",
+  "@type": "Blog",
+  "name": site_name ~ " Updates",
+  "description": "Weekly roundups of technology events in and around Washington, DC",
+  "url": base_url ~ "/updates/"
+} | tojson }}
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="updates-container">
+    <header class="updates-header">
+        <h1>Updates</h1>
+        <p>A roundup of the week's tech events, posted every Monday.
+           <a href="/updates/feed.xml">Subscribe via RSS</a>.</p>
+    </header>
+
+    {% if posts %}
+    <ul class="updates-list">
+        {% for post in posts %}
+        <li class="update-entry">
+            <h2><a href="{{ post.url }}">{{ post.title }}</a></h2>
+            <p class="update-meta">
+                <time datetime="{{ post.published_on.strftime('%Y-%m-%d') }}">{{ post.date_formatted }}</time>
+                {% if post.kind == 'weekly' %}<span class="update-badge">Weekly roundup</span>{% endif %}
+            </p>
+            {% if post.summary %}<p class="update-summary">{{ post.summary }}</p>{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No updates have been published yet. The first roundup goes out Monday.</p>
+    {% endif %}
+</div>
+{% endblock %}

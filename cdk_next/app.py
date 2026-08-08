@@ -21,6 +21,8 @@ from stacks.newsletter_stack import NextNewsletterStack
 from stacks.qa_agent_stack import NextQaAgentStack
 from stacks.discovery_agent_stack import NextDiscoveryAgentStack
 from stacks.ops_stack import NextOpsStack
+from stacks.social_stack import NextSocialStack
+from stacks.updates_stack import NextUpdatesStack
 from stacks.cicd_stack import NextCicdStack
 
 app = cdk.App()
@@ -67,6 +69,8 @@ discovery_agent = NextDiscoveryAgentStack(
 )
 
 ops = NextOpsStack(app, "NextOpsStack", table=db.table, env=env)
+social = NextSocialStack(app, "NextSocialStack", env=env)
+updates = NextUpdatesStack(app, "NextUpdatesStack", table=db.table, env=env)
 cicd = NextCicdStack(app, "NextCicdStack", env=env)
 
 # Tags cannot be added during `cdk import`; NextCognitoStack picks them up

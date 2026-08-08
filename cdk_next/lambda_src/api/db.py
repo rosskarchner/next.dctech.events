@@ -713,3 +713,57 @@ def delete_category(slug):
     """Delete a CATEGORY entity."""
     table = _get_table()
     table.delete_item(Key={'PK': f'CATEGORY#{slug}', 'SK': 'META'})
+
+
+# ─── POST operations (free-form /updates posts) ───────────────────
+
+POST_FIELDS = ['title', 'slug', 'body', 'published_on', 'status', 'summary',
+               'author', 'created_at', 'updated_at']
+
+
+def get_all_posts():
+    """Every free-form post, drafts included. Newest first."""
+    table = _get_table()
+    items = _scan_all(table, FilterExpression=Attr('PK').begins_with('POST#')
+                      & Attr('SK').eq('META'))
+    posts = [_post_item_to_dict(item) for item in items]
+    posts.sort(key=lambda p: (p.get('published_on') or '', p.get('slug', '')),
+               reverse=True)
+    return posts
+
+
+def get_post(slug):
+    """A single free-form post by slug."""
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'POST#{slug}', 'SK': 'META'})
+    item = response.get('Item')
+    return _post_item_to_dict(item) if item else None
+
+
+def put_post(slug, data):
+    """Create or update a free-form POST entity."""
+    table = _get_table()
+    item = {
+        'PK': f'POST#{slug}',
+        'SK': 'META',
+        'slug': slug,
+        **{k: _from_plain(v) for k, v in data.items()
+           if k in POST_FIELDS and v is not None},
+    }
+    table.put_item(Item=item)
+
+
+def delete_post(slug):
+    """Delete a free-form POST entity."""
+    table = _get_table()
+    table.delete_item(Key={'PK': f'POST#{slug}', 'SK': 'META'})
+
+
+def _post_item_to_dict(item):
+    """Convert a DynamoDB POST item to a dict."""
+    slug = item['PK'].split('#', 1)[1]
+    post = {'slug': slug, 'status': item.get('status', 'draft')}
+    for field in POST_FIELDS:
+        if field in item and field != 'slug':
+            post[field] = _to_plain(item[field])
+    return post

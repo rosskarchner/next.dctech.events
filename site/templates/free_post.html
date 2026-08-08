@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ post.title }} - {{ site_name }}{% endblock %}
+
+{% block description %}{{ summary }}{% endblock %}
+
+{% block og_title %}{{ post.title }}{% endblock %}
+{% block og_description %}{{ summary }}{% endblock %}
+
+{% block twitter_title %}{{ post.title }}{% endblock %}
+{% block twitter_description %}{{ summary }}{% endblock %}
+
+{% block extra_head %}
+<link rel="alternate" type="application/rss+xml" title="{{ site_name }} Updates" href="/updates/feed.xml">
+<script type="application/ld+json">
+{{ {
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": post.title,
+  "description": summary,
+  "datePublished": post.published_on.strftime('%Y-%m-%d'),
+  "url": base_url ~ post.url,
+  "isPartOf": {
+    "@type": "Blog",
+    "name": site_name ~ " Updates",
+    "url": base_url ~ "/updates/"
+  }
+} | tojson }}
+</script>
+{% endblock %}
+
+{% block content %}
+<article class="update-post h-entry">
+    <header class="update-header">
+        <h1 class="p-name">{{ post.title }}</h1>
+        <p class="update-meta">
+            <time class="dt-published" datetime="{{ post.published_on.strftime('%Y-%m-%d') }}">{{ post.date_formatted }}</time>
+            &middot; <a href="/updates/">All updates</a>
+        </p>
+    </header>
+
+    {# Authored by an admin through /edit and rendered from Markdown at build
+       time, so the HTML is trusted and intentionally not escaped. #}
+    <div class="e-content update-body">{{ post.body_html | safe }}</div>
+
+    <footer class="update-footer">
+        <p>
+            <a href="/updates/">&larr; All updates</a>
+            &middot; <a href="/updates/feed.xml">RSS</a>
+        </p>
+    </footer>
+</article>
+{% endblock %}

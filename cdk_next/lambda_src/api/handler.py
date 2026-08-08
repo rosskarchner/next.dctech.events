@@ -136,6 +136,22 @@ def lambda_handler(event, context):
             draft_id = path.split('/')[4]
             return add_cors(admin.get_draft_json(event, jinja_env, draft_id))
 
+        # Free-form /updates posts
+        if path == '/api/admin/posts' and http_method == 'GET':
+            return add_cors(admin.list_posts_json(event, jinja_env))
+
+        if path == '/api/admin/posts' and http_method == 'POST':
+            return add_cors(admin.create_post_json(event, jinja_env))
+
+        if path.startswith('/api/admin/posts/'):
+            slug = path.split('/')[4]
+            if http_method == 'GET':
+                return add_cors(admin.get_post_json(event, jinja_env, slug))
+            if http_method == 'PUT':
+                return add_cors(admin.update_post_json(event, jinja_env, slug))
+            if http_method == 'DELETE':
+                return add_cors(admin.delete_post_json(event, jinja_env, slug))
+
         # Submission routes (authenticated)
         if path == '/submit' and http_method == 'GET':
             return add_cors(submit.submit_form(event, jinja_env))

@@ -141,6 +141,27 @@ def main():
                     _clean(item))
     counts['recurring'] = len(by_prefix.get('RECURRING', []))
 
+    # ── _updates/ ───────────────────────────────────────────────────
+    # Published weekly posts. These are frozen snapshots written by the
+    # updates publisher — exported verbatim, since the events they list are
+    # in the past by the time anyone reads the archive and can no longer be
+    # reconstructed from the pipeline.
+    _reset_dir('_updates')
+    for item in by_prefix.get('UPDATE', []):
+        week_id = item['PK'].split('#', 1)[1]
+        _write_yaml(os.path.join('_updates', f'{week_id}.yaml'), _clean(item))
+    counts['updates'] = len(by_prefix.get('UPDATE', []))
+
+    # ── _posts/ ─────────────────────────────────────────────────────
+    # Free-form posts authored in /edit. Drafts are exported too — calgen is
+    # the single place that decides what renders, and it skips anything not
+    # marked published.
+    _reset_dir('_posts')
+    for item in by_prefix.get('POST', []):
+        slug = item['PK'].split('#', 1)[1]
+        _write_yaml(os.path.join('_posts', f'{slug}.yaml'), _clean(item))
+    counts['posts'] = len(by_prefix.get('POST', []))
+
     # ── _cache/ical/ ────────────────────────────────────────────────
     _reset_dir(os.path.join('_cache', 'ical'))
     for item in by_prefix.get('ICAL', []):

@@ -10,6 +10,7 @@ git-committed YAML to update.
 import json
 import os
 import re
+import time
 
 import boto3
 
@@ -18,6 +19,7 @@ from db import (
     get_drafts_by_status, get_draft as db_get_draft, update_draft_status,
     promote_draft_to_event, put_group,
     get_all_categories,
+    get_all_posts, get_post as db_get_post, put_post, delete_post,
 )
 
 CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
@@ -333,3 +335,140 @@ def get_subscribers_json(event, jinja_env):
     except Exception as e:
         print(f"Error fetching subscribers: {e}")
         return _json(500, {'error': str(e)})
+
+
+# ─── Free-form /updates posts ─────────────────────────────────────
+
+VALID_POST_STATUSES = ('draft', 'published')
+
+
+def _post_payload(event):
+    """Read a JSON post body, falling back to form encoding."""
+    raw = event.get('body') or ''
+    try:
+        data = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        data = _parse_body(event)
+    return data if isinstance(data, dict) else {}
+
+
+def _clean_post(data, existing=None):
+    """Validate and normalize a post payload. Returns (post, error)."""
+    existing = existing or {}
+
+    title = str(data.get('title') or existing.get('title') or '').strip()
+    if not title:
+        return None, 'Title is required'
+
+    body = data.get('body')
+    if body is None:
+        body = existing.get('body', '')
+    body = str(body)
+
+    # An explicit slug wins, then the existing one (so renaming the title of a
+    # published post does not silently move its URL), then the title.
+    slug = _slugify(data.get('slug') or existing.get('slug') or title)
+    if not slug:
+        return None, 'Could not derive a slug from the title'
+
+    status = str(data.get('status') or existing.get('status') or 'draft').lower()
+    if status not in VALID_POST_STATUSES:
+        return None, f"Status must be one of {', '.join(VALID_POST_STATUSES)}"
+
+    published_on = str(
+        data.get('published_on') or existing.get('published_on') or ''
+    ).strip()
+    if not published_on:
+        published_on = time.strftime('%Y-%m-%d')
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', published_on):
+        return None, 'published_on must be YYYY-MM-DD'
+
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    return {
+        'slug': slug,
+        'title': title,
+        'body': body,
+        'status': status,
+        'published_on': published_on,
+        'summary': str(data.get('summary') or existing.get('summary') or '').strip(),
+        'created_at': existing.get('created_at') or now,
+        'updated_at': now,
+    }, None
+
+
+def list_posts_json(event, jinja_env):
+    """GET /api/admin/posts — every post, drafts included."""
+    claims, err = _admin_check(event)
+    if err:
+        return err
+    return _json(200, {'posts': get_all_posts()})
+
+
+def get_post_json(event, jinja_env, slug):
+    """GET /api/admin/posts/{slug}."""
+    claims, err = _admin_check(event)
+    if err:
+        return err
+
+    post = db_get_post(slug)
+    if not post:
+        return _json(404, {'error': 'Post not found'})
+    return _json(200, {'post': post})
+
+
+def create_post_json(event, jinja_env):
+    """POST /api/admin/posts."""
+    claims, err = _admin_check(event)
+    if err:
+        return err
+
+    post, msg = _clean_post(_post_payload(event))
+    if msg:
+        return _json(400, {'error': msg})
+
+    if db_get_post(post['slug']):
+        return _json(409, {'error': f"A post with slug '{post['slug']}' already exists"})
+
+    post['author'] = claims.get('email', '')
+    put_post(post['slug'], post)
+    return _json(201, {'post': post})
+
+
+def update_post_json(event, jinja_env, slug):
+    """PUT /api/admin/posts/{slug}."""
+    claims, err = _admin_check(event)
+    if err:
+        return err
+
+    existing = db_get_post(slug)
+    if not existing:
+        return _json(404, {'error': 'Post not found'})
+
+    post, msg = _clean_post(_post_payload(event), existing=existing)
+    if msg:
+        return _json(400, {'error': msg})
+
+    # A slug change is a move: write the new key, drop the old one. Guard
+    # against clobbering an unrelated post that already owns the new slug.
+    if post['slug'] != slug:
+        if db_get_post(post['slug']):
+            return _json(409, {'error': f"A post with slug '{post['slug']}' already exists"})
+
+    post['author'] = existing.get('author') or claims.get('email', '')
+    put_post(post['slug'], post)
+    if post['slug'] != slug:
+        delete_post(slug)
+    return _json(200, {'post': post})
+
+
+def delete_post_json(event, jinja_env, slug):
+    """DELETE /api/admin/posts/{slug}."""
+    claims, err = _admin_check(event)
+    if err:
+        return err
+
+    if not db_get_post(slug):
+        return _json(404, {'error': 'Post not found'})
+
+    delete_post(slug)
+    return _json(200, {'deleted': slug})

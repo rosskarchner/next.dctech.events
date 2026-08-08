@@ -23,6 +23,7 @@ dependencies = [
     "python-dateutil>=2.8",
     "click>=8.0",
     "beautifulsoup4>=4.11",
+    "markdown>=3.5",
 ]
 
 [project.optional-dependencies]
