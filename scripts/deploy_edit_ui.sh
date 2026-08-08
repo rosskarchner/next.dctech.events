@@ -26,7 +26,14 @@ find "$STAGING" -type f \( -name '*.js' -o -name '*.html' \) -print0 |
     -e "s|{{API_BASE}}|$API_BASE|g" \
     -e "s|{{COGNITO_CLIENT_ID}}|$CLIENT_ID|g"
 
-aws s3 sync "$STAGING/" "s3://$BUCKET/edit/" --delete
+# no-cache means "revalidate before reusing", not "never cache": the browser
+# still stores the file and an ETag match returns a cheap 304. Without an
+# explicit Cache-Control, S3 sends none, and browsers fall back to heuristic
+# freshness (roughly 10% of the age since Last-Modified) — so a returning
+# visitor kept running the previous deploy's JS for hours. Invalidating
+# CloudFront does not help there; it never reaches the browser's cache.
+aws s3 sync "$STAGING/" "s3://$BUCKET/edit/" --delete \
+  --cache-control "no-cache, must-revalidate"
 aws cloudfront create-invalidation --distribution-id "$DIST_ID" \
   --paths '/edit/*' >/dev/null
 
