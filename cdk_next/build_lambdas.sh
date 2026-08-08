@@ -64,6 +64,8 @@ fi
 if [ -e lambda_src/updates_publisher/app.py ]; then
   mkdir -p build/updates_publisher
   cp -r lambda_src/updates_publisher/. build/updates_publisher/
+  # Tests live next to the handler; they have no business in the bundle.
+  rm -rf build/updates_publisher/test_*.py build/updates_publisher/__pycache__
 fi
 
 # ── qa_agent / discovery_agent (stub scaffolds, no deps) ────────────
