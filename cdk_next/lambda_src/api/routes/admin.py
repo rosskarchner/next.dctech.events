@@ -21,7 +21,7 @@ from db import (
     get_all_categories,
     get_all_posts, get_post as db_get_post, put_post, delete_post,
     trust_submitter, untrust_submitter, list_trusted_submitters,
-    is_trusted_submitter,
+    is_trusted_submitter, promote_draft,
 )
 
 CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
@@ -72,25 +72,12 @@ def _parse_body(event):
 
 
 def _promote_approved_draft(draft_id, draft_type, merged):
-    """Promote an approved draft directly in DynamoDB (no git-commit hop)."""
-    if draft_type == 'group':
-        slug = _slugify(merged.get('name', draft_id))
-        group_data = {
-            'name': merged.get('name', ''),
-            'website': merged.get('website', ''),
-            'active': True,
-        }
-        if merged.get('ical_url') or merged.get('ical'):
-            group_data['ical'] = merged.get('ical') or merged.get('ical_url')
-        if merged.get('fallback_url'):
-            group_data['fallback_url'] = merged['fallback_url']
-        if merged.get('categories'):
-            group_data['categories'] = merged['categories']
-        put_group(slug, group_data)
-        return slug
-    merged = dict(merged)
-    merged.setdefault('id', draft_id)
-    return promote_draft_to_event(merged)
+    """Promote an approved draft directly in DynamoDB (no git-commit hop).
+
+    Thin wrapper over db.promote_draft, which MCP calls too — the rules for
+    what a published draft becomes live in exactly one place.
+    """
+    return promote_draft(draft_id, draft_type, merged)
 
 
 def dashboard(event, jinja_env):

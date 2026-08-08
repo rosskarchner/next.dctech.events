@@ -11,6 +11,7 @@ described in next-architecture-plan.md:
 """
 
 import os
+import re
 import time
 import uuid
 from datetime import date as _date_type, datetime, timedelta, timezone as _tz
@@ -919,3 +920,39 @@ def list_trusted_submitters():
         })
     out.sort(key=lambda t: t.get('trusted_at', ''))
     return out
+
+
+# ─── Draft promotion (shared by the REST admin routes and MCP) ────
+
+def slugify(text):
+    return re.sub(r'[^a-z0-9]+', '-', str(text or '').lower()).strip('-')
+
+
+def promote_draft(draft_id, draft_type, merged):
+    """Publish an approved draft: DRAFT# → EVENT# or GROUP#.
+
+    Lives here rather than in routes/admin.py because the MCP Lambda bundles
+    db.py but not the route modules — keeping it there would have meant a
+    second copy of the approval rules, free to drift from this one.
+
+    Returns the id of the published entity (event guid or group slug).
+    """
+    if draft_type == 'group':
+        slug = slugify(merged.get('name', draft_id))
+        group_data = {
+            'name': merged.get('name', ''),
+            'website': merged.get('website', ''),
+            'active': True,
+        }
+        if merged.get('ical_url') or merged.get('ical'):
+            group_data['ical'] = merged.get('ical') or merged.get('ical_url')
+        if merged.get('fallback_url'):
+            group_data['fallback_url'] = merged['fallback_url']
+        if merged.get('categories'):
+            group_data['categories'] = merged['categories']
+        put_group(slug, group_data)
+        return slug
+
+    merged = dict(merged)
+    merged.setdefault('id', draft_id)
+    return promote_draft_to_event(merged)

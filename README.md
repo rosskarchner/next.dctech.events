@@ -99,3 +99,7 @@ Tools: `list_groups`, `add_group`, `set_group_active`, `verify_ical_feed`,
 `delete_single_event`, `list_recurring_events`, `add_recurring_event`,
 `update_recurring_event`, `delete_recurring_event`, `list_categories`,
 `add_category`, `get_overlay`, `set_overlay`, `get_events`, `trigger_rebuild`.
+
+Moderation: `list_pending_submissions`, `get_submission`, `approve_submission`
+(optionally trusting the submitter), `reject_submission`, and
+`list_trusted_submitters` / `trust_submitter` / `untrust_submitter`.

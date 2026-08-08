@@ -397,3 +397,140 @@ def trigger_rebuild() -> dict:
     codebuild = boto3.client('codebuild')
     build = codebuild.start_build(projectName=CODEBUILD_PROJECT_NAME)
     return {'build_id': build['build']['id']}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Submission review
+#
+# Mirrors the /api/admin moderation routes so the queue can be triaged from an
+# agent instead of the /edit UI. Both paths call the same db.* functions, so
+# approving here is byte-for-byte what approving in the browser does.
+#
+# Unlike the REST routes there is no per-user admin check: this endpoint is
+# IAM-authed for trusted callers within the account, which is the same trust
+# boundary that already lets add_single_event and set_overlay publish directly.
+# ─────────────────────────────────────────────────────────────────────────────
+
+MCP_REVIEWER = 'mcp:agent'
+
+
+@mcp.tool()
+def list_pending_submissions() -> list:
+    """List submissions awaiting review, newest first.
+
+    Each entry includes `submitter_trusted` so you can tell at a glance whether
+    this person's future events would already publish without review.
+    """
+    drafts = db.get_drafts_by_status('pending')
+    for draft in drafts:
+        draft['submitter_trusted'] = db.is_trusted_submitter(
+            draft.get('submitter_email', ''))
+    return drafts
+
+
+@mcp.tool()
+def get_submission(draft_id: str) -> dict:
+    """Full detail for one submission, including the submitter's history.
+
+    `submitter_history` is every other submission from the same address, which
+    is the evidence you want before deciding whether to trust someone.
+    """
+    draft = db.get_draft(draft_id)
+    if not draft:
+        raise ValueError(f'No submission with id {draft_id!r}')
+
+    email = draft.get('submitter_email', '')
+    draft['submitter_trusted'] = db.is_trusted_submitter(email)
+
+    submitter_id = draft.get('submitter_id') or email
+    history = [d for d in db.get_drafts_by_submitter(submitter_id)
+               if d.get('id') != draft_id]
+    draft['submitter_history'] = [
+        {k: d.get(k) for k in ('id', 'title', 'name', 'date', 'status',
+                               'created_at')}
+        for d in history
+    ]
+    return draft
+
+
+@mcp.tool()
+def approve_submission(draft_id: str, categories: list | None = None,
+                       trust_submitter: bool = False) -> dict:
+    """Approve a pending submission and publish it.
+
+    categories: overrides the submitted ones (validated against real slugs).
+    trust_submitter: also mark the submitter trusted, so their future *events*
+      publish automatically. Group submissions always keep getting reviewed.
+    """
+    draft = db.get_draft(draft_id)
+    if not draft:
+        raise ValueError(f'No submission with id {draft_id!r}')
+    if draft.get('status') != 'pending':
+        raise ValueError(
+            f"Submission {draft_id} is already {draft.get('status')!r}; "
+            'only pending submissions can be approved'
+        )
+
+    merged = {k: v for k, v in draft.items() if v is not None}
+    if categories is not None:
+        _check_categories(categories)
+        merged['categories'] = categories
+
+    draft_type = draft.get('draft_type', 'event')
+    published_id = db.promote_draft(draft_id, draft_type, merged)
+    db.update_draft_status(draft_id, 'APPROVED', MCP_REVIEWER)
+
+    result = {'draft_id': draft_id, 'draft_type': draft_type,
+              'published_id': published_id, 'trusted': None}
+
+    if trust_submitter:
+        email = str(draft.get('submitter_email') or '').strip().lower()
+        if email:
+            db.trust_submitter(email, trusted_by=MCP_REVIEWER)
+            result['trusted'] = email
+        else:
+            result['warning'] = 'Could not trust: draft has no submitter email'
+
+    return result
+
+
+@mcp.tool()
+def reject_submission(draft_id: str, reason: str | None = None) -> dict:
+    """Reject a pending submission. It is not published and stays on record."""
+    draft = db.get_draft(draft_id)
+    if not draft:
+        raise ValueError(f'No submission with id {draft_id!r}')
+    if draft.get('status') != 'pending':
+        raise ValueError(
+            f"Submission {draft_id} is already {draft.get('status')!r}; "
+            'only pending submissions can be rejected'
+        )
+
+    db.update_draft_status(draft_id, 'REJECTED', MCP_REVIEWER)
+    return {'draft_id': draft_id, 'status': 'rejected', 'reason': reason}
+
+
+@mcp.tool()
+def list_trusted_submitters() -> list:
+    """Addresses whose event submissions publish without review."""
+    return db.list_trusted_submitters()
+
+
+@mcp.tool()
+def trust_submitter(email: str, note: str | None = None) -> dict:
+    """Trust an address, so their future events publish without review."""
+    email = str(email or '').strip().lower()
+    if '@' not in email:
+        raise ValueError(f'{email!r} is not a valid email address')
+    db.trust_submitter(email, trusted_by=MCP_REVIEWER, note=note)
+    return {'trusted': email}
+
+
+@mcp.tool()
+def untrust_submitter(email: str) -> dict:
+    """Revoke trust. Their future submissions go back through the queue."""
+    email = str(email or '').strip().lower()
+    if not db.is_trusted_submitter(email):
+        raise ValueError(f'{email!r} is not currently trusted')
+    db.untrust_submitter(email)
+    return {'untrusted': email}

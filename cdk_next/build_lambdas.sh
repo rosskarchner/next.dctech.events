@@ -31,6 +31,8 @@ uv pip install "${UV_ARGS[@]}" --target build/api jinja2 pytz
 mkdir -p build/mcp
 cp -r lambda_src/mcp/. build/mcp/
 cp lambda_src/api/db.py lambda_src/api/event_utils.py build/mcp/
+# Tests live next to the server; they have no business in the bundle.
+rm -rf build/mcp/test_*.py build/mcp/__pycache__
 uv pip install "${UV_ARGS[@]}" --target build/mcp "mcp>=1.9,<2" mangum requests
 
 # ── ical_aggregator ─────────────────────────────────────────────────
