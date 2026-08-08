@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "dctech-events": {
+      "command": "python3",
+      "args": ["scripts/mcp_sigv4_bridge.py"],
+      "env": {
+        "AWS_REGION": "us-east-1"
+      }
+    }
+  }
+}

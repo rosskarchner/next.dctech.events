@@ -71,3 +71,31 @@ The old site is still built and published to GitHub Pages by the other repo,
 but nothing points at it: its weekly newsletter schedule
 (`dctech-newsletter-dev-scheduled_newsletter-event`) was disabled at cutover
 to avoid double-sending to the shared subscriber list.
+
+## MCP server (managing groups and events)
+
+Groups, events, categories, and overlays are managed through an MCP server
+(`cdk_next/lambda_src/mcp/server.py`) deployed behind API Gateway. Prefer its
+tools over hand-written `aws dynamodb` calls — they validate categories, verify
+iCal feeds, and keep the GSI keys consistent.
+
+The endpoint uses an AWS_IAM authorizer, so every request must be SigV4-signed.
+MCP clients do not sign requests, so `scripts/mcp_sigv4_bridge.py` bridges
+stdio to the signed endpoint using your ordinary AWS credentials. `.mcp.json`
+wires it up, so a client started in this repo picks it up automatically.
+
+Verify it by hand with:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | python3 scripts/mcp_sigv4_bridge.py
+```
+
+Tools: `list_groups`, `add_group`, `set_group_active`, `verify_ical_feed`,
+`list_single_events`, `add_single_event`, `update_single_event`,
+`delete_single_event`, `list_recurring_events`, `add_recurring_event`,
+`update_recurring_event`, `delete_recurring_event`, `list_categories`,
+`add_category`, `get_overlay`, `set_overlay`, `get_events`, `trigger_rebuild`.

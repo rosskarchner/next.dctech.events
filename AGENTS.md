@@ -126,3 +126,18 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Conventions & Patterns
+
+### Managing groups, events, and categories
+
+Use the MCP server (`dctech-events` in `.mcp.json`) rather than hand-written
+`aws dynamodb` calls. Its tools validate category slugs, verify iCal feeds, and
+set the GSI keys that list views depend on — all easy to get subtly wrong by
+hand. Tools include `list_groups`, `add_group`, `set_group_active`,
+`verify_ical_feed`, `add_single_event`, `add_recurring_event`, `set_overlay`,
+and `trigger_rebuild`.
+
+It is served behind an AWS_IAM authorizer, so `scripts/mcp_sigv4_bridge.py`
+signs requests with your AWS credentials. If tools are unavailable, check
+`aws sts get-caller-identity` first.
