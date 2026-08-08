@@ -15,6 +15,7 @@ from auth import get_user_from_event
 from db import (
     create_draft, get_all_categories, get_drafts_by_submitter,
     check_and_record_link_request, subscribe_to_newsletter,
+    is_trusted_submitter, promote_draft_to_event, update_draft_status,
 )
 from routes.responses import html as _html, json as _json_response
 
@@ -176,6 +177,7 @@ def _submit_event(event, data, submitter, jinja_env, submitter_id=None):
         return _html(400, html, event)
 
     draft_id = create_draft('event', draft_data, submitter, submitter_id)
+    _notify_admin(draft_id, 'event', draft_data, submitter, False)
 
     template = jinja_env.get_template('partials/submit_confirmation.html')
     html = template.render(draft_id=draft_id, draft_type='event')
@@ -192,6 +194,7 @@ def _submit_group(event, data, submitter, jinja_env, submitter_id=None):
         return _html(400, html, event)
 
     draft_id = create_draft('group', draft_data, submitter, submitter_id)
+    _notify_admin(draft_id, 'group', draft_data, submitter, False)
 
     template = jinja_env.get_template('partials/submit_confirmation.html')
     html = template.render(draft_id=draft_id, draft_type='group')
@@ -232,6 +235,7 @@ def submit_event_json(event, jinja_env):
             return _json(400, _error_payload(error), event)
         draft_id = create_draft('group', draft_data, submitter, submitter_id)
         subscribed = _maybe_subscribe(data, submitter)
+        _notify_admin(draft_id, 'group', draft_data, submitter, False)
         return _json(201, {'draft_id': draft_id, 'draft_type': 'group',
                            'subscribed': subscribed}, event)
 
@@ -242,11 +246,20 @@ def submit_event_json(event, jinja_env):
     if site:
         draft_data['site'] = site
     draft_id = create_draft('event', draft_data, submitter, submitter_id)
+
+    # Trusted submitters skip the queue. Only events: a group submission adds
+    # a whole recurring feed to the site, which deserves a human look even
+    # from someone whose one-off events are trusted.
+    published = False
+    if is_trusted_submitter(submitter):
+        published = _auto_approve_event(draft_id, draft_data, submitter)
+
     # After the draft is safely stored, so a newsletter hiccup cannot cost
     # the user the submission they just filled in.
     subscribed = _maybe_subscribe(data, submitter)
+    _notify_admin(draft_id, 'event', draft_data, submitter, published)
     return _json(201, {'draft_id': draft_id, 'draft_type': 'event',
-                       'subscribed': subscribed}, event)
+                       'subscribed': subscribed, 'published': published}, event)
 
 
 def my_submissions_json(event, jinja_env):
@@ -369,3 +382,103 @@ def request_link_json(event, jinja_env):
         'message': ('Check your email — we sent you a link to submit your '
                     'event. It may take a minute to arrive.'),
     }, event)
+
+
+# ─── Trusted-submitter auto-approval ──────────────────────────────
+
+# Recorded as the reviewer so the queue history distinguishes an automatic
+# publish from one a human actually looked at.
+AUTO_REVIEWER = 'auto:trusted-submitter'
+
+
+def _auto_approve_event(draft_id, draft_data, submitter):
+    """Publish a trusted submitter's event immediately.
+
+    The DRAFT record is still written first and then marked APPROVED rather
+    than skipped: it keeps the audit trail and /my-submissions complete, and
+    leaves a normal-looking history entry showing who published and when.
+
+    Returns True if the event was published. A failure here is deliberately
+    not fatal — the draft simply stays pending and an admin approves it by
+    hand, which is the pre-existing behaviour and strictly safer than losing
+    the submission.
+    """
+    try:
+        merged = dict(draft_data)
+        merged['id'] = draft_id
+        merged.setdefault('submitter_email', submitter)
+        promote_draft_to_event(merged)
+        update_draft_status(draft_id, 'APPROVED', AUTO_REVIEWER)
+        return True
+    except Exception as exc:
+        print(f'Auto-approval failed for draft {draft_id} ({submitter}): {exc}')
+        return False
+
+
+# ─── Admin notification ───────────────────────────────────────────
+
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'ross@karchner.com')
+QUEUE_URL = os.environ.get('QUEUE_URL', 'https://dctech.events/edit/queue.html')
+
+
+def _notify_admin(draft_id, draft_type, draft_data, submitter, published):
+    """Email the admin about a new submission.
+
+    Complements the daily queue digest in NextOpsStack with an immediate
+    heads-up. Auto-published submissions are included too — those never reach
+    the queue, so this is the only notice they generate, and it is the one
+    worth seeing if a trusted submitter posts something wrong.
+
+    Never raises: a mail failure must not fail the submission.
+    """
+    try:
+        import boto3
+
+        label = 'Group' if draft_type == 'group' else 'Event'
+        title = (draft_data.get('title') or draft_data.get('name')
+                 or '(untitled)')
+        when = draft_data.get('date') or ''
+        if draft_data.get('time'):
+            when = f"{when} {draft_data['time']}".strip()
+
+        if published:
+            state = 'Published automatically (trusted submitter)'
+            subject = f'[dctech.events] {label} auto-published: {title}'
+        else:
+            state = 'Waiting for review'
+            subject = f'[dctech.events] New {label.lower()} submission: {title}'
+
+        rows = [
+            ('Title', title),
+            ('When', when or '—'),
+            ('Location', draft_data.get('location') or '—'),
+            ('URL', draft_data.get('url') or draft_data.get('website') or '—'),
+            ('Submitter', submitter or 'unknown'),
+            ('Status', state),
+            ('Draft ID', draft_id),
+        ]
+        html_rows = ''.join(
+            f'<tr><td style="padding:2px 12px 2px 0;color:#666">{k}</td>'
+            f'<td style="padding:2px 0">{v}</td></tr>'
+            for k, v in rows
+        )
+        text_rows = '\n'.join(f'{k}: {v}' for k, v in rows)
+
+        boto3.client('sesv2').send_email(
+            FromEmailAddress=FROM_EMAIL,
+            ReplyToAddresses=[submitter] if submitter else [REPLY_TO_EMAIL],
+            Destination={'ToAddresses': [ADMIN_EMAIL]},
+            Content={'Simple': {
+                'Subject': {'Data': subject[:200]},
+                'Body': {
+                    'Html': {'Data': (
+                        f'<p><strong>{state}</strong></p>'
+                        f'<table>{html_rows}</table>'
+                        f'<p><a href="{QUEUE_URL}">Open the moderation queue</a></p>'
+                    )},
+                    'Text': {'Data': f'{state}\n\n{text_rows}\n\n{QUEUE_URL}\n'},
+                },
+            }},
+        )
+    except Exception as exc:
+        print(f'Admin notification failed for draft {draft_id}: {exc}')

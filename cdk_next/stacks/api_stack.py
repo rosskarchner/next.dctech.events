@@ -65,6 +65,10 @@ class NextApiStack(cdk.Stack):
             "BASE_URL": config.BASE_URL,
             "FROM_EMAIL": "outbound@dctech.events",
             "REPLY_TO_EMAIL": config.NEWSLETTER_ADMIN_EMAIL,
+            # Immediate per-submission notification, alongside the daily
+            # queue digest in NextOpsStack.
+            "ADMIN_EMAIL": config.NEWSLETTER_ADMIN_EMAIL,
+            "QUEUE_URL": f"{config.BASE_URL}/edit/queue.html",
         }
 
         self.api_function = lambda_.Function(

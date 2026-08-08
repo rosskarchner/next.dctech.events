@@ -20,6 +20,8 @@ from db import (
     promote_draft_to_event, put_group,
     get_all_categories,
     get_all_posts, get_post as db_get_post, put_post, delete_post,
+    trust_submitter, untrust_submitter, list_trusted_submitters,
+    is_trusted_submitter,
 )
 
 CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
@@ -179,9 +181,11 @@ def approve_draft(event, jinja_env, draft_id):
 
     _promote_approved_draft(draft_id, draft_type, merged)
     update_draft_status(draft_id, 'APPROVED', claims.get('email', ''))
+    trusted = _maybe_trust_submitter(data, draft, claims)
 
     label = 'group' if draft_type == 'group' else 'event'
-    return _html(200, f"Approved and published {label}.")
+    suffix = f" {trusted} will now publish automatically." if trusted else ''
+    return _html(200, f"Approved and published {label}.{suffix}")
 
 
 def reject_draft(event, jinja_env, draft_id):
@@ -239,8 +243,14 @@ def approve_draft_json(event, jinja_env, draft_id):
 
     promoted_id = _promote_approved_draft(draft_id, draft_type, merged)
     update_draft_status(draft_id, 'APPROVED', claims.get('email', ''))
+    trusted = _maybe_trust_submitter(data, draft, claims)
+
     label = 'group' if draft_type == 'group' else 'event'
-    return _json(200, {'message': f'Approved and published {label}.', 'id': promoted_id})
+    message = f'Approved and published {label}.'
+    if trusted:
+        message += f' {trusted} is now trusted — their events publish automatically.'
+    return _json(200, {'message': message, 'id': promoted_id,
+                       'trusted': trusted})
 
 
 def reject_draft_json(event, jinja_env, draft_id):
@@ -472,3 +482,78 @@ def delete_post_json(event, jinja_env, slug):
 
     delete_post(slug)
     return _json(200, {'deleted': slug})
+
+
+# ─── Trusted submitters ───────────────────────────────────────────
+
+def _wants_trust(data):
+    return str(data.get('trust_submitter', '')).lower() in (
+        '1', 'true', 'on', 'yes')
+
+
+def _maybe_trust_submitter(data, draft, claims):
+    """Honor the 'trust this submitter' box on approval.
+
+    Returns the trusted email, or None. Never raises: trusting is a
+    convenience bolted onto approval, and losing it must not turn a
+    successful publish into an error the admin has to puzzle over.
+    """
+    if not _wants_trust(data):
+        return None
+
+    email = str(draft.get('submitter_email') or '').strip().lower()
+    if not email:
+        print('Trust requested but the draft has no submitter email')
+        return None
+
+    try:
+        trust_submitter(email, trusted_by=claims.get('email', ''),
+                        note=str(data.get('trust_note') or '').strip() or None)
+        return email
+    except Exception as exc:
+        print(f'Failed to trust {email}: {exc}')
+        return None
+
+
+def list_trusted_json(event, jinja_env):
+    """GET /api/admin/trusted — everyone who skips the queue."""
+    claims, err = _admin_check(event)
+    if err:
+        return err
+    return _json(200, {'trusted': list_trusted_submitters()})
+
+
+def trust_submitter_json(event, jinja_env):
+    """POST /api/admin/trusted — trust an address directly."""
+    claims, err = _admin_check(event)
+    if err:
+        return err
+
+    raw = event.get('body') or ''
+    try:
+        data = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        data = _parse_body(event)
+
+    email = str(data.get('email') or '').strip().lower()
+    if not email or '@' not in email:
+        return _json(400, {'error': 'A valid email address is required'})
+
+    trust_submitter(email, trusted_by=claims.get('email', ''),
+                    note=str(data.get('note') or '').strip() or None)
+    return _json(201, {'trusted': email})
+
+
+def untrust_submitter_json(event, jinja_env, email):
+    """DELETE /api/admin/trusted/{email} — revoke trust."""
+    claims, err = _admin_check(event)
+    if err:
+        return err
+
+    from urllib.parse import unquote
+    email = unquote(str(email or '')).strip().lower()
+    if not is_trusted_submitter(email):
+        return _json(404, {'error': 'That address is not trusted'})
+
+    untrust_submitter(email)
+    return _json(200, {'untrusted': email})

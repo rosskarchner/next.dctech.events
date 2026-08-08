@@ -23,6 +23,8 @@ mkdir -p build
 # ── api ──────────────────────────────────────────────────────────────
 mkdir -p build/api
 cp -r lambda_src/api/. build/api/
+# Tests live next to the handlers; they have no business in the bundle.
+rm -rf build/api/test_*.py build/api/__pycache__ build/api/routes/__pycache__
 uv pip install "${UV_ARGS[@]}" --target build/api jinja2 pytz
 
 # ── mcp ──────────────────────────────────────────────────────────────

@@ -406,3 +406,30 @@ a:hover { text-decoration: underline; }
 .btn-danger:hover {
   background: var(--color-danger-hover);
 }
+
+/* Trusted-submitter option in the approval form */
+.trust-section {
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--color-bg-secondary, #f9fafb);
+  border-left: 3px solid var(--color-primary, #2563eb);
+  border-radius: 0.25rem;
+}
+
+.trust-label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  font-weight: normal;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.trust-label input[type="checkbox"] {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.trust-label input[type="checkbox"]:disabled + span {
+  color: var(--color-text-muted, #666);
+}

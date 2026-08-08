@@ -10,6 +10,10 @@
 
   let categoriesBySlug = {};
   let currentDrafts = [];
+  // Lowercased emails that skip the queue; drives the checkbox state so an
+  // already-trusted submitter is shown as such instead of offered again.
+  let trustedSubmitters = new Set();
+  let trustedDetails = [];
   let expandedDraftId = null;
   let editCategoriesMode = {};
 
@@ -98,6 +102,19 @@
             <div class="categories-wrapper">
               ${categorySection}
             </div>
+            ${draft.draft_type === 'group' ? '' : `
+              <div class="trust-section">
+                <label class="trust-label">
+                  <input type="checkbox" class="trust-submitter"
+                         data-draft-id="${escapeHtml(draft.id)}"
+                         ${trustedSubmitters.has((draft.submitter_email || '').toLowerCase()) ? 'checked disabled' : ''}>
+                  <span>
+                    ${trustedSubmitters.has((draft.submitter_email || '').toLowerCase())
+                      ? `<strong>${escapeHtml(draft.submitter_email || '')}</strong> is already trusted — their events publish automatically.`
+                      : `Trust <strong>${escapeHtml(draft.submitter_email || 'this submitter')}</strong> — publish their future events automatically, without review.`}
+                  </span>
+                </label>
+              </div>`}
             <div class="approve-form-actions">
               ${isEditMode
                 ? `<button type="button" class="btn btn-success btn-sm" data-action="confirm-approve" data-draft-id="${escapeHtml(draft.id)}">Approve with Categories</button>
@@ -134,6 +151,98 @@
         </table>
       </div>
     `;
+  }
+
+  function showError(message) {
+    const container = document.getElementById('queue-list');
+    if (!container || !message) return;
+    container.insertAdjacentHTML(
+      'afterbegin',
+      `<div class="message message-error"><p>${escapeHtml(message)}</p></div>`);
+  }
+
+  function showNotice(message) {
+    const container = document.getElementById('queue-list');
+    if (!container || !message) return;
+    container.insertAdjacentHTML(
+      'afterbegin',
+      `<div class="message message-success"><p>${escapeHtml(message)}</p></div>`);
+  }
+
+  async function loadTrusted() {
+    try {
+      const response = await DctechAuth.authorizedFetch('/api/admin/trusted');
+      if (!response.ok) return;
+      const payload = await response.json();
+      trustedDetails = payload.trusted || [];
+      trustedSubmitters = new Set(
+        trustedDetails.map((t) => String(t.email || '').toLowerCase()));
+    } catch (err) {
+      // Non-fatal: the queue is still usable, the checkbox just cannot show
+      // existing trust. Do not block moderation on it.
+      console.warn('Could not load trusted submitters:', err);
+    }
+  }
+
+  function renderTrusted() {
+    const list = document.getElementById('trusted-list');
+    const count = document.getElementById('trusted-count');
+    if (!list) return;
+
+    if (count) count.textContent = `(${trustedDetails.length})`;
+
+    if (!trustedDetails.length) {
+      list.innerHTML = '<p style="color:#666;">Nobody is trusted yet. Tick the box when approving a submission to add someone.</p>';
+      return;
+    }
+
+    list.innerHTML = `
+      <table style="width:100%; border-collapse:collapse;">
+        <tbody>
+          ${trustedDetails.map((t) => `
+            <tr>
+              <td style="padding:0.4rem 0;"><strong>${escapeHtml(t.email)}</strong>
+                ${t.note ? `<br><span style="color:#666;font-size:0.85em;">${escapeHtml(t.note)}</span>` : ''}
+              </td>
+              <td style="padding:0.4rem 0; color:#666; font-size:0.85em;">
+                ${escapeHtml((t.trusted_at || '').slice(0, 10))}
+                ${t.trusted_by ? `by ${escapeHtml(t.trusted_by)}` : ''}
+              </td>
+              <td style="padding:0.4rem 0; text-align:right;">
+                <button type="button" class="btn btn-outline btn-sm"
+                        data-action="untrust" data-email="${escapeHtml(t.email)}">Revoke</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  async function untrustSubmitter(email) {
+    if (!window.confirm(`Stop auto-publishing events from ${email}?`)) return;
+    const response = await DctechAuth.authorizedFetch(
+      `/api/admin/trusted/${encodeURIComponent(email)}`, { method: 'DELETE' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || 'Failed to revoke trust.');
+    }
+    await loadTrusted();
+    renderTrusted();
+    renderQueue();
+  }
+
+  async function addTrusted(email) {
+    const response = await DctechAuth.authorizedFetch('/api/admin/trusted', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || 'Failed to trust that address.');
+    }
+    await loadTrusted();
+    renderTrusted();
+    renderQueue();
   }
 
   async function loadQueue() {
@@ -186,6 +295,12 @@
       row.querySelectorAll('input[name="categories"]:checked').forEach((input) => {
         formData.append('categories', input.value);
       });
+      // Only send it when newly ticked; an already-trusted submitter renders
+      // the box checked-and-disabled purely as a status indicator.
+      const trustBox = row.querySelector('input.trust-submitter');
+      if (trustBox && trustBox.checked && !trustBox.disabled) {
+        formData.append('trust_submitter', 'true');
+      }
     }
 
     const response = await DctechAuth.authorizedFetch(`/api/admin/drafts/${draftId}/approve`, {
@@ -197,7 +312,14 @@
       throw new Error(payload.error || 'Failed to approve draft.');
     }
 
+    if (payload.trusted) {
+      trustedSubmitters.add(String(payload.trusted).toLowerCase());
+      showNotice(payload.message);
+    }
+
     expandedDraftId = null;
+    await loadTrusted();
+    renderTrusted();
     await loadQueue();
   }
 
@@ -244,6 +366,8 @@
           await approveDraft(draftId);
         } else if (action === 'reject') {
           await rejectDraft(draftId);
+        } else if (action === 'untrust') {
+          await untrustSubmitter(button.getAttribute('data-email'));
         }
       } catch (err) {
         const container = document.getElementById('queue-list');
@@ -258,6 +382,25 @@
     const isAdmin = DctechAuth.requireAdmin();
     if (!isAdmin) return;
     bindEvents();
+
+    const trustForm = document.getElementById('trust-add-form');
+    if (trustForm) {
+      trustForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const input = document.getElementById('trust-add-email');
+        const email = input.value.trim();
+        if (!email) return;
+        try {
+          await addTrusted(email);
+          input.value = '';
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+    }
+
+    await loadTrusted();
+    renderTrusted();
     await loadQueue();
   }
 

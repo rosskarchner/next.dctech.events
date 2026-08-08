@@ -849,3 +849,73 @@ def subscribe_to_newsletter(email, contact_list, topic):
             TopicPreferences=preferences,
         )
         return 'updated'
+
+
+# ─── Trusted submitters ───────────────────────────────────────────
+
+# Trust is keyed by normalized email, not submitter_id: magic-link submitters
+# have no Cognito `sub` (their id is "magiclink:<email>"), so email is the only
+# identity shared by both auth paths — and the one an admin actually recognizes
+# in the queue. Safe because both paths prove control of the address before a
+# submission is accepted.
+
+def _trust_key(email):
+    return {'PK': f"TRUSTED#{str(email or '').strip().lower()}", 'SK': 'META'}
+
+
+def is_trusted_submitter(email):
+    """True if this address may skip the moderation queue."""
+    email = str(email or '').strip().lower()
+    if not email:
+        return False
+    table = _get_table()
+    return 'Item' in table.get_item(Key=_trust_key(email))
+
+
+def trust_submitter(email, trusted_by=None, note=None):
+    """Mark an address as trusted. Idempotent."""
+    email = str(email or '').strip().lower()
+    if not email:
+        return None
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    existing = _get_table().get_item(Key=_trust_key(email)).get('Item') or {}
+    item = {
+        **_trust_key(email),
+        'email': email,
+        # GSI1 so the admin list is a query rather than a table scan.
+        'GSI1PK': 'TRUSTED',
+        'GSI1SK': f'EMAIL#{email}',
+        'trusted_by': trusted_by or existing.get('trusted_by', ''),
+        'trusted_at': existing.get('trusted_at', now),
+        'updated_at': now,
+    }
+    if note:
+        item['note'] = note
+    _get_table().put_item(Item=item)
+    return email
+
+
+def untrust_submitter(email):
+    """Revoke trust. Future submissions go back through the queue."""
+    email = str(email or '').strip().lower()
+    if not email:
+        return False
+    _get_table().delete_item(Key=_trust_key(email))
+    return True
+
+
+def list_trusted_submitters():
+    """Every trusted address, oldest first."""
+    table = _get_table()
+    items = _query_all(table, IndexName='GSI1',
+                       KeyConditionExpression=Key('GSI1PK').eq('TRUSTED'))
+    out = []
+    for item in items:
+        out.append({
+            'email': item.get('email', item['PK'].split('#', 1)[1]),
+            'trusted_by': item.get('trusted_by', ''),
+            'trusted_at': item.get('trusted_at', ''),
+            'note': _to_plain(item.get('note', '')),
+        })
+    out.sort(key=lambda t: t.get('trusted_at', ''))
+    return out

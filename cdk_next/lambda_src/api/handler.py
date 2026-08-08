@@ -141,6 +141,20 @@ def lambda_handler(event, context):
             draft_id = path.split('/')[4]
             return add_cors(admin.get_draft_json(event, jinja_env, draft_id))
 
+        # Trusted submitters (skip the moderation queue)
+        if path == '/api/admin/trusted' and http_method == 'GET':
+            return add_cors(admin.list_trusted_json(event, jinja_env))
+
+        if path == '/api/admin/trusted' and http_method == 'POST':
+            return add_cors(admin.trust_submitter_json(event, jinja_env))
+
+        if path.startswith('/api/admin/trusted/') and http_method == 'DELETE':
+            # Emails contain no slashes, but they are URL-encoded by the
+            # client, so take the remainder of the path rather than one segment.
+            trusted_email = path[len('/api/admin/trusted/'):]
+            return add_cors(
+                admin.untrust_submitter_json(event, jinja_env, trusted_email))
+
         # Free-form /updates posts
         if path == '/api/admin/posts' and http_method == 'GET':
             return add_cors(admin.list_posts_json(event, jinja_env))

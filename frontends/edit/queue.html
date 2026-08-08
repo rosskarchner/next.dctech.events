@@ -46,6 +46,22 @@
 
       <div id="queue-list"></div>
     </div>
+
+    <details class="card" id="trusted-card" style="margin-top: 1.5rem;">
+      <summary style="cursor: pointer; font-weight: 600;">
+        Trusted submitters <span id="trusted-count"></span>
+      </summary>
+      <p style="color: #666; font-size: 0.9em; margin-top: 0.5rem;">
+        Their event submissions publish immediately without review. Group
+        submissions still come through this queue.
+      </p>
+      <div id="trusted-list"></div>
+      <form id="trust-add-form" style="display:flex; gap:0.5rem; margin-top:1rem; flex-wrap:wrap;">
+        <input type="email" id="trust-add-email" placeholder="email@example.com"
+               required style="flex:1; min-width:14rem; padding:0.4rem;">
+        <button type="submit" class="btn btn-outline btn-sm">Trust this address</button>
+      </form>
+    </details>
   </main>
 
   <script src="/edit/js/queue.js"></script>
