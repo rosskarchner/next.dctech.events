@@ -6,6 +6,11 @@ item; the events table's stream then fires the existing debounced rebuild, so
 the post is live on /updates/ within a couple of minutes with no extra
 build wiring here.
 
+That rebuild only happens because UPDATE# is listed in the site generator
+trigger's RELEVANT_PREFIXES (lambda_src/site_generator/trigger/handler.py).
+Drop it from that allowlist and posts go invisible until the daily
+safety-net build.
+
 The snapshot is the whole point. calgen's pipeline and get_events() both drop
 events dated before today, so a post rendered from live data would empty out
 as its week receded into the past — freezing the listing at publish time is

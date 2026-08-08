@@ -11,7 +11,11 @@ import boto3
 PROJECT_NAME = os.environ['CODEBUILD_PROJECT_NAME']
 
 # Only content that feeds the static site should trigger a rebuild.
-RELEVANT_PREFIXES = ('EVENT#', 'GROUP#', 'CATEGORY#', 'RECURRING#', 'ICAL#')
+# POST# (free-form /updates posts) and UPDATE# (weekly roundups) both render
+# into /updates, so publishing either has to rebuild the site — without them
+# a new post sits invisible until the daily safety-net build.
+RELEVANT_PREFIXES = ('EVENT#', 'GROUP#', 'CATEGORY#', 'RECURRING#', 'ICAL#',
+                     'POST#', 'UPDATE#')
 
 codebuild = boto3.client('codebuild')
 
