@@ -72,14 +72,42 @@ if [ -e lambda_src/updates_publisher/app.py ]; then
   rm -rf build/updates_publisher/test_*.py build/updates_publisher/__pycache__
 fi
 
-# ── qa_agent / discovery_agent (stub scaffolds, no deps) ────────────
-for agent in qa_agent discovery_agent; do
-  if [ -e "lambda_src/$agent/handler.py" ]; then
-    mkdir -p "build/$agent"
-    cp -r "lambda_src/$agent/." "build/$agent/"
-    cp lambda_src/api/db.py "build/$agent/"
-  fi
-done
+# ── discovery_agent (stub scaffold, no deps) ────────────────────────
+if [ -e lambda_src/discovery_agent/handler.py ]; then
+  mkdir -p build/discovery_agent
+  cp -r lambda_src/discovery_agent/. build/discovery_agent/
+  cp lambda_src/api/db.py build/discovery_agent/
+fi
+
+# ── qa_trigger (invokes the AgentCore runtime; boto3 only) ──────────
+if [ -e lambda_src/qa_trigger/handler.py ]; then
+  mkdir -p build/qa_trigger
+  cp -r lambda_src/qa_trigger/. build/qa_trigger/
+  rm -rf build/qa_trigger/__pycache__
+fi
+
+# ── calendar_qc (AgentCore Runtime asset) ───────────────────────────
+# NOT a Lambda: AgentCore Runtime is Graviton-only, so this one target builds
+# aarch64 wheels. Installing the x86_64 set used everywhere else above yields
+# a runtime that fails at cold start with an ELF class error.
+if [ -d agents/calendar_qc ]; then
+  mkdir -p build/calendar_qc
+  cp -r agents/calendar_qc/. build/calendar_qc/
+  rm -rf build/calendar_qc/test_*.py build/calendar_qc/__pycache__
+  # --only-binary :all: is not just speed here. A source build would compile
+  # against this machine's architecture and silently ship x86_64 objects to a
+  # Graviton runtime; failing the build is the correct outcome instead.
+  #
+  # This lands around 280M unpacked / 92M zipped, mostly playwright's bundled
+  # node driver — which the browser tool needs even though the browser itself
+  # runs remotely. AgentCore direct-code limits are 250M zipped / 750M
+  # unpacked, so there is room, but check both if dependencies grow.
+  uv pip install --python-platform aarch64-manylinux_2_17 \
+    --python-version "$PY_VERSION" --link-mode=copy --only-binary :all: \
+    --target build/calendar_qc \
+    strands-agents "strands-agents-tools[agent_core_browser]" \
+    bedrock-agentcore "mcp>=1.9,<2" httpx
+fi
 
 # ── site_generator trigger (pure stdlib + boto3) ────────────────────
 if [ -e lambda_src/site_generator/trigger/handler.py ]; then

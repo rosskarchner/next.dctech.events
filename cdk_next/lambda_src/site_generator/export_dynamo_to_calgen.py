@@ -113,8 +113,11 @@ def main():
         guid = item['PK'].split('#', 1)[1]
         source = item.get('source')
 
-        overrides = _to_plain(item.get('overrides') or {})
-        overrides.pop('_comment', None)
+        # Underscore-prefixed overlay keys are private bookkeeping (_comment,
+        # _qa_run) — calgen merges overlay keys straight onto the event, so
+        # anything left here would show up as a junk event attribute.
+        overrides = {k: v for k, v in _to_plain(item.get('overrides') or {}).items()
+                     if not k.startswith('_')}
         if overrides:
             _write_yaml(os.path.join('_overlay', f'{guid}.yaml'), overrides)
             n_overlay += 1

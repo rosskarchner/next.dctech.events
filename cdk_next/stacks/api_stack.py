@@ -243,6 +243,9 @@ class NextApiStack(cdk.Stack):
 
         self.api = api
         self.api_endpoint = api.url
+        # Consumed by NextQaAgentStack — the QC agent reaches events only
+        # through this endpoint.
+        self.mcp_url = f"{api.url}mcp"
 
         cdk.CfnOutput(self, "NextApiEndpoint", value=api.url)
-        cdk.CfnOutput(self, "NextMcpUrl", value=f"{api.url}mcp")
+        cdk.CfnOutput(self, "NextMcpUrl", value=self.mcp_url)

@@ -132,8 +132,13 @@ def _persist_group(group, events):
             if (existing.get('source') == 'ical'
                     and all(existing.get(k) == v for k, v in data.items())):
                 continue  # identical item — don't rewrite, don't wake the trigger
+        # New iCal events land in pending_qa — the QA agent's work queue (GSI5).
+        # Refreshed events keep whatever status they already had, via the
+        # setdefault above. This does not gate publication: get_all_events
+        # queries GSI4 and never looks at review_status, so the event is live
+        # on the site immediately and QC is a cleanup pass over it.
         db.put_event(guid, data, source='ical',
-                     review_status=data.get('review_status', 'approved'),
+                     review_status=data.get('review_status', 'pending_qa'),
                      created_at=(existing or {}).get('createdAt'))
         writes += 1
     return fresh_guids, writes

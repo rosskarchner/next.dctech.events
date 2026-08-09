@@ -57,6 +57,33 @@ def _check_categories(categories) -> None:
 _OVERLAY_PROTECTED_FIELDS = {'group', 'group_id', 'group_website', 'date',
                              'end_date', 'guid', 'source'}
 
+# Compact projection to keep responses well under MCP message size limits.
+# Shared by get_events and list_pending_qa; get_event returns the full record.
+_EVENT_FIELDS = [
+    'guid', 'title', 'date', 'url', 'location', 'location_type',
+    'group', 'group_id', 'source', 'categories',
+]
+
+
+# Keys inside `overrides` that start with an underscore are private bookkeeping
+# (_comment, _qa_run) — never overlay values. export_dynamo_to_calgen strips
+# them, so calgen never sees them. Callers may not write them directly; the
+# tools below own them.
+
+
+def _check_overlay_fields(fields) -> None:
+    invalid = set(fields) & _OVERLAY_PROTECTED_FIELDS
+    if invalid:
+        raise ValueError(f'Cannot set protected overlay field(s): {sorted(invalid)}')
+    private = sorted(k for k in fields if k.startswith('_'))
+    if private:
+        raise ValueError(f'Cannot set reserved overlay key(s): {private}')
+
+
+def _public_overlay(overrides) -> dict:
+    """The overlay minus its private bookkeeping keys — what actually renders."""
+    return {k: v for k, v in (overrides or {}).items() if not k.startswith('_')}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Groups
@@ -326,42 +353,182 @@ def get_overlay(guid: str) -> dict:
 
 
 @mcp.tool()
-def set_overlay(guid: str, fields: dict, comment: str) -> dict:
+def set_overlay(guid: str, fields: dict, comment: str,
+                run_id: str | None = None) -> dict:
     """
     Merge `fields` into the event's `overrides`, preserving existing overlay
-    fields. `comment` is recorded alongside as `overlay_comment`.
+    fields. `comment` is recorded alongside as `_comment`.
 
     Supported fields: duplicate_of, hidden, location, title, categories.
     Protected fields (set by the pipeline from the source feed, not
     overridable) are rejected: group, group_id, group_website, date,
     end_date, guid, source.
+
+    `run_id` tags the write as part of a batch (the QA agent's weekly pass),
+    recording each field's prior value so revert_qa_run can restore it. Pass
+    it for automated writes; leave it unset for hand edits.
     """
-    invalid = set(fields) & _OVERLAY_PROTECTED_FIELDS
-    if invalid:
-        raise ValueError(f'Cannot set protected overlay field(s): {sorted(invalid)}')
+    _check_overlay_fields(fields)
     event = db.get_event_from_config(guid)
     if not event:
         raise ValueError(f'No such event: {guid}')
     existing = dict(event.get('overrides') or {})
+
+    if run_id:
+        # Record what each field looked like *before this run first touched
+        # it* — so reverting restores the prior value rather than blindly
+        # deleting, and a second write in the same run doesn't clobber the
+        # original snapshot. Keys with no prior value are tracked separately
+        # in `added` (a sentinel value wouldn't survive the DynamoDB round
+        # trip), and revert deletes those outright.
+        stamp = dict(existing.get('_qa_run') or {})
+        if stamp.get('run_id') != run_id:
+            stamp = {'run_id': run_id, 'prior': {}, 'added': []}
+        prior = dict(stamp.get('prior') or {})
+        added = list(stamp.get('added') or [])
+        for key in fields:
+            if key in prior or key in added:
+                continue
+            if key in existing:
+                prior[key] = existing[key]
+            else:
+                added.append(key)
+        stamp['prior'] = prior
+        stamp['added'] = added
+        existing['_qa_run'] = stamp
+
     existing.update(fields)
     if comment:
         existing['_comment'] = comment
     db.update_event(guid, {'date': event.get('date', ''),
                            'time': event.get('time') or '00:00'},
                     overrides=existing)
-    return {'guid': guid, 'overlay': existing}
+    return {'guid': guid, 'overlay': _public_overlay(existing)}
+
+
+@mcp.tool()
+def get_event(guid: str) -> dict:
+    """
+    Return the full stored record for one event, including `description` and
+    `overrides` — fields that get_events omits from its compact projection.
+
+    Use this to pull detail on the handful of events you are actually making a
+    decision about; use get_events for the bulk corpus.
+    """
+    event = db.get_event_from_config(guid)
+    if not event:
+        raise ValueError(f'No such event: {guid}')
+    return event
+
+
+@mcp.tool()
+def list_pending_qa(limit: int | None = 200) -> list:
+    """
+    Events awaiting quality-control review (review_status=pending_qa, GSI5) —
+    the QA agent's work queue.
+
+    This is the list of events to make decisions *about*. It is not the set to
+    compare against: duplicate detection needs the full corpus from get_events,
+    because the other half of a duplicate pair was usually approved in an
+    earlier run and has already left this queue.
+    """
+    events = db.get_events_by_review_status('pending_qa', limit=limit)
+    return [{k: e.get(k) for k in _EVENT_FIELDS} for e in events]
+
+
+@mcp.tool()
+def resolve_qa_review(guid: str, status: str) -> dict:
+    """
+    Take an event out of the pending_qa queue once it has been reviewed:
+    'approved' (checked, nothing further needed) or 'flagged' (needs a human).
+
+    Overlay fixes are recorded separately via set_overlay — an approved event
+    may well carry overlays; approval means "reviewed", not "unchanged".
+    """
+    if status not in ('approved', 'flagged'):
+        raise ValueError(f"status must be 'approved' or 'flagged', got: {status!r}")
+    if not db.get_event_from_config(guid):
+        raise ValueError(f'No such event: {guid}')
+    db.set_event_review_status(guid, status)
+    return {'guid': guid, 'review_status': status}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QA run bookkeeping
+#
+# The weekly QA agent writes overlays directly rather than opening something
+# reviewable, so these two tools are what replaces the old workflow's pull
+# request: list what a run changed, and undo the whole run if it got it wrong.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _events_in_qa_run(run_id: str) -> list:
+    """Every event carrying an overlay written by `run_id`, with its stamp.
+
+    Scans all events (past included) — the run may have hidden an event or
+    dated one, and those still need to be revertible.
+    """
+    matched = []
+    for event in db.get_all_events(include_past=True):
+        stamp = (event.get('overrides') or {}).get('_qa_run') or {}
+        if stamp.get('run_id') == run_id:
+            matched.append((event, stamp))
+    return matched
+
+
+@mcp.tool()
+def list_qa_run(run_id: str) -> list:
+    """
+    List every overlay written by one QA agent run — what it changed, and what
+    each field was before. Pair with revert_qa_run to undo the run.
+    """
+    return [
+        {
+            'guid': event['guid'],
+            'title': event.get('title', ''),
+            'date': event.get('date', ''),
+            'group': event.get('group', ''),
+            'comment': (event.get('overrides') or {}).get('_comment', ''),
+            'applied': _public_overlay(event.get('overrides')),
+            'restores_to': stamp.get('prior') or {},
+            'removes': stamp.get('added') or [],
+        }
+        for event, stamp in _events_in_qa_run(run_id)
+    ]
+
+
+@mcp.tool()
+def revert_qa_run(run_id: str) -> dict:
+    """
+    Undo every overlay written by one QA agent run: fields the run introduced
+    are removed, fields it overwrote are restored to their previous value.
+
+    Overlay fields written by other runs or by hand are left alone, so this is
+    safe on an event that has been edited since.
+    """
+    reverted = []
+    for event, stamp in _events_in_qa_run(run_id):
+        overrides = dict(event.get('overrides') or {})
+        for key in stamp.get('added') or []:
+            overrides.pop(key, None)
+        for key, value in (stamp.get('prior') or {}).items():
+            overrides[key] = value
+        overrides.pop('_qa_run', None)
+        # The comment described this run's edit; it no longer describes
+        # anything once the edit is gone.
+        overrides.pop('_comment', None)
+        db.update_event(event['guid'],
+                        {'date': event.get('date', ''),
+                         'time': event.get('time') or '00:00'},
+                        overrides=overrides)
+        reverted.append({'guid': event['guid'],
+                         'title': event.get('title', ''),
+                         'overlay': _public_overlay(overrides)})
+    return {'run_id': run_id, 'reverted': len(reverted), 'events': reverted}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Events + rebuild
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Compact projection to keep responses well under MCP message size limits.
-_EVENT_FIELDS = [
-    'guid', 'title', 'date', 'url', 'location', 'location_type',
-    'group', 'group_id', 'source', 'categories',
-]
-
 
 @mcp.tool()
 def get_events(
