@@ -103,3 +103,32 @@ Tools: `list_groups`, `add_group`, `set_group_active`, `verify_ical_feed`,
 Moderation: `list_pending_submissions`, `get_submission`, `approve_submission`
 (optionally trusting the submitter), `reject_submission`, and
 `list_trusted_submitters` / `trust_submitter` / `untrust_submitter`.
+
+## Social cross-posting
+
+Every new /updates post is announced on Mastodon
+([@techevents@dmv.community](https://dmv.community/@techevents)) and Bluesky
+([@dctechevents.bsky.social](https://bsky.app/profile/dctechevents.bsky.social))
+by `dctech-events-next-social-publisher`
+(`cdk_next/lambda_src/social_publisher/`). It reads the events table's
+DynamoDB stream, filtered to `UPDATE#` and `POST#` keys, so it covers both the
+Monday weekly roundup and free-form announcements written in /edit without
+either publisher knowing it exists — and a social outage can never block the
+write that created the post.
+
+Credentials live in `dctech-events-next/mastodon` and
+`dctech-events-next/bluesky` (created by `NextSocialStack`, populated
+out-of-band). Posting twice is prevented by a `SOCIAL#{PK}` record holding the
+ids of what has already gone out, per network; streams deliver at least once
+and failed batches retry, so it is load-bearing rather than belt-and-braces.
+
+Backfill or preview a post by hand:
+
+```bash
+aws lambda invoke --function-name dctech-events-next-social-publisher \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"pk":"UPDATE#2026-W33","dry_run":true}' /dev/stdout
+```
+
+Drop `dry_run` to post; add `"force": true` to post again despite the
+`SOCIAL#` record.

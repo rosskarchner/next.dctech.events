@@ -72,6 +72,14 @@ if [ -e lambda_src/updates_publisher/app.py ]; then
   rm -rf build/updates_publisher/test_*.py build/updates_publisher/__pycache__
 fi
 
+# ── social_publisher (cross-posts /updates; stdlib + boto3 only) ────
+if [ -e lambda_src/social_publisher/app.py ]; then
+  mkdir -p build/social_publisher
+  cp -r lambda_src/social_publisher/. build/social_publisher/
+  # Tests live next to the handler; they have no business in the bundle.
+  rm -rf build/social_publisher/test_*.py build/social_publisher/__pycache__
+fi
+
 # ── discovery_agent (stub scaffold, no deps) ────────────────────────
 if [ -e lambda_src/discovery_agent/handler.py ]; then
   mkdir -p build/discovery_agent
