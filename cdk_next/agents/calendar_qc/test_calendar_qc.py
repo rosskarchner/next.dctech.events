@@ -273,3 +273,35 @@ def test_tool_result_unwraps_object_style_content_blocks():
 
 def test_tool_result_passes_through_already_decoded_rows():
     assert main._tool_result([{'guid': 'g1'}], expect_list=True) == [{'guid': 'g1'}]
+
+
+# ── AgentCore entrypoint mode ────────────────────────────────────────
+# Regression guard: entryPoint is ["main.py"], so AgentCore runs this file
+# with no arguments. It used to run a QC pass there instead of serving, so
+# nothing ever answered /ping ("Runtime initialization time exceeded") and the
+# pass ran off argparse defaults — dropping run_id and dry_run from the
+# request payload, which made every invocation a write run.
+
+
+def test_no_arguments_serves_rather_than_running_a_pass():
+    args = main.build_arg_parser().parse_args([])
+    assert args.local is False
+    assert main.should_serve(args, app_available=True) is True
+
+
+def test_local_flag_runs_a_single_pass():
+    args = main.build_arg_parser().parse_args(['--local', '--dry-run'])
+    assert main.should_serve(args, app_available=True) is False
+    assert args.dry_run is True
+
+
+def test_falls_back_to_a_single_pass_without_the_runtime_sdk():
+    # Importing bedrock_agentcore fails on a workstation; `python main.py`
+    # there must still do something useful rather than crash.
+    args = main.build_arg_parser().parse_args([])
+    assert main.should_serve(args, app_available=False) is False
+
+
+def test_dry_run_defaults_off_so_serving_never_implies_a_write_mode():
+    # run_qc's own default is the one that bit us; keep it visible.
+    assert main.build_arg_parser().parse_args([]).dry_run is False

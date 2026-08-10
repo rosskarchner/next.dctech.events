@@ -312,11 +312,39 @@ except ImportError:  # local dry runs don't need the runtime SDK
     app = None
 
 
-if __name__ == '__main__':
+def build_arg_parser():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--local', action='store_true',
+                        help='run a single pass in-process instead of serving')
     parser.add_argument('--dry-run', action='store_true',
                         help='withhold every write tool and print the digest')
     parser.add_argument('--limit', type=int, default=None,
                         help='cap the number of queued events reviewed')
-    args = parser.parse_args()
-    print(json.dumps(run_qc(dry_run=args.dry_run, limit=args.limit), indent=2))
+    return parser
+
+
+def should_serve(args, app_available):
+    """Whether to start the HTTP server rather than run one pass.
+
+    AgentCore's entryPoint is ["main.py"], so it executes this file with no
+    arguments — serving therefore has to be the no-argument default.
+    """
+    return app_available and not args.local
+
+
+if __name__ == '__main__':
+    args = build_arg_parser().parse_args()
+
+    if not should_serve(args, app is not None):
+        print(json.dumps(run_qc(dry_run=args.dry_run, limit=args.limit),
+                         indent=2))
+    else:
+        # Serving has to be the no-argument default. AgentCore's entryPoint is
+        # ["main.py"], so it executes this file as a script with no arguments
+        # and then polls /ping. When this block ran a QC pass instead, nothing
+        # ever listened: every invocation died with "Runtime initialization
+        # time exceeded" while a pass ran anyway, off the CLI defaults rather
+        # than the request payload — so run_id and dry_run were silently
+        # dropped and every run wrote. Keep the bare `python main.py` path
+        # serving; use --local for a one-shot run on a workstation.
+        app.run()
