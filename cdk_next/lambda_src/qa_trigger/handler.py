@@ -8,6 +8,7 @@ also mints the run id, which is what makes the whole run revertible later
 The agent itself runs for many minutes; this returns as soon as the runtime
 accepts the invocation.
 """
+import hashlib
 import json
 import os
 import uuid
@@ -16,6 +17,27 @@ from datetime import date
 import boto3
 
 AGENT_RUNTIME_ARN = os.environ['AGENT_RUNTIME_ARN']
+
+# InvokeAgentRuntime constrains runtimeSessionId to 33-256 characters.
+SESSION_ID_MIN = 33
+SESSION_ID_MAX = 256
+
+
+def _session_id(run_id):
+    """A session id derived from `run_id`, padded to the API's minimum.
+
+    Run ids are 22 characters and deliberately stay that way: the weekly
+    digest prints one for a human to paste into `revert_qa_run(...)`, so the
+    padding belongs here rather than in the id itself.
+
+    Padded with a hash of the run id, not a random value, because
+    runtimeSessionId is an idempotency token — a Lambda retry has to land on
+    the same session instead of opening a second conversation with the agent.
+    """
+    if len(run_id) >= SESSION_ID_MIN:
+        return run_id[:SESSION_ID_MAX]
+    filler = hashlib.sha256(run_id.encode()).hexdigest()
+    return f'{run_id}-{filler}'[:SESSION_ID_MAX]
 
 
 def lambda_handler(event, context):
@@ -34,7 +56,7 @@ def lambda_handler(event, context):
     response = client.invoke_agent_runtime(
         agentRuntimeArn=AGENT_RUNTIME_ARN,
         # Each weekly pass is its own conversation — nothing carries over.
-        runtimeSessionId=run_id,
+        runtimeSessionId=_session_id(run_id),
         payload=json.dumps(payload).encode(),
         qualifier='DEFAULT',
     )

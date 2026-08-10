@@ -91,7 +91,8 @@ fi
 if [ -e lambda_src/qa_trigger/handler.py ]; then
   mkdir -p build/qa_trigger
   cp -r lambda_src/qa_trigger/. build/qa_trigger/
-  rm -rf build/qa_trigger/__pycache__
+  # Tests live next to the handler; they have no business in the bundle.
+  rm -rf build/qa_trigger/test_*.py build/qa_trigger/__pycache__
 fi
 
 # ── calendar_qc (AgentCore Runtime asset) ───────────────────────────
