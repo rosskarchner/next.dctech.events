@@ -155,6 +155,18 @@ def main():
         _write_yaml(os.path.join('_updates', f'{week_id}.yaml'), _clean(item))
     counts['updates'] = len(by_prefix.get('UPDATE', []))
 
+    # ── _archive/ ───────────────────────────────────────────────────
+    # One frozen listing per ISO week, captured by the updates publisher the
+    # Wednesday before that week starts. This is the only record of what the
+    # calendar showed for a week: the pipeline drops events dated before
+    # today, and organizers' feeds drop them too, so once a week is over its
+    # events cannot be reconstructed from anything else.
+    _reset_dir('_archive')
+    for item in by_prefix.get('ARCHIVE', []):
+        week_id = item['PK'].split('#', 1)[1]
+        _write_yaml(os.path.join('_archive', f'{week_id}.yaml'), _clean(item))
+    counts['archive'] = len(by_prefix.get('ARCHIVE', []))
+
     # ── _posts/ ─────────────────────────────────────────────────────
     # Free-form posts authored in /edit. Drafts are exported too — calgen is
     # the single place that decides what renders, and it skips anything not

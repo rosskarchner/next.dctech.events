@@ -2,13 +2,20 @@
 
 {% block title %}{{ category_name }} Events - {{ site_name }}{% endblock %}
 
-{% block og_title %}{{ category_name }} Events - {{ site_name }}{% endblock %}
+{% block robots %}<meta name="robots" content="{% if stats.upcoming_events == 0 %}noindex, follow{% else %}index, follow{% endif %}">{% endblock %}
+
+{% block description %}{{ stats.upcoming_events }} upcoming {{ category_name }} tech event{{ '' if stats.upcoming_events == 1 else 's' }} in Washington, DC, Maryland and Virginia. {{ category_description or 'Updated daily, with links straight to each organizer.' }}{% endblock %}
+
+{% block og_title %}Upcoming {{ category_name }} Events in DC{% endblock %}
+{% block og_description %}{{ stats.upcoming_events }} upcoming {{ category_name }} tech event{{ '' if stats.upcoming_events == 1 else 's' }} in the DC, Maryland and Virginia area.{% endblock %}
+
+{% block twitter_title %}Upcoming {{ category_name }} Events in DC{% endblock %}
+{% block twitter_description %}{{ stats.upcoming_events }} upcoming {{ category_name }} tech event{{ '' if stats.upcoming_events == 1 else 's' }} in the DC, Maryland and Virginia area.{% endblock %}
 
 {% block content %}
 <div class="home-container">
     <section class="events-section">
-        <h2>Upcoming {{ category_name }} Events 
-        </h2>
+        <h1>Upcoming {{ category_name }} Events in the DC Area</h1>
 
         {% if category_description %}
             <p class="category-description">{{ category_description }}</p>
@@ -24,11 +31,6 @@
 {% endblock %}
 
 {% block extra_head %}
-    <meta property="og:title" content="{{ category_name }} Events - {{ site_name }}">
-    <meta property="og:type" content="website">
-    <meta property="og:description" content="{{ category_description }}">
-    <meta property="og:site_name" content="{{ site_name }}">
-    
     <!-- Feed links -->
     <link rel="alternate" type="application/rss+xml" title="{{ category_name }} Events RSS Feed" href="feed.xml">
     <link rel="alternate" type="text/calendar" title="{{ category_name }} Events iCal Feed" href="feed.ics">

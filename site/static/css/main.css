@@ -48,7 +48,7 @@ header {
     border-bottom: 2px solid var(--color-border);
 }
 
-h1.logo {
+.logo {
     margin: 0 0 var(--spacing-sm) 0;
     font-family: Kenney Mini,-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 1.75rem; /* Smaller default for mobile */
@@ -57,17 +57,17 @@ h1.logo {
 }
 
 @media (min-width: 768px) {
-    h1.logo {
+    .logo {
         font-size: 2.5rem; /* Larger size for tablets and desktop */
     }
 }
 
-h1.logo a {
+.logo a {
     color: var(--color-text);
     text-decoration: none;
 }
 
-h1.logo a:hover {
+.logo a:hover {
     color: var(--color-primary);
 }
 
@@ -604,5 +604,92 @@ footer {
     border-left: 4px solid var(--color-border);
     padding-left: var(--spacing-md);
     margin-left: 0;
+    color: var(--color-text-light);
+}
+
+/* ── Per-event pages ────────────────────────────────────────────────
+   The permalink is deliberately quiet. In a listing the event title is the
+   outbound link to the organizer; this '#' is a crawlable route to our own
+   page for the event, sized so that a reader looking for the event never
+   mistakes it for the thing to click. Do not make it louder. */
+.event-permalink {
+    margin-left: 0.4em;
+    font-size: 0.8em;
+    color: var(--color-text-light);
+    opacity: 0.35;
+    text-decoration: none;
+}
+
+.event-permalink:hover,
+.event-permalink:focus {
+    opacity: 1;
+    color: var(--color-primary);
+}
+
+.event-page {
+    max-width: 44rem;
+}
+
+.event-facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--spacing-xs) var(--spacing-md);
+    margin: var(--spacing-lg) 0;
+}
+
+.event-facts dt {
+    font-weight: 700;
+    color: var(--color-text-light);
+}
+
+.event-facts dd {
+    margin: 0;
+}
+
+/* The primary action on the page: out to the organizer. */
+.event-source-cta {
+    margin: var(--spacing-lg) 0 var(--spacing-xs) 0;
+}
+
+.event-source-link {
+    display: inline-block;
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: var(--color-primary);
+    color: #fff;
+    border-radius: 4px;
+    font-size: 1.125rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.event-source-link:hover,
+.event-source-link:focus {
+    background: var(--color-text);
+    color: #fff;
+}
+
+.event-source-note {
+    color: var(--color-text-light);
+    font-size: 0.9rem;
+    margin-top: 0;
+}
+
+.event-page h2 {
+    font-size: 1.1rem;
+    margin-bottom: var(--spacing-xs);
+}
+
+.event-actions {
+    margin-top: var(--spacing-xl);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text-light);
+}
+
+/* Shown on week and month pages whose events are already in the past. */
+.archive-notice {
+    background: var(--color-background-alt);
+    border-left: 4px solid var(--color-border);
+    padding: var(--spacing-md);
     color: var(--color-text-light);
 }

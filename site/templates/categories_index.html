@@ -2,10 +2,18 @@
 
 {% block title %}Categories - {{ site_name }}{% endblock %}
 
+{% block description %}Browse {{ site_name }} by topic — {{ categories|length }} categories of technology meetups, conferences and workshops in and around Washington, DC.{% endblock %}
+
+{% block og_title %}Browse DC Tech Events by Category{% endblock %}
+{% block og_description %}Browse technology events in Washington, DC and surrounding areas by category.{% endblock %}
+
+{% block twitter_title %}Browse DC Tech Events by Category{% endblock %}
+{% block twitter_description %}Browse technology events in Washington, DC and surrounding areas by category.{% endblock %}
+
 {% block content %}
 <div class="home-container">
     <section class="events-section">
-        <h2>Browse by Category</h2>
+        <h1>Browse DC Tech Events by Category</h1>
         <p>Explore technology events in Washington, DC and surrounding areas by category.</p>
 
         {% if categories %}
@@ -36,9 +44,3 @@
 </div>
 {% endblock %}
 
-{% block extra_head %}
-    <meta property="og:title" content="Categories - {{ site_name }}">
-    <meta property="og:type" content="website">
-    <meta property="og:description" content="Browse technology events by category">
-    <meta property="og:site_name" content="{{ site_name }}">
-{% endblock %}

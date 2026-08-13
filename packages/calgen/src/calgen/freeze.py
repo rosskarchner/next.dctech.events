@@ -4,7 +4,7 @@ import os
 
 from calgen.app import (
     create_app, get_events, get_upcoming_weeks, get_categories, get_upcoming_months,
-    get_category_month_combos,
+    get_category_month_combos, get_events_by_slug, get_all_week_ids, get_all_months,
 )
 from calgen.updates import get_free_posts, get_update_posts
 from calgen.site_config import get_config
@@ -18,8 +18,20 @@ def create_freezer(app):
 
     @freezer.register_generator
     def month_page():
-        for m in get_upcoming_months():
-            yield {'year': m['year'], 'month': m['month']}
+        # Archived months included: a month page that stops being generated
+        # is deleted from the bucket by `s3 sync --delete` and 404s.
+        for year, month in get_all_months():
+            yield {'year': year, 'month': month}
+
+    @freezer.register_generator
+    def event_page():
+        for slug in get_events_by_slug():
+            yield {'slug': slug}
+
+    @freezer.register_generator
+    def event_ical():
+        for slug in get_events_by_slug():
+            yield {'slug': slug}
 
     @freezer.register_generator
     def region_page():
@@ -29,7 +41,7 @@ def create_freezer(app):
 
     @freezer.register_generator
     def week_page():
-        for week_id in get_upcoming_weeks(12):
+        for week_id in get_all_week_ids(12):
             yield {'week_id': week_id}
 
     @freezer.register_generator

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{#
+  A search landing page, not a step in this site's click path.
+
+  Nobody browsing dctech.events is routed here: every listing links its event
+  title straight out to the organizer, and this page is reachable only from a
+  low-prominence '#' permalink beside that title. It exists for people who
+  arrive from a search engine, who had no direct path to the organizer for us
+  to intercept, and its whole job is to hand them off as fast as possible.
+
+  Three rules hold this honest, and changing any of them turns the site into
+  the kind of calendar it was built to replace:
+
+  1. The organizer's link is the primary action — first, largest, with the
+     real hostname visible. No redirect, no click wrapper, no signup wall.
+  2. The organizer's own description is never republished here, even though
+     the feed supplies one. That copy belongs to them; duplicating it is both
+     the substitution behavior we object to and content Google would filter.
+     This page carries facts only: when, where, who, what it's filed under.
+  3. What the page does add is what no single organizer knows — that the same
+     event is listed by several groups, a one-event calendar download, and
+     the category cross-links.
+#}
+
+{% block title %}{{ event.title }} - {{ formatted_date }} - {{ site_name }}{% endblock %}
+
+{% block description %}{{ event.title }}{% if event.group %}, hosted by {{ event.group }}{% endif %} on {{ formatted_date }}{% if formatted_time %} at {{ formatted_time }}{% endif %}{% if event.location %} in {{ city or event.location }}{% endif %}.{% endblock %}
+
+{% block og_title %}{{ event.title }}{% endblock %}
+{% block og_description %}{{ formatted_date }}{% if formatted_time %} at {{ formatted_time }}{% endif %}{% if event.group %} — {{ event.group }}{% endif %}{% endblock %}
+
+{% block twitter_title %}{{ event.title }}{% endblock %}
+{% block twitter_description %}{{ formatted_date }}{% if formatted_time %} at {{ formatted_time }}{% endif %}{% if event.group %} — {{ event.group }}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="home-container">
+    <article class="event-page h-event">
+        <h1 class="p-name">{{ event.title }}</h1>
+
+        <dl class="event-facts">
+            <dt>When</dt>
+            <dd>
+                <time class="dt-start" datetime="{{ event.date }}{% if event.time %}T{{ event.time }}{% endif %}">
+                    {{ formatted_date }}{% if formatted_time %}, {{ formatted_time }}{% endif %}
+                </time>
+                {% if event.is_recurring %}
+                    <span class="recurring-badge" title="This is a recurring event. Please confirm with the organizer before attending.">🔄 Recurring</span>
+                {% endif %}
+            </dd>
+
+            {% if event.location %}
+            <dt>Where</dt>
+            <dd class="p-location">{{ event.location }}</dd>
+            {% endif %}
+
+            {% if event.group %}
+            <dt>Who</dt>
+            <dd class="p-organizer h-card">
+                {% if event.group_website %}
+                    <a class="u-url p-name" href="{{ event.group_website }}" target="_blank" rel="noopener noreferrer">{{ event.group }}</a>
+                {% else %}
+                    <span class="p-name">{{ event.group }}</span>
+                {% endif %}
+            </dd>
+            {% endif %}
+        </dl>
+
+        {# The point of the page. First, biggest, and the organizer's own
+           hostname is on screen so nobody has to guess where they land. #}
+        {% if event.url %}
+        <p class="event-source-cta">
+            <a class="u-url event-source-link" href="{{ event.url }}" target="_blank" rel="noopener noreferrer">
+                Full details &amp; registration at {{ source_host or 'the organizer' }} &rarr;
+            </a>
+        </p>
+        <p class="event-source-note">
+            {{ site_name }} lists this event but does not run it. Times, location and
+            registration are the organizer's to change — always confirm with them.
+        </p>
+        {% endif %}
+
+        {% if event.also_published_by %}
+        <section class="event-also-published">
+            <h2>Also listed by</h2>
+            <p>
+                {% for alt_group in event.also_published_by %}
+                    <a href="{{ alt_group.url }}" target="_blank" rel="noopener noreferrer">{{ alt_group.group }}</a>{% if not loop.last %}{% if loop.revindex == 2 %} and {% else %}, {% endif %}{% endif %}
+                {% endfor %}
+            </p>
+        </section>
+        {% endif %}
+
+        {% if event.categories %}
+        <section class="event-categories-section">
+            <h2>Filed under</h2>
+            <div class="event-categories">
+                {% for cat_slug in event.categories %}
+                    {% if categories and cat_slug in categories %}
+                        <a href="/categories/{{ cat_slug }}/" class="category-badge">{{ categories[cat_slug].name }}</a>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        <p class="event-actions">
+            <a href="/events/{{ slug }}/event.ics">Add to your calendar (.ics)</a>
+            &middot;
+            <a href="/">See all upcoming DC tech events</a>
+        </p>
+    </article>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+{#
+  url points at this page because that is what earns the rich result, and
+  Google routes the result's registration click through offers.url — so the
+  structured data sends searchers to the organizer too.
+
+  endDate is emitted only when a feed supplied one; see _event_end_iso.
+#}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Event",
+  "name": {{ event.title | tojson }},
+  "url": {{ (base_url ~ '/events/' ~ slug ~ '/') | tojson }},
+  "startDate": "{{ event.date }}{% if event.time %}T{{ event.time }}{% endif %}",
+  {% if end_datetime %}"endDate": {{ end_datetime | tojson }},{% endif %}
+  "eventStatus": "https://schema.org/EventScheduled",
+  "eventAttendanceMode": "https://schema.org/{% if event.virtual %}Online{% else %}Offline{% endif %}EventAttendanceMode",
+  {% if event.location %}
+  "location": {
+    {% if event.virtual %}
+    "@type": "VirtualLocation",
+    "url": {{ (event.url or base_url) | tojson }}
+    {% else %}
+    "@type": "Place",
+    "name": {{ event.location | tojson }},
+    "address": {
+      "@type": "PostalAddress",
+      "streetAddress": {{ event.location | tojson }}
+      {% if city %},"addressLocality": {{ city | tojson }}{% endif %}
+      {% if state %},"addressRegion": {{ state | tojson }}{% endif %}
+      ,"addressCountry": "US"
+    }
+    {% endif %}
+  },
+  {% endif %}
+  {% if event.group %}
+  "organizer": {
+    "@type": "Organization",
+    "name": {{ event.group | tojson }}
+    {% if event.group_website %},"url": {{ event.group_website | tojson }}{% endif %}
+  },
+  {% endif %}
+  {% if event.url %}
+  "offers": {
+    "@type": "Offer",
+    "url": {{ event.url | tojson }},
+    "availability": "https://schema.org/InStock"
+  },
+  {% endif %}
+  "isAccessibleForFree": true
+}
+</script>
+{% endblock %}

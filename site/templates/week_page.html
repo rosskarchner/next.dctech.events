@@ -31,7 +31,14 @@
     </header>
 
     <section class="events-section">
-        <h2>{{ stats.upcoming_events }} Events This Week</h2>
+        <h2>{{ stats.upcoming_events }} Event{{ '' if stats.upcoming_events == 1 else 's' }} This Week</h2>
+        {% if is_past %}
+        <p class="archive-notice">
+            These events have already happened. This page is kept as a record of
+            what the calendar showed, so older links keep working —
+            <a href="/">see what is coming up</a>.
+        </p>
+        {% endif %}
         {% include "partials/events_by_day.html" %}
     </section>
 </div>

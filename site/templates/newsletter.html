@@ -3,6 +3,10 @@
 <head>
     <meta charset="utf-8">
     <title>{{ site_name }} Newsletter</title>
+    <!-- This page is the email body, rendered to /newsletter.html so the
+         sender can fetch it. Its event list duplicates the homepage, so it
+         must not compete with the homepage in search results. -->
+    <meta name="robots" content="noindex, follow">
 </head>
 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
     <h1 style="color: #333;">{{ site_name }} - Upcoming Events</h1>

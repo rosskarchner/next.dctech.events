@@ -2,11 +2,20 @@
 
 {% block title %}{{ location_name }} Tech Events - {{ site_name }}{% endblock %}
 
+{% block robots %}<meta name="robots" content="{% if stats.upcoming_events == 0 %}noindex, follow{% else %}index, follow{% endif %}">{% endblock %}
+
+{% block description %}{{ stats.upcoming_events }} upcoming technology meetup{{ '' if stats.upcoming_events == 1 else 's' }}, conference{{ '' if stats.upcoming_events == 1 else 's' }} and workshop{{ '' if stats.upcoming_events == 1 else 's' }} in {{ location_name }}. Updated daily, with links straight to each organizer.{% endblock %}
+
+{% block og_title %}Upcoming Tech Events in {{ location_name }}{% endblock %}
+{% block og_description %}{{ stats.upcoming_events }} upcoming technology event{{ '' if stats.upcoming_events == 1 else 's' }} in {{ location_name }}.{% endblock %}
+
+{% block twitter_title %}Upcoming Tech Events in {{ location_name }}{% endblock %}
+{% block twitter_description %}{{ stats.upcoming_events }} upcoming technology event{{ '' if stats.upcoming_events == 1 else 's' }} in {{ location_name }}.{% endblock %}
+
 {% block content %}
 <div class="home-container">
     <section class="events-section">
-        <h2>Upcoming Events in {{ location_name }}
-        </h2>
+        <h1>Upcoming Tech Events in {{ location_name }}</h1>
         
         {% if stats.upcoming_events == 0 %}
             <p>No upcoming events found for {{ location_name }}. <a href="/">View all events</a> or <a href="{{ add_events_link }}">add an event</a>.</p>
@@ -18,11 +27,6 @@
 {% endblock %}
 
 {% block extra_head %}
-    <meta property="og:title" content="{{ location_name }} Tech Events - {{ site_name }}">
-    <meta property="og:type" content="website">
-    <meta property="og:description" content="Technology events in {{ location_name }}">
-    <meta property="og:site_name" content="{{ site_name }}">
-    
     <!-- Feed links -->
     <link rel="alternate" type="application/rss+xml" title="{{ location_name }} Events RSS Feed" href="feed.xml">
     <link rel="alternate" type="text/calendar" title="{{ location_name }} Events iCal Feed" href="feed.ics">

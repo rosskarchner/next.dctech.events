@@ -15,10 +15,13 @@ import io
 
 from calgen.site_config import get_config
 from calgen.location_utils import extract_location_info, get_region_name
-from calgen.event_utils import calculate_event_hash
+from calgen.event_utils import calculate_event_hash, event_slug
 from calgen.updates import (
     get_all_posts, get_free_post, get_free_posts, get_update_post,
     get_update_posts, summarize,
+)
+from calgen.archive import (
+    get_archived_events, get_archived_week, get_archived_weeks, merge_events,
 )
 
 # Valid US state/territory codes for location route validation
@@ -38,6 +41,12 @@ local_tz = pytz.timezone(timezone_name)
 
 
 from calgen.regions import load_region_plugin  # noqa: E402
+
+# The browse sidebar crosses every category with every month, and each combo
+# is frozen as its own page. Below this many events a combo has nothing its
+# parent /categories/<slug>/ page does not already say, so it ships noindex
+# and stays out of the sitemap rather than competing with that parent.
+THIN_FACET_MIN_EVENTS = 3
 
 
 def create_app(site_dir=None):
@@ -134,8 +143,15 @@ def _register_routes(app):
         except Exception:
             return "Invalid week identifier", 404
 
-        events = get_events()
-        week_events = filter_events_by_week(events, week_start, week_end)
+        # Live events for the part of the week still ahead, the frozen
+        # capture for the part already gone. For a wholly future week the
+        # archive adds nothing; for a wholly past one it is all there is.
+        archived = get_archived_week(week_id)
+        week_events = merge_events(
+            filter_events_by_week(get_events(), week_start, week_end),
+            filter_events_by_week(archived['events'], week_start, week_end)
+            if archived else [],
+        )
         days = prepare_events_by_day(week_events)
         week_start_formatted = week_start.strftime('%B %-d, %Y')
         stats = {'upcoming_events': len(week_events)}
@@ -146,6 +162,7 @@ def _register_routes(app):
                                week_id=week_id,
                                week_start=week_start,
                                week_end=week_end,
+                               is_past=week_end < datetime.now(local_tz).date(),
                                week_start_formatted=week_start_formatted,
                                base_url=base_url)
 
@@ -162,8 +179,10 @@ def _register_routes(app):
         except ValueError:
             return "Invalid date", 404
 
-        events = get_events()
-        month_events = filter_events_by_month(events, first_day, last_day)
+        month_events = merge_events(
+            filter_events_by_month(get_events(), first_day, last_day),
+            filter_events_by_month(get_archived_events(), first_day, last_day),
+        )
         days = prepare_events_by_day(month_events)
         month_name = calendar.month_name[month]
         stats = {'upcoming_events': len(month_events)}
@@ -172,6 +191,7 @@ def _register_routes(app):
         prev_year = year if month > 1 else year - 1
         next_month = month + 1 if month < 12 else 1
         next_year = year if month < 12 else year + 1
+        built_months = set(get_all_months())
 
         return render_template('month_page.html',
                                days=days,
@@ -183,7 +203,40 @@ def _register_routes(app):
                                prev_year=prev_year,
                                next_month=next_month,
                                next_year=next_year,
+                               # Only months that are actually built get a nav
+                               # link; the ends of the range used to point at
+                               # pages that were never frozen.
+                               has_prev=(prev_year, prev_month) in built_months,
+                               has_next=(next_year, next_month) in built_months,
+                               is_past=last_day < datetime.now(local_tz).date(),
                                sidebar=get_sidebar_data(active_month=(year, month)))
+
+    @app.route("/events/<slug>/")
+    def event_page(slug):
+        event = get_event_by_slug(slug)
+        if not event:
+            return "Event not found", 404
+        cfg = get_config()
+        city, state = extract_location_info(event.get('location', '') or '')
+        return render_template('event_page.html',
+                               event=event,
+                               slug=slug,
+                               city=city,
+                               state=state,
+                               source_host=urlparse(event.get('url', '') or '').netloc,
+                               formatted_date=_format_event_date(event),
+                               formatted_time=_format_event_time(event),
+                               end_datetime=_event_end_iso(event),
+                               categories=get_categories(),
+                               base_url=cfg.get('base_url', ''))
+
+    @app.route("/events/<slug>/event.ics")
+    def event_ical(slug):
+        event = get_event_by_slug(slug)
+        if not event:
+            return "Event not found", 404
+        return _generate_ical_feed([event], event.get('title', 'Event'),
+                                   get_config().get('site_name', ''))
 
     @app.route("/locations/")
     def locations_index():
@@ -326,6 +379,7 @@ def _register_routes(app):
                                month_name=calendar.month_name[month],
                                year=year,
                                month=month,
+                               is_thin=len(month_events) < THIN_FACET_MIN_EVENTS,
                                sidebar=get_sidebar_data(active_category=slug,
                                                         active_month=(year, month)))
 
@@ -353,44 +407,66 @@ def _register_routes(app):
 
     @app.route("/sitemap.xml")
     def sitemap():
+        """Every indexable frozen URL, and an honest lastmod or none at all.
+
+        Two deliberate omissions. `changefreq` is gone entirely — Google has
+        not used it for years, and it was never a request anyway. `lastmod` is
+        emitted only for /updates posts, where `published_on` is a real
+        content date; every listing page is derived from the current event set
+        and has no per-page change date we can compute. Stamping build time on
+        all of them, as this function used to, is worse than saying nothing:
+        it makes every URL look freshly changed on every rebuild, and crawlers
+        respond by discounting the field sitewide.
+
+        Thin category+month facets are excluded — they carry noindex (see
+        THIN_FACET_MIN_EVENTS), so listing them would only send crawlers to
+        pages we have asked them to drop.
+        """
         cfg = get_config()
         base_url = cfg.get('base_url', '')
-        now = datetime.now().strftime('%Y-%m-%d')
 
         urls = [
-            {'loc': f"{base_url}/", 'lastmod': now},
-            {'loc': f"{base_url}/virtual/", 'lastmod': now},
-            {'loc': f"{base_url}/categories/", 'lastmod': now},
-            {'loc': f"{base_url}/groups/", 'lastmod': now},
+            {'loc': f"{base_url}/"},
+            {'loc': f"{base_url}/virtual/"},
+            {'loc': f"{base_url}/categories/"},
+            {'loc': f"{base_url}/groups/"},
+            {'loc': f"{base_url}/feeds/"},
         ]
 
         plugin = app.region_plugin
         if plugin:
-            urls.append({'loc': f"{base_url}/locations/", 'lastmod': now})
+            urls.append({'loc': f"{base_url}/locations/"})
             for region in plugin.list_regions():
-                urls.append({'loc': f"{base_url}/locations/{region['slug']}/", 'lastmod': now})
+                urls.append({'loc': f"{base_url}/locations/{region['slug']}/"})
 
         for slug in get_categories().keys():
-            urls.append({'loc': f"{base_url}/categories/{slug}/", 'lastmod': now, 'changefreq': 'daily'})
+            urls.append({'loc': f"{base_url}/categories/{slug}/"})
 
-        for week_id in get_upcoming_weeks(12):
-            urls.append({'loc': f"{base_url}/week/{week_id}/", 'lastmod': now, 'changefreq': 'daily'})
+        for slug in get_events_by_slug():
+            urls.append({'loc': f"{base_url}/events/{slug}/"})
 
-        urls.append({'loc': f"{base_url}/updates/", 'lastmod': now, 'changefreq': 'weekly'})
+        for year, month in get_all_months():
+            urls.append({'loc': f"{base_url}/{year}/{month}/"})
+
+        for week_id in get_all_week_ids(12):
+            urls.append({'loc': f"{base_url}/week/{week_id}/"})
+
+        for (slug, year, month), count in sorted(get_category_month_counts().items()):
+            if count >= THIN_FACET_MIN_EVENTS:
+                urls.append({'loc': f"{base_url}/categories/{slug}/{year}/{month}/"})
+
+        urls.append({'loc': f"{base_url}/updates/"})
         for post in get_all_posts():
-            # Weekly roundups are frozen snapshots and never change again;
-            # free-form posts can be edited after publication.
             urls.append({'loc': f"{base_url}{post['url']}",
-                         'lastmod': post['published_on'].strftime('%Y-%m-%d'),
-                         'changefreq': 'never' if post['kind'] == 'weekly' else 'monthly'})
+                         'lastmod': post['published_on'].strftime('%Y-%m-%d')})
 
         xml = ['<?xml version="1.0" encoding="UTF-8"?>',
                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
         for url in urls:
             xml.append('  <url>')
             xml.append(f'    <loc>{url["loc"]}</loc>')
-            xml.append(f'    <lastmod>{url["lastmod"]}</lastmod>')
-            xml.append(f'    <changefreq>{url.get("changefreq", "daily")}</changefreq>')
+            if url.get('lastmod'):
+                xml.append(f'    <lastmod>{url["lastmod"]}</lastmod>')
             xml.append('  </url>')
         xml.append('</urlset>')
         return Response('\n'.join(xml), mimetype='application/xml')
@@ -693,14 +769,85 @@ def _month_url(year, month, active_category=None):
     return f"/{year}/{month}/"
 
 
-def get_category_month_combos():
-    """Return sorted (slug, year, month) tuples that have at least one event.
+def get_all_week_ids(num_weeks=12):
+    """Week pages worth building: the upcoming ones plus every archived one.
 
-    Used to enumerate the category+month pages worth freezing.
+    Without the archive half, a week page vanishes the moment its events do
+    and the URL starts 404ing — the site deploys with `s3 sync --delete`, so
+    the previously published file is actively removed.
     """
+    return sorted(set(get_upcoming_weeks(num_weeks)) | set(get_archived_weeks()))
+
+
+def get_all_months():
+    """Months worth building: those with upcoming events plus archived ones."""
+    months = {(m['year'], m['month']) for m in get_upcoming_months()}
+    for event in get_archived_events():
+        try:
+            event_date = datetime.strptime(event['date'], '%Y-%m-%d').date()
+        except (KeyError, ValueError, TypeError):
+            continue
+        months.add((event_date.year, event_date.month))
+    return sorted(months)
+
+
+def get_events_by_slug():
+    """{slug: event} for every current event, for the per-event pages.
+
+    Collisions are impossible in practice (the slug carries a guid prefix)
+    but a feed that publishes the same event twice would produce the same
+    guid, so first-wins keeps the page deterministic.
+    """
+    index = {}
+    for event in get_events():
+        index.setdefault(event_slug(event), event)
+    return index
+
+
+def get_event_by_slug(slug):
+    return get_events_by_slug().get(slug)
+
+
+def _format_event_date(event):
+    try:
+        return datetime.strptime(event['date'], '%Y-%m-%d').date().strftime('%A, %B %-d, %Y')
+    except (KeyError, ValueError, TypeError):
+        return event.get('date', '')
+
+
+def _format_event_time(event):
+    raw = event.get('time', '')
+    if isinstance(raw, dict):
+        raw = raw.get(event.get('date', ''), '')
+    if not (raw and isinstance(raw, str) and ':' in raw):
+        return ''
+    try:
+        return datetime.strptime(raw.strip(), '%H:%M').time().strftime('%-I:%M %p').lower()
+    except ValueError:
+        return ''
+
+
+def _event_end_iso(event):
+    """schema.org endDate, only when the data actually supports one.
+
+    Google wants endDate on Event, but inventing one (start + 2h, say) would
+    put a fact in the markup that no feed asserted. Emitted only for events
+    carrying an explicit end_date; otherwise the property is omitted.
+    """
+    end_date = event.get('end_date')
+    if not end_date:
+        return ''
+    end_time = event.get('end_time')
+    if end_time and isinstance(end_time, str) and ':' in end_time:
+        return f"{end_date}T{end_time}"
+    return str(end_date)
+
+
+def get_category_month_counts():
+    """Return {(slug, year, month): event_count} for every non-empty combo."""
     events = get_events()
     categories = get_categories()
-    combos = set()
+    counts = {}
     for event in events:
         event_date_str = event.get('date')
         if not event_date_str:
@@ -711,8 +858,17 @@ def get_category_month_combos():
             continue
         for slug in event.get('categories', []):
             if slug in categories:
-                combos.add((slug, event_date.year, event_date.month))
-    return sorted(combos)
+                key = (slug, event_date.year, event_date.month)
+                counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def get_category_month_combos():
+    """Return sorted (slug, year, month) tuples that have at least one event.
+
+    Used to enumerate the category+month pages worth freezing.
+    """
+    return sorted(get_category_month_counts())
 
 
 def get_sidebar_data(active_category=None, active_month=None):
@@ -981,6 +1137,13 @@ def prepare_events_by_day(events, add_week_links=False):
             event_copy['time'] = time_key if time_key != 'All Day' else ''
             event_copy['formatted_time'] = formatted_time
             event_copy['display_title'] = f"{event['title']} (continuing)" if i > 0 else event['title']
+            # Permalink to this event's own page. Every list template renders
+            # it as a low-prominence '#' beside the title, never in place of
+            # the outbound link: the title always goes straight to the
+            # organizer. See site/templates/event_page.html for the rest of
+            # the reasoning.
+            if not event.get('archived'):
+                event_copy['permalink'] = f"/events/{event_slug(event)}/"
 
             if time_key not in events_by_day[day_key]['time_slots']:
                 events_by_day[day_key]['time_slots'][time_key] = []
@@ -1155,10 +1318,18 @@ def _generate_updates_rss(posts, site_name, base_url):
             body = [post.get('body_html', '')]
         else:
             body = [f"<p>{summarize(post)}</p>"]
-            body.append(
-                f'<p><a href="{base_url}{post["week_url"]}">'
-                f'See the full week on {site_name}</a></p>'
-            )
+            # A roundup of what was *added* spans months, so pointing at one
+            # week of the calendar would be a link to the wrong thing.
+            if post.get('added_since'):
+                body.append(
+                    f'<p><a href="{base_url}/">'
+                    f'See everything coming up on {site_name}</a></p>'
+                )
+            else:
+                body.append(
+                    f'<p><a href="{base_url}{post["week_url"]}">'
+                    f'See the full week on {site_name}</a></p>'
+                )
             listing = []
             for event in post.get('events', []):
                 title = event.get('title')

@@ -1,37 +1,30 @@
-# Header Images Directory
+# Site images
 
-This directory should contain the responsive header images for the site.
+These files are **generated**, not hand-drawn. Do not edit them directly —
+regenerate from the site's own branding instead:
 
-📄 **Quick Reference:** See `SIZES_QUICK_REFERENCE.txt` in this directory for a visual overview of all required sizes.
+```bash
+python scripts/generate_site_images.py
+```
 
-📚 **Complete Guide:** See [HEADER_IMAGES.md](../../HEADER_IMAGES.md) in the root directory for:
-- Complete specifications for all required image sizes
-- Implementation examples
-- Design guidelines
-- Optimization recommendations
+The script reads the wordmark face from `site/static/kenney-mini/kenney-mini.woff2`
+and mirrors the palette in `site/static/css/main.css`, so a rename, a new
+tagline or a palette change only needs the script re-run. It needs `pillow`,
+`fonttools`, and a brotli decoder (`pip install brotlicffi`) to read the
+`.woff2`.
 
-## Required Files
+## What it produces
 
-### Social Media Sharing (Priority 1)
-- `og-image.png` - 1200×630 px
+| File | Size | Used by |
+| --- | --- | --- |
+| `og-image.png` | 1200×630 | `og:image` / `twitter:image` in `base.html` — the social share card |
+| `favicon-16.png`, `favicon-32.png` | 16, 32 | browser tabs; the 32 also shows in Google mobile results |
+| `favicon.ico` | 16/32/48 | clients that still probe `/favicon.ico` directly |
+| `icon-180.png` | 180 | iOS home screen (`apple-touch-icon`) |
+| `icon-192.png`, `icon-512.png` | 192, 512 | `site/static/manifest.json` |
 
-### Responsive Web Display (Priority 2)
-- `header-mobile.png` - 640×336 px
-- `header-tablet.png` - 1024×538 px
-- `header-desktop.png` - 1920×1008 px
-- `header-retina.png` - 2400×1260 px
-
-### Icons (Priority 3)
-- `icon-180.png` - 180×180 px (Apple Touch Icon)
-- `icon-192.png` - 192×192 px (Android Chrome)
-- `icon-512.png` - 512×512 px (Android Chrome Large)
-- `favicon-32.png` - 32×32 px
-- `favicon-16.png` - 16×16 px
-
-## Next Steps
-
-1. Create images following the specifications in HEADER_IMAGES.md
-2. Place them in this directory
-3. Uncomment the meta tags in `templates/base.html`
-4. Rename `manifest.json.template` to `manifest.json` in the parent directory
-5. Test with social media debuggers and on various devices
+An earlier version of this file described responsive header images
+(`header-mobile.png` and friends) and pointed at a `HEADER_IMAGES.md` that was
+never written. The site has no header image and the templates never referenced
+those files, so they are not generated. `SIZES_QUICK_REFERENCE.txt` is left
+from that plan and describes sizes nothing uses.

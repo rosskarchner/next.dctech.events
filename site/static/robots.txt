@@ -4,3 +4,5 @@ Disallow: /edit/
 Disallow: /edit/event/
 Disallow: /categories/edit/
 Disallow: /groups/edit/
+
+Sitemap: https://dctech.events/sitemap.xml

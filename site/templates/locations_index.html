@@ -2,10 +2,18 @@
 
 {% block title %}Locations - {{ site_name }}{% endblock %}
 
+{% block description %}Browse tech events by where they happen — Washington DC, Maryland and Virginia — each with its own page, calendar feed and RSS feed.{% endblock %}
+
+{% block og_title %}Browse DC Tech Events by Location{% endblock %}
+{% block og_description %}Tech events in Washington DC, Maryland and Virginia, each with its own calendar and RSS feed.{% endblock %}
+
+{% block twitter_title %}Browse DC Tech Events by Location{% endblock %}
+{% block twitter_description %}Tech events in Washington DC, Maryland and Virginia, each with its own calendar and RSS feed.{% endblock %}
+
 {% block content %}
 <div class="home-container">
     <section class="events-section">
-        <h2>Events by Region</h2>
+        <h1>DC Tech Events by Region</h1>
         
         <ul>
             {% for loc in locations %}

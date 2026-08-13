@@ -2,12 +2,20 @@
 
 {% block title %}{{ category_name }} Events in {{ month_name }} {{ year }} - {{ site_name }}{% endblock %}
 
-{% block og_title %}{{ category_name }} Events in {{ month_name }} {{ year }} - {{ site_name }}{% endblock %}
+{% block robots %}<meta name="robots" content="{% if is_thin %}noindex, follow{% else %}index, follow{% endif %}">{% endblock %}
+
+{% block description %}{{ stats.upcoming_events }} {{ category_name }} tech event{{ '' if stats.upcoming_events == 1 else 's' }} in the Washington, DC area during {{ month_name }} {{ year }}, with links straight to each organizer.{% endblock %}
+
+{% block og_title %}{{ category_name }} Events in {{ month_name }} {{ year }}{% endblock %}
+{% block og_description %}{{ stats.upcoming_events }} {{ category_name }} tech event{{ '' if stats.upcoming_events == 1 else 's' }} in the DC area during {{ month_name }} {{ year }}.{% endblock %}
+
+{% block twitter_title %}{{ category_name }} Events in {{ month_name }} {{ year }}{% endblock %}
+{% block twitter_description %}{{ stats.upcoming_events }} {{ category_name }} tech event{{ '' if stats.upcoming_events == 1 else 's' }} in the DC area during {{ month_name }} {{ year }}.{% endblock %}
 
 {% block content %}
 <div class="home-container">
     <section class="events-section">
-        <h2>{{ category_name }} Events in {{ month_name }} {{ year }}</h2>
+        <h1>{{ category_name }} Events in {{ month_name }} {{ year }}</h1>
 
         {% if category_description %}
             <p class="category-description">{{ category_description }}</p>
@@ -24,9 +32,3 @@
 </div>
 {% endblock %}
 
-{% block extra_head %}
-    <meta property="og:title" content="{{ category_name }} Events in {{ month_name }} {{ year }} - {{ site_name }}">
-    <meta property="og:type" content="website">
-    <meta property="og:description" content="{{ category_name }} tech events in {{ month_name }} {{ year }}">
-    <meta property="og:site_name" content="{{ site_name }}">
-{% endblock %}

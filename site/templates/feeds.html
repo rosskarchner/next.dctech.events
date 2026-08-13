@@ -2,10 +2,18 @@
 
 {% block title %}RSS & iCal Feeds - {{ site_name }}{% endblock %}
 
+{% block description %}Subscribe to DC tech events by iCal or RSS — the full calendar, or a feed narrowed to a single category or to DC, Maryland or Virginia.{% endblock %}
+
+{% block og_title %}Subscribe to {{ site_name }}{% endblock %}
+{% block og_description %}Calendar (iCal) and RSS feeds for tech events in the DC area, including per-category and per-location feeds.{% endblock %}
+
+{% block twitter_title %}Subscribe to {{ site_name }}{% endblock %}
+{% block twitter_description %}Calendar (iCal) and RSS feeds for tech events in the DC area, including per-category and per-location feeds.{% endblock %}
+
 {% block content %}
 <div class="home-container">
     <section class="events-section">
-        <h2>RSS & iCal Feeds</h2>
+        <h1>RSS & iCal Feeds</h1>
         <p>Subscribe to our feeds to stay up-to-date with DC tech events. Choose from calendar feeds (iCal) or RSS feeds for your preferred reader.</p>
 
         <!-- Main Feeds -->
@@ -82,9 +90,3 @@
 </div>
 {% endblock %}
 
-{% block extra_head %}
-    <meta property="og:title" content="RSS & iCal Feeds - {{ site_name }}">
-    <meta property="og:type" content="website">
-    <meta property="og:description" content="Subscribe to RSS and iCal feeds for DC tech events">
-    <meta property="og:site_name" content="{{ site_name }}">
-{% endblock %}

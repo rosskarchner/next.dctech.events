@@ -2,11 +2,18 @@
 
 {% block title %}{{ site_name }}{% endblock %}
 
+{% block description %}{{ stats.total_upcoming_events }} upcoming technology meetups, conferences and workshops in Washington, DC, Maryland and Virginia. Updated daily, with links straight to each organizer.{% endblock %}
+
+{% block og_description %}{{ stats.total_upcoming_events }} upcoming tech meetups and conferences in and around Washington, DC.{% endblock %}
+{% block twitter_description %}{{ stats.total_upcoming_events }} upcoming tech meetups and conferences in and around Washington, DC.{% endblock %}
+
 
 {% block content %}
 <div class="home-container">
 
     <section class="events-section">
+        <h1>Upcoming Tech Events in DC, Maryland &amp; Virginia</h1>
+
         <div id="subscribe">
             <div>
             Get this calendar in your inbox every week! <a href="{{ newsletter_signup_link }}" hx-get="{{ newsletter_signup_link }}" hx-target="#subscribe" hx-swap="innerHTML">Subscribe today</a>.

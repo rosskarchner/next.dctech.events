@@ -2,18 +2,33 @@
 
 {% block title %}Events for {{ month_name }} {{ year }} - DC Tech Events{% endblock %}
 
+{% block description %}{{ stats.upcoming_events }} technology meetup{{ '' if stats.upcoming_events == 1 else 's' }} and conference{{ '' if stats.upcoming_events == 1 else 's' }} in Washington, DC, Maryland and Virginia during {{ month_name }} {{ year }}.{% endblock %}
+
+{% block og_title %}DC Tech Events in {{ month_name }} {{ year }}{% endblock %}
+{% block og_description %}{{ stats.upcoming_events }} technology event{{ '' if stats.upcoming_events == 1 else 's' }} in the DC area during {{ month_name }} {{ year }}.{% endblock %}
+
+{% block twitter_title %}DC Tech Events in {{ month_name }} {{ year }}{% endblock %}
+{% block twitter_description %}{{ stats.upcoming_events }} technology event{{ '' if stats.upcoming_events == 1 else 's' }} in the DC area during {{ month_name }} {{ year }}.{% endblock %}
+
 {% block content %}
 <div class="month-container">
     <header class="month-header">
         <h1>Events for {{ month_name }} {{ year }}</h1>
         <div class="month-navigation">
-            <a href="/{{ prev_year }}/{{ prev_month }}/" class="nav-button">&laquo; Previous</a>
-    
-            <a href="/{{ next_year }}/{{ next_month }}/" class="nav-button">Next &raquo;</a>
+            {% if has_prev %}<a href="/{{ prev_year }}/{{ prev_month }}/" class="nav-button">&laquo; Previous</a>{% endif %}
+
+            {% if has_next %}<a href="/{{ next_year }}/{{ next_month }}/" class="nav-button">Next &raquo;</a>{% endif %}
         </div>
     </header>
 
     <section class="events-section">
+        {% if is_past %}
+        <p class="archive-notice">
+            These events have already happened. This page is kept as a record of
+            what the calendar showed, so older links keep working —
+            <a href="/">see what is coming up</a>.
+        </p>
+        {% endif %}
         {% include "partials/events_by_day.html" %}
     </section>
     

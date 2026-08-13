@@ -2,12 +2,20 @@
 
 {% block title %}Virtual Events - {{ site_name }}{% endblock %}
 
+{% block description %}{{ stats.upcoming_events }} upcoming online tech event{{ '' if stats.upcoming_events == 1 else 's' }} you can attend from anywhere, hosted by groups in and around Washington, DC.{% endblock %}
+
+{% block og_title %}Upcoming Virtual Tech Events{% endblock %}
+{% block og_description %}{{ stats.upcoming_events }} upcoming online tech event{{ '' if stats.upcoming_events == 1 else 's' }} hosted by DC-area groups.{% endblock %}
+
+{% block twitter_title %}Upcoming Virtual Tech Events{% endblock %}
+{% block twitter_description %}{{ stats.upcoming_events }} upcoming online tech event{{ '' if stats.upcoming_events == 1 else 's' }} hosted by DC-area groups.{% endblock %}
+
 
 {% block content %}
 <div class="home-container">
 
     <section class="events-section">
-        <h2>{{ stats.upcoming_events }} Upcoming Virtual Events</h2>
+        <h1>{{ stats.upcoming_events }} Upcoming Virtual Events</h1>
 
         <div id="subscribe">
             <div>
