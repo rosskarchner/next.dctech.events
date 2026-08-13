@@ -567,11 +567,13 @@ def trigger_rebuild() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Submission review
+# Submissions
 #
-# Mirrors the /api/admin moderation routes so the queue can be triaged from an
-# agent instead of the /edit UI. Both paths call the same db.* functions, so
-# approving here is byte-for-byte what approving in the browser does.
+# Mirrors the /submit and /api/admin routes so the queue can be filled and
+# triaged from an agent instead of the browser. Both paths call the same db.*
+# functions, so a draft created here is indistinguishable from one the web form
+# created, and approving here is byte-for-byte what approving in the /edit UI
+# does.
 #
 # Unlike the REST routes there is no per-user admin check: this endpoint is
 # IAM-authed for trusted callers within the account, which is the same trust
@@ -579,6 +581,57 @@ def trigger_rebuild() -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 MCP_REVIEWER = 'mcp:agent'
+
+
+@mcp.tool()
+def submit_event(
+    title: str, date: str, url: str, submitter_email: str,
+    time: str | None = None, end_date: str | None = None,
+    location: str | None = None, city: str | None = None,
+    state: str | None = None, cost: str | None = None,
+    description: str | None = None, all_day: bool = False,
+    categories: list | None = None,
+) -> dict:
+    """
+    Queue an event for moderator review, the way the public /submit form does.
+
+    Use this — not add_single_event — when the event came from somewhere you
+    have not vetted (a scraped calendar, a third-party listing, a tip). This
+    always lands in the pending queue for a human; add_single_event publishes
+    immediately. Trusted-submitter auto-approval deliberately does not apply
+    here: the submitter address is whoever the event is *credited* to, not
+    proof that they asked for it to be listed.
+
+    date/end_date are 'YYYY-MM-DD'; time is 24-hour 'HH:MM' local, omitted for
+    all-day events. Returns the draft_id to pass to approve_submission.
+    """
+    categories = categories or []
+    _check_categories(categories)
+
+    draft_data, error = db.build_event_draft_data({
+        'title': title,
+        'date': date,
+        'time': time or '',
+        'timing': 'allday' if all_day else 'specific',
+        'url': url,
+        'end_date': end_date or '',
+        'location': location or '',
+        'city': city or '',
+        'state': state or '',
+        'cost': cost or '',
+        'description': description or '',
+        'categories': categories,
+    })
+    if error:
+        raise ValueError(error)
+
+    email = str(submitter_email or '').strip().lower()
+    if '@' not in email:
+        raise ValueError(f'{submitter_email!r} is not a valid email address')
+
+    draft_id = db.create_draft('event', draft_data, email)
+    return {'draft_id': draft_id, 'status': 'pending', 'title': draft_data['title'],
+            'date': draft_data['date'], 'submitter_email': email}
 
 
 @mcp.tool()

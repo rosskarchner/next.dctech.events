@@ -100,9 +100,13 @@ Tools: `list_groups`, `add_group`, `set_group_active`, `verify_ical_feed`,
 `update_recurring_event`, `delete_recurring_event`, `list_categories`,
 `add_category`, `get_overlay`, `set_overlay`, `get_events`, `trigger_rebuild`.
 
-Moderation: `list_pending_submissions`, `get_submission`, `approve_submission`
-(optionally trusting the submitter), `reject_submission`, and
-`list_trusted_submitters` / `trust_submitter` / `untrust_submitter`.
+Submissions: `submit_event` queues an event for review the way the public
+/submit form does; `list_pending_submissions`, `get_submission`,
+`approve_submission` (optionally trusting the submitter), `reject_submission`,
+and `list_trusted_submitters` / `trust_submitter` / `untrust_submitter` work
+the queue. Use `submit_event` for anything found rather than vetted — a
+scraped calendar, a third-party listing — and `add_single_event` only when you
+mean to publish immediately.
 
 ## Social cross-posting
 

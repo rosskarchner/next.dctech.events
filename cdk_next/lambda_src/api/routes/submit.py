@@ -13,6 +13,7 @@ import os
 import magic_link
 from auth import get_user_from_event
 from db import (
+    build_event_draft_data as _build_event_draft_data,
     create_draft, get_all_categories, get_drafts_by_submitter,
     check_and_record_link_request, subscribe_to_newsletter,
     is_trusted_submitter, promote_draft_to_event, update_draft_status,
@@ -60,58 +61,6 @@ def _site_from_origin(event):
         return None
     host = origin.split('//')[-1].split('/')[0]
     return host.split('.')[0] or None
-
-
-def _normalize_categories(data):
-    categories = data.get('categories', [])
-    if isinstance(categories, str):
-        categories = [c.strip() for c in categories.split(',') if c.strip()]
-    return categories
-
-
-def _build_event_draft_data(data):
-    title = (data.get('title') or data.get('name') or '').strip()
-    date_val = data.get('date', '').strip()
-    time_str = data.get('time', '').strip() or None
-    timing = data.get('timing', 'specific')
-
-    start_dt = data.get('start_datetime', '').strip()
-    if start_dt and not date_val:
-        if 'T' in start_dt:
-            date_val, time_str = start_dt.split('T')
-        else:
-            date_val = start_dt
-
-    if not title or not date_val:
-        return None, 'Event title and date are required.'
-
-    if timing == 'specific' and not time_str:
-        hour = data.get('time_hour', '')
-        minute = data.get('time_minute', '00')
-        ampm = data.get('time_ampm', 'PM')
-        if hour:
-            h = int(hour)
-            if ampm == 'PM' and h != 12:
-                h += 12
-            elif ampm == 'AM' and h == 12:
-                h = 0
-            time_str = f'{h:02d}:{minute}'
-
-    draft_data = {
-        'title': title,
-        'date': date_val,
-        'time': time_str,
-        'url': data.get('url', ''),
-        'city': data.get('city', ''),
-        'state': data.get('state', ''),
-        'cost': data.get('cost', ''),
-        'end_date': data.get('end_date', ''),
-        'all_day': timing == 'allday',
-        'description': data.get('description', ''),
-        'location': data.get('location', ''),
-        'categories': _normalize_categories(data),
-    }
-    return draft_data, None
 
 
 def _build_group_draft_data(data):

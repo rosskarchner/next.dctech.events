@@ -138,11 +138,20 @@ hand. Tools include `list_groups`, `add_group`, `set_group_active`,
 `verify_ical_feed`, `add_single_event`, `add_recurring_event`, `set_overlay`,
 and `trigger_rebuild`.
 
-It also covers moderation: `list_pending_submissions`, `get_submission`,
+It also covers submissions: `submit_event` queues an event for moderator
+review, plus `list_pending_submissions`, `get_submission`,
 `approve_submission` (with an optional `trust_submitter` flag),
-`reject_submission`, and `list/trust/untrust_submitter`. Approving through MCP
-calls the same `db.promote_draft` the /edit UI does, so the two paths cannot
-drift apart.
+`reject_submission`, and `list/trust/untrust_submitter`. Both ends share the
+web form's code — `db.build_event_draft_data` on the way in,
+`db.promote_draft` on the way out — so the MCP and browser paths cannot drift
+apart.
+
+Reach for `submit_event` whenever an event was *found* rather than vetted (a
+scraped calendar, a third-party listing, a tip): it always lands in the queue
+for a human, and unlike the public API it ignores submitter trust, since the
+address you pass is who the event is credited to and not evidence that they
+asked to be listed. `add_single_event` skips review entirely — use it only
+when you mean to publish.
 
 It is served behind an AWS_IAM authorizer, so `scripts/mcp_sigv4_bridge.py`
 signs requests with your AWS credentials. If tools are unavailable, check
