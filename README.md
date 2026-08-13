@@ -104,6 +104,28 @@ Moderation: `list_pending_submissions`, `get_submission`, `approve_submission`
 (optionally trusting the submitter), `reject_submission`, and
 `list_trusted_submitters` / `trust_submitter` / `untrust_submitter`.
 
+## The /updates post
+
+Every Wednesday at 11:00 UTC, `dctech-events-next-updates-publisher`
+(`cdk_next/lambda_src/updates_publisher/`) writes one
+`UPDATE#{publish_date}` item listing every event *added* to the calendar in the
+previous seven days, and the table's stream rebuilds the site. Anything still
+in the moderation queue is a `DRAFT#` item that was never published, so it
+cannot appear.
+
+The post is a frozen snapshot, not a query: calgen drops events dated before
+today, so a roundup rendered live would empty out as the events it announced
+happened. Preview or republish a week by hand:
+
+```bash
+aws lambda invoke --function-name dctech-events-next-updates-publisher \
+  --payload '{"published_on":"2026-08-19","dry_run":true}' /dev/stdout
+```
+
+Drop `dry_run` to write it, and add `"force": true` to overwrite a post that
+already exists. Posts published before 2026-08-12 are keyed by ISO week and
+list the events *happening* that week — the older meaning of the post.
+
 ## Social cross-posting
 
 Every new /updates post is announced on Mastodon
@@ -112,7 +134,7 @@ Every new /updates post is announced on Mastodon
 by `dctech-events-next-social-publisher`
 (`cdk_next/lambda_src/social_publisher/`). It reads the events table's
 DynamoDB stream, filtered to `UPDATE#` and `POST#` keys, so it covers both the
-Monday weekly roundup and free-form announcements written in /edit without
+Wednesday weekly roundup and free-form announcements written in /edit without
 either publisher knowing it exists — and a social outage can never block the
 write that created the post.
 

@@ -1,10 +1,10 @@
 """NextUpdatesStack — the weekly /updates post publisher.
 
-Replaces the external Bear Blog at updates.dctech.events. A Monday-morning
-Lambda snapshots the current ISO week's events into a single UPDATE#{week_id}
-item; the events table's stream then fires the existing debounced rebuild, so
-the post is live on /updates/ within a couple of minutes with no extra
-build wiring here.
+Replaces the external Bear Blog at updates.dctech.events. A Wednesday-morning
+Lambda snapshots every event *added* in the previous seven days into a single
+UPDATE#{publish_date} item; the events table's stream then fires the existing
+debounced rebuild, so the post is live on /updates/ within a couple of minutes
+with no extra build wiring here.
 
 That rebuild only happens because UPDATE# is listed in the site generator
 trigger's RELEVANT_PREFIXES (lambda_src/site_generator/trigger/handler.py).
@@ -13,8 +13,12 @@ safety-net build.
 
 The snapshot is the whole point. calgen's pipeline and get_events() both drop
 events dated before today, so a post rendered from live data would empty out
-as its week receded into the past — freezing the listing at publish time is
+as the events it announced happened — freezing the listing at publish time is
 what gives the archive permanent content.
+
+Posts published before 2026-08-12 are keyed UPDATE#{iso_week} and list the
+events *happening* that week, which is what the post used to be. Both shapes
+render, because each snapshot carries its own title and summary.
 
 The same stream also feeds a social publisher that cross-posts the permalink
 to Mastodon and Bluesky. It lives here rather than inside the weekly
@@ -75,14 +79,16 @@ class NextUpdatesStack(cdk.Stack):
                 removal_policy=cdk.RemovalPolicy.DESTROY,
             ),
         )
-        table.grant_write_data(self.publisher_function)
+        # Reads as well as writes: which events are new is answered by
+        # scanning EVENT# createdAt, which only the table records.
+        table.grant_read_write_data(self.publisher_function)
 
         events.Rule(
             self,
             "NextUpdatesPublishSchedule",
-            # Monday 11:00 UTC — 7 AM EDT / 6 AM EST, so the post is up before
-            # the workday and ahead of the 13:30 UTC daily ops mail.
-            schedule=events.Schedule.expression("cron(0 11 ? * MON *)"),
+            # Wednesday 11:00 UTC — 7 AM EDT / 6 AM EST, so the post is up
+            # before the workday and ahead of the 13:30 UTC daily ops mail.
+            schedule=events.Schedule.expression("cron(0 11 ? * WED *)"),
             targets=[targets.LambdaFunction(self.publisher_function)],
             description="Publish the weekly dctech.events /updates post",
         )
@@ -91,7 +97,10 @@ class NextUpdatesStack(cdk.Stack):
             self,
             "NextUpdatesPublisherFunction",
             value=self.publisher_function.function_name,
-            description="Invoke with {\"week_of\": \"YYYY-MM-DD\"} to backfill a week",
+            description=(
+                "Invoke with {\"published_on\": \"YYYY-MM-DD\"} to republish a "
+                "week (add \"dry_run\": true to preview it first)"
+            ),
         )
 
         # ── social cross-posting ────────────────────────────────────

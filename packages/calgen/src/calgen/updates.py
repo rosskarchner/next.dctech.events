@@ -2,9 +2,15 @@
 
 *Weekly roundups* are snapshots, not derived views. `get_events()` and the
 pipeline both drop anything older than today, so a roundup rendered from live
-event data would quietly empty out as its week receded into the past. A
-publisher instead writes one YAML file per ISO week into `_updates/` at publish
-time, freezing that week's listing.
+event data would quietly empty out as the events in it happened. A publisher
+instead writes one YAML file per week into `_updates/` at publish time,
+freezing that week's listing.
+
+What a roundup lists changed on 2026-08-12: posts from then on carry a
+`published_on` date and list the events *added* that week, while older ones are
+filed under `week_start` and list the events *happening* that week. Nothing
+here has to know which is which — a snapshot carries its own title and its own
+`summary`, so both render as themselves.
 
 *Free-form posts* are hand-written announcements authored in /edit, exported to
 `_posts/` as YAML with a Markdown body. They carry their own slug and date
@@ -45,33 +51,37 @@ def _load_post(path):
     except (OSError, yaml.YAMLError):
         return None
 
+    # The date the post is filed under: its own publication date if it has
+    # one, else the Monday of the week it covers, which is how roundups were
+    # dated before they became "what was added this week".
     week_start = _parse_date(data.get('week_start'))
-    if not week_start or not data.get('week_id'):
+    filed_on = _parse_date(data.get('published_on')) or week_start
+    if not filed_on or not data.get('week_id'):
         return None
 
     week_end = _parse_date(data.get('week_end'))
     events = data.get('events') or []
 
     post = dict(data)
-    post['week_start'] = week_start
+    post['week_start'] = week_start or filed_on
     post['week_end'] = week_end
     post['events'] = events
     post['event_count'] = data.get('event_count', len(events))
-    post['year'] = week_start.year
-    post['month'] = week_start.month
-    post['day'] = week_start.day
+    post['year'] = filed_on.year
+    post['month'] = filed_on.month
+    post['day'] = filed_on.day
     # Unpadded to match Flask's <int:> converter (and _month_url's existing
     # /{year}/{month}/ convention) — a padded literal here would not match the
     # path Frozen-Flask actually writes.
-    post['url'] = f"/updates/{week_start.year}/{week_start.month}/{week_start.day}/"
+    post['url'] = f"/updates/{filed_on.year}/{filed_on.month}/{filed_on.day}/"
     post['week_url'] = f"/week/{data['week_id']}/"
-    post['week_start_formatted'] = week_start.strftime('%B %-d, %Y')
+    post['week_start_formatted'] = filed_on.strftime('%B %-d, %Y')
     if not post.get('title'):
         post['title'] = (
             f"DC Tech Events for the week of {post['week_start_formatted']}"
         )
     post['kind'] = 'weekly'
-    post['published_on'] = week_start
+    post['published_on'] = filed_on
     post['date_formatted'] = post['week_start_formatted']
     return post
 
@@ -156,7 +166,7 @@ def get_update_posts():
         if post:
             posts.append(post)
 
-    posts.sort(key=lambda p: p['week_start'], reverse=True)
+    posts.sort(key=lambda p: p['published_on'], reverse=True)
     return posts
 
 
@@ -203,6 +213,13 @@ def summarize(post, max_titles=3):
     """Short human blurb used in the index and in feed descriptions."""
     if post.get('kind') == 'post':
         return _summarize_free_post(post)
+
+    # A roundup written from 2026-08-12 on states its own span ("12 events
+    # added between August 5–11"), which nothing here could reconstruct: the
+    # snapshot records what was added, not when the week was.
+    explicit = str(post.get('summary') or '').strip()
+    if explicit:
+        return explicit
 
     titles = [e.get('title') for e in post.get('events', []) if e.get('title')]
     count = post.get('event_count', len(titles))

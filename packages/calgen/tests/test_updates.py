@@ -122,6 +122,71 @@ def test_summarize_singular_and_empty(site_dir):
         'No events were listed for this week.'
 
 
+# ── "What was added" roundups (published_on, 2026-08-12 onward) ────
+
+def _write_added_post(tmp_path, name, published_on, events=None, **extra):
+    """A roundup of what was *added* that week: filed under its own
+    publication date, with no week_start to fall back on."""
+    d = tmp_path / updates.UPDATES_DIR
+    d.mkdir(exist_ok=True)
+    data = {
+        'week_id': '2026-W33',
+        'published_on': published_on,
+        'added_since': '2026-08-05',
+        'added_until': '2026-08-11',
+        'events': events if events is not None else [],
+        **extra,
+    }
+    (d / f'{name}.yaml').write_text(yaml.dump(data), encoding='utf-8')
+
+
+def test_post_is_filed_under_its_publication_date(site_dir):
+    _write_added_post(site_dir, '2026-08-12', '2026-08-12')
+    post = updates.get_update_posts()[0]
+
+    assert post['url'] == '/updates/2026/8/12/'
+    assert post['published_on'] == date(2026, 8, 12)
+    # The route looks a post up by the same date its URL was built from.
+    assert updates.get_update_post(2026, 8, 12)['url'] == post['url']
+    assert updates.get_update_post(2026, 8, 5) is None
+
+
+def test_published_on_wins_over_a_legacy_week_start(site_dir):
+    # Both fields present: the publication date is what the post is filed by.
+    _write_added_post(site_dir, 'x', '2026-08-12', week_start='2026-08-05')
+    assert updates.get_update_posts()[0]['url'] == '/updates/2026/8/12/'
+
+
+def test_stored_summary_wins_over_the_derived_one(site_dir):
+    _write_added_post(site_dir, 'x', '2026-08-12',
+                      events=[{'title': 'A'}, {'title': 'B'}],
+                      summary='2 events added between August 5–11: A, B.')
+    post = updates.get_update_posts()[0]
+    assert updates.summarize(post) == '2 events added between August 5–11: A, B.'
+
+
+def test_an_empty_added_roundup_still_states_its_span(site_dir):
+    _write_added_post(site_dir, 'x', '2026-08-12',
+                      summary='No new events were added between August 5–11.')
+    post = updates.get_update_posts()[0]
+    assert updates.summarize(post) == \
+        'No new events were added between August 5–11.'
+
+
+def test_old_and_new_roundups_sort_together(site_dir):
+    _write_post(site_dir, '2026-W32', '2026-08-03')       # legacy shape
+    _write_added_post(site_dir, '2026-08-12', '2026-08-12')
+
+    got = [p['url'] for p in updates.get_update_posts()]
+    assert got == ['/updates/2026/8/12/', '/updates/2026/8/3/']
+
+
+def test_a_legacy_roundup_still_summarizes_from_its_events(site_dir):
+    # No stored summary — the pre-2026-08-12 posts do not have one.
+    _write_post(site_dir, '2026-W32', '2026-08-03', events=[{'title': 'A'}])
+    assert '1 event this week' in updates.summarize(updates.get_update_posts()[0])
+
+
 # ── Free-form posts ────────────────────────────────────────────────
 
 def _write_free(tmp_path, slug, published_on, status='published', **extra):

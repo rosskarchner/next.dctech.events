@@ -2,8 +2,8 @@
 
 Fed by the events table's DynamoDB stream rather than called from the
 publishers, so it covers both kinds of /updates post from one place: the
-Monday `UPDATE#{week_id}` roundup written by the updates publisher, and the
-free-form `POST#{slug}` announcements published through /edit. Neither writer
+Wednesday `UPDATE#{publish_date}` roundup written by the updates publisher, and
+the free-form `POST#{slug}` announcements published through /edit. Neither writer
 has to know this exists, and a social API outage can never block or duplicate
 the DynamoDB write that produced the post.
 
@@ -68,6 +68,12 @@ def _plain(value):
 
 def _week_summary(item):
     """Same blurb calgen's updates.summarize() puts on the index page."""
+    # Roundups published from 2026-08-12 on carry their own: they list what was
+    # *added* over a stated span, which cannot be re-derived from the events.
+    explicit = str(item.get("summary") or "").strip()
+    if explicit:
+        return explicit
+
     events = item.get("events") or []
     titles = [e.get("title") for e in events if isinstance(e, dict) and e.get("title")]
     count = _plain(item.get("event_count")) or len(titles)
@@ -107,7 +113,9 @@ def _describe(item):
     pk = str(item.get("PK", ""))
 
     if pk.startswith("UPDATE#"):
-        raw_start = item.get("week_start")
+        # The date the post is filed under — its own publication date, or for
+        # posts written before 2026-08-12, the Monday of the week they cover.
+        raw_start = item.get("published_on") or item.get("week_start")
         if not raw_start:
             return None
         week_start = date.fromisoformat(str(raw_start))

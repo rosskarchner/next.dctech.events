@@ -41,7 +41,13 @@
 
     <div class="e-content">
         <p>{{ summary }}</p>
-        <p><a class="update-week-link" href="{{ post.week_url }}">See this week on {{ site_name }} &rarr;</a></p>
+        {# A roundup of newly added events spans months, so "this week" would
+           send the reader to the wrong page. #}
+        {% if post.added_since %}
+            <p><a class="update-week-link" href="/">See everything coming up on {{ site_name }} &rarr;</a></p>
+        {% else %}
+            <p><a class="update-week-link" href="{{ post.week_url }}">See this week on {{ site_name }} &rarr;</a></p>
+        {% endif %}
 
         {% if days %}
             {% include "partials/events_by_day.html" %}

@@ -60,6 +60,22 @@ def test_weekly_summary_matches_calgen_phrasing():
                        "Hack and Tell, and 24 more.")
 
 
+def test_added_roundup_is_filed_under_its_publication_date():
+    # From 2026-08-12 the key is the publish date and the post lists what was
+    # added that week; week_start is kept only so older readers agree.
+    item = _weekly(PK="UPDATE#2026-08-12", published_on="2026-08-12",
+                   week_start="2026-08-12")
+    assert app._describe(item)["url"] == \
+        "https://dctech.events/updates/2026/8/12/"
+
+
+def test_added_roundup_uses_its_stored_summary():
+    item = _weekly(published_on="2026-08-12",
+                   summary="23 events added between August 5–11: A, B, C.")
+    assert app._describe(item)["summary"] == \
+        "23 events added between August 5–11: A, B, C."
+
+
 def test_weekly_summary_without_events():
     item = _weekly(events=[], event_count=Decimal("0"))
     assert app._describe(item)["summary"] == "No events were listed for this week."
