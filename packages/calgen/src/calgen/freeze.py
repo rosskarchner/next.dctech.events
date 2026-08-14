@@ -5,6 +5,7 @@ import os
 from calgen.app import (
     create_app, get_events, get_upcoming_weeks, get_categories, get_upcoming_months,
     get_category_month_combos, get_events_by_slug, get_all_week_ids, get_all_months,
+    get_recently_added,
 )
 from calgen.updates import get_free_posts, get_update_posts
 from calgen.site_config import get_config
@@ -22,6 +23,13 @@ def create_freezer(app):
         # is deleted from the bucket by `s3 sync --delete` and 404s.
         for year, month in get_all_months():
             yield {'year': year, 'month': month}
+
+    @freezer.register_generator
+    def just_added_page():
+        # Only when there is something to show: without the added_at export
+        # the page would freeze as a permanent empty state.
+        if get_recently_added():
+            yield {}
 
     @freezer.register_generator
     def event_page():

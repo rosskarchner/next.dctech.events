@@ -2,6 +2,20 @@
 
 {% block title %}Recently Added Events - {{ site_name }}{% endblock %}
 
+{# Frozen-Flask builds argument-less routes whether or not the freezer
+   generator yields, so this page exists even before the added_at export has
+   run. An empty one is a real 200 with nothing on it — worth serving, not
+   worth indexing. #}
+{% block robots %}<meta name="robots" content="{% if days_with_events %}index, follow{% else %}noindex, follow{% endif %}">{% endblock %}
+
+{% block description %}The newest additions to {{ site_name }} — tech meetups, conferences and workshops in the DC area, listed by the day they appeared rather than the day they happen.{% endblock %}
+
+{% block og_title %}Recently Added DC Tech Events{% endblock %}
+{% block og_description %}The newest additions to the DC-area tech calendar, listed by the day they appeared.{% endblock %}
+
+{% block twitter_title %}Recently Added DC Tech Events{% endblock %}
+{% block twitter_description %}The newest additions to the DC-area tech calendar, listed by the day they appeared.{% endblock %}
+
 {% block content %}
 <div class="content-container">
     <h1>Recently Added Events</h1>

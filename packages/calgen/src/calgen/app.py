@@ -23,6 +23,7 @@ from calgen.updates import (
 from calgen.archive import (
     get_archived_events, get_archived_week, get_archived_weeks, merge_events,
 )
+from calgen.added_at import get_added_at_index, added_on, group_by_added_date
 
 # Valid US state/territory codes for location route validation
 VALID_US_STATES = {
@@ -47,6 +48,14 @@ from calgen.regions import load_region_plugin  # noqa: E402
 # parent /categories/<slug>/ page does not already say, so it ships noindex
 # and stays out of the sitemap rather than competing with that parent.
 THIN_FACET_MIN_EVENTS = 3
+
+# How many distinct days /just-added/ shows. The page is a freshness signal,
+# not an archive — older additions are already findable by date, category and
+# location, so an unbounded list would just grow duplicate listings.
+JUST_ADDED_DAYS = 30
+
+# How many of the newest additions the homepage teases.
+RECENTLY_ADDED_PREVIEW = 5
 
 
 def create_app(site_dir=None):
@@ -118,6 +127,7 @@ def _register_routes(app):
                                days=days,
                                stats=stats,
                                base_url=base_url,
+                               recently_added=get_recently_added(),
                                upcoming_months=get_upcoming_months(),
                                categories_with_counts=get_categories_with_event_counts(),
                                sidebar=get_sidebar_data())
@@ -210,6 +220,21 @@ def _register_routes(app):
                                has_next=(next_year, next_month) in built_months,
                                is_past=last_day < datetime.now(local_tz).date(),
                                sidebar=get_sidebar_data(active_month=(year, month)))
+
+    @app.route("/just-added/")
+    def just_added_page():
+        """Events by the day they appeared on the site, newest first.
+
+        A freshness page, and the only view keyed on when a listing was
+        recorded rather than when its event happens.
+        """
+        days = group_by_added_date(get_events(), limit_days=JUST_ADDED_DAYS)
+        for day in days:
+            day['date_display'] = _format_added_day(day['date'])
+        return render_template('just_added.html',
+                               days_with_events=days,
+                               error_message=None if days else
+                               "Nothing has been recorded as newly added yet.")
 
     @app.route("/events/<slug>/")
     def event_page(slug):
@@ -444,6 +469,9 @@ def _register_routes(app):
 
         for slug in get_events_by_slug():
             urls.append({'loc': f"{base_url}/events/{slug}/"})
+
+        if get_recently_added():
+            urls.append({'loc': f"{base_url}/just-added/"})
 
         for year, month in get_all_months():
             urls.append({'loc': f"{base_url}/{year}/{month}/"})
@@ -806,6 +834,24 @@ def get_events_by_slug():
 
 def get_event_by_slug(slug):
     return get_events_by_slug().get(slug)
+
+
+def _format_added_day(day):
+    try:
+        return datetime.strptime(day, '%Y-%m-%d').date().strftime('%B %-d, %Y')
+    except (ValueError, TypeError):
+        return day
+
+
+def get_recently_added(limit=RECENTLY_ADDED_PREVIEW):
+    """The newest additions, flattened — the homepage's one-line teaser."""
+    events = []
+    for day in group_by_added_date(get_events(), limit_days=limit):
+        for event in day['events']:
+            events.append(event)
+            if len(events) >= limit:
+                return events
+    return events
 
 
 def _format_event_date(event):

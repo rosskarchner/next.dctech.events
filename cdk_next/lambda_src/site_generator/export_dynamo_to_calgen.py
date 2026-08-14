@@ -32,6 +32,15 @@ def _to_plain(val):
     return val
 
 
+def _title_key(date_str, title):
+    """Fallback identity for events whose guid differs between table and site.
+
+    Must stay byte-identical to updates_publisher's _title_key and calgen's
+    reader, or the two halves of the join silently stop matching.
+    """
+    return f"{date_str}|{' '.join(str(title or '').split()).casefold()}"
+
+
 def _clean(item, drop=()):
     """Strip DynamoDB key/index attributes and internal fields."""
     out = {}
@@ -154,6 +163,36 @@ def main():
         week_id = item['PK'].split('#', 1)[1]
         _write_yaml(os.path.join('_updates', f'{week_id}.yaml'), _clean(item))
     counts['updates'] = len(by_prefix.get('UPDATE', []))
+
+    # ── _data/added_at.json ─────────────────────────────────────────
+    # When each event was first recorded. `createdAt` lives only on the
+    # EVENT# rows and is dropped from the per-event YAML above (it is
+    # bookkeeping, not content), but /just-added/ is entirely about it, so it
+    # is exported once as a lookup instead of being smeared across every file.
+    #
+    # Two keys into the same answer, mirroring updates_publisher's
+    # _added_at_index: iCal events share one guid with the site's events.json,
+    # but submitted events are keyed EVENT#<8 hex> while calgen recomputes a
+    # 32-char content hash for them (next_dctech_events-p8o), so those only
+    # match on (date, title). Where both hit, the guid wins.
+    by_guid, by_title = {}, {}
+    for item in by_prefix.get('EVENT', []):
+        created = item.get('createdAt')
+        if not created:
+            continue
+        created = str(created)
+        by_guid[item['PK'].split('#', 1)[1]] = created
+        title, event_date = item.get('title'), item.get('date')
+        if title and event_date:
+            key = _title_key(str(event_date), str(title))
+            # Earliest wins: a duplicate row for the same listing must not
+            # make an old event look newly added.
+            if created < by_title.get(key, created + 'z'):
+                by_title[key] = created
+    os.makedirs('_data', exist_ok=True)
+    with open(os.path.join('_data', 'added_at.json'), 'w', encoding='utf-8') as f:
+        json.dump({'by_guid': by_guid, 'by_title': by_title}, f, indent=1)
+    counts['added_at'] = len(by_guid)
 
     # ── _archive/ ───────────────────────────────────────────────────
     # One frozen listing per ISO week, captured by the updates publisher the
