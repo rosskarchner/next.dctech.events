@@ -95,6 +95,68 @@ def _from_plain(val):
 
 # ─── DRAFT operations ─────────────────────────────────────────────
 
+def normalize_categories(data):
+    categories = data.get('categories', [])
+    if isinstance(categories, str):
+        categories = [c.strip() for c in categories.split(',') if c.strip()]
+    return categories
+
+
+def build_event_draft_data(data):
+    """Normalize a submitted event into the draft shape create_draft stores.
+
+    Here rather than in routes/submit.py for the same reason as promote_draft
+    below: the MCP Lambda bundles db.py but not the route modules, so a copy
+    there would be a second set of submission rules free to drift from this
+    one. The web form and submit_event must produce identical drafts, or a
+    submission's shape would depend on which door it came through.
+
+    Returns (draft_data, error_message); exactly one of the two is None.
+    """
+    title = (data.get('title') or data.get('name') or '').strip()
+    date_val = data.get('date', '').strip()
+    time_str = data.get('time', '').strip() or None
+    timing = data.get('timing', 'specific')
+
+    start_dt = data.get('start_datetime', '').strip()
+    if start_dt and not date_val:
+        if 'T' in start_dt:
+            date_val, time_str = start_dt.split('T')
+        else:
+            date_val = start_dt
+
+    if not title or not date_val:
+        return None, 'Event title and date are required.'
+
+    if timing == 'specific' and not time_str:
+        hour = data.get('time_hour', '')
+        minute = data.get('time_minute', '00')
+        ampm = data.get('time_ampm', 'PM')
+        if hour:
+            h = int(hour)
+            if ampm == 'PM' and h != 12:
+                h += 12
+            elif ampm == 'AM' and h == 12:
+                h = 0
+            time_str = f'{h:02d}:{minute}'
+
+    draft_data = {
+        'title': title,
+        'date': date_val,
+        'time': time_str,
+        'url': data.get('url', ''),
+        'city': data.get('city', ''),
+        'state': data.get('state', ''),
+        'cost': data.get('cost', ''),
+        'end_date': data.get('end_date', ''),
+        'all_day': timing == 'allday',
+        'description': data.get('description', ''),
+        'location': data.get('location', ''),
+        'categories': normalize_categories(data),
+    }
+    return draft_data, None
+
+
 def create_draft(draft_type, data, submitter_email, submitter_id=None):
     """Create a new DRAFT entity (pending submission)."""
     table = _get_table()

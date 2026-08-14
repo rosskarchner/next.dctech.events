@@ -46,7 +46,7 @@ _WRITE_TOOLS = {'set_overlay', 'resolve_qa_review', 'trigger_rebuild',
                 'add_single_event', 'update_single_event', 'delete_single_event',
                 'add_group', 'set_group_active', 'add_category',
                 'add_recurring_event', 'update_recurring_event',
-                'delete_recurring_event', 'approve_submission',
+                'delete_recurring_event', 'submit_event', 'approve_submission',
                 'reject_submission', 'trust_submitter', 'untrust_submitter',
                 'revert_qa_run'}
 

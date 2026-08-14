@@ -19,6 +19,7 @@ approve = server.approve_submission
 reject = server.reject_submission
 get_sub = server.get_submission
 list_pending = server.list_pending_submissions
+submit = server.submit_event
 trust = server.trust_submitter
 untrust = server.untrust_submitter
 
@@ -30,7 +31,8 @@ PENDING = {"id": "d1", "draft_type": "event", "status": "pending",
 
 @pytest.fixture
 def fake(monkeypatch):
-    state = {"status": [], "trusted": set(), "promoted": [], "untrusted": []}
+    state = {"status": [], "trusted": set(), "promoted": [], "untrusted": [],
+             "created": []}
 
     monkeypatch.setattr(server.db, "get_draft",
                         lambda did: dict(PENDING) if did == "d1" else None)
@@ -48,7 +50,72 @@ def fake(monkeypatch):
     monkeypatch.setattr(server.db, "get_drafts_by_submitter", lambda uid: [])
     monkeypatch.setattr(server.db, "get_all_categories",
                         lambda: {"ai": {}, "data": {}})
+    monkeypatch.setattr(server.db, "create_draft",
+                        lambda dtype, data, email, sub_id=None: state["created"].append(
+                            (dtype, data, email, sub_id)) or "new-draft")
     return state
+
+
+# ── Submit ─────────────────────────────────────────────────────────
+
+def test_submit_creates_a_pending_event_draft(fake):
+    result = submit(title="A Talk", date="2026-08-20",
+                    url="https://luma.com/x", submitter_email="sub@example.com",
+                    time="18:00", location="DC", categories=["ai"])
+
+    assert result == {"draft_id": "new-draft", "status": "pending",
+                      "title": "A Talk", "date": "2026-08-20",
+                      "submitter_email": "sub@example.com"}
+    dtype, data, email, _ = fake["created"][0]
+    assert dtype == "event"
+    assert data["time"] == "18:00"
+    assert data["all_day"] is False
+    assert data["categories"] == ["ai"]
+
+
+def test_submit_never_publishes_even_for_a_trusted_submitter(fake):
+    # The address is who the event is credited to, not consent to list it,
+    # so trust must not short-circuit review the way /api/submissions does.
+    fake["trusted"].add("sub@example.com")
+    assert submit(title="A Talk", date="2026-08-20", url="https://luma.com/x",
+                  submitter_email="sub@example.com")["status"] == "pending"
+    assert fake["promoted"] == []
+
+
+def test_submit_marks_all_day_events(fake):
+    submit(title="A Conference", date="2026-08-20", url="https://x.test",
+           submitter_email="sub@example.com", all_day=True)
+    data = fake["created"][0][1]
+    assert data["all_day"] is True
+    assert data["time"] is None
+
+
+def test_submit_rejects_unknown_category_slugs(fake):
+    with pytest.raises(ValueError, match="Unknown category"):
+        submit(title="A Talk", date="2026-08-20", url="https://x.test",
+               submitter_email="sub@example.com", categories=["not-a-category"])
+    assert fake["created"] == []
+
+
+def test_submit_requires_a_title_and_date(fake):
+    with pytest.raises(ValueError, match="title and date are required"):
+        submit(title="   ", date="2026-08-20", url="https://x.test",
+               submitter_email="sub@example.com")
+    assert fake["created"] == []
+
+
+def test_submit_rejects_a_non_address(fake):
+    with pytest.raises(ValueError, match="not a valid email"):
+        submit(title="A Talk", date="2026-08-20", url="https://x.test",
+               submitter_email="not-an-email")
+    assert fake["created"] == []
+
+
+def test_submit_normalizes_the_submitter_address(fake):
+    result = submit(title="A Talk", date="2026-08-20", url="https://x.test",
+                    submitter_email="  Sub@Example.COM ")
+    assert result["submitter_email"] == "sub@example.com"
+    assert fake["created"][0][2] == "sub@example.com"
 
 
 # ── Approve ────────────────────────────────────────────────────────
