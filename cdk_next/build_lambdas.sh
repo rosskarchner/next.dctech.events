@@ -80,19 +80,19 @@ if [ -e lambda_src/social_publisher/app.py ]; then
   rm -rf build/social_publisher/test_*.py build/social_publisher/__pycache__
 fi
 
-# ── discovery_agent (stub scaffold, no deps) ────────────────────────
-if [ -e lambda_src/discovery_agent/handler.py ]; then
-  mkdir -p build/discovery_agent
-  cp -r lambda_src/discovery_agent/. build/discovery_agent/
-  cp lambda_src/api/db.py build/discovery_agent/
-fi
-
 # ── qa_trigger (invokes the AgentCore runtime; boto3 only) ──────────
 if [ -e lambda_src/qa_trigger/handler.py ]; then
   mkdir -p build/qa_trigger
   cp -r lambda_src/qa_trigger/. build/qa_trigger/
   # Tests live next to the handler; they have no business in the bundle.
   rm -rf build/qa_trigger/test_*.py build/qa_trigger/__pycache__
+fi
+
+# ── discovery_trigger (invokes the discovery AgentCore runtime) ──────
+if [ -e lambda_src/discovery_trigger/handler.py ]; then
+  mkdir -p build/discovery_trigger
+  cp -r lambda_src/discovery_trigger/. build/discovery_trigger/
+  rm -rf build/discovery_trigger/test_*.py build/discovery_trigger/__pycache__
 fi
 
 # ── calendar_qc (AgentCore Runtime asset) ───────────────────────────
@@ -116,6 +116,18 @@ if [ -d agents/calendar_qc ]; then
     --target build/calendar_qc \
     strands-agents "strands-agents-tools[agent_core_browser]" \
     bedrock-agentcore "mcp>=1.9,<2" httpx
+fi
+
+# ── discovery (AgentCore Runtime asset) ──────────────────────────────
+if [ -d agents/discovery ]; then
+  mkdir -p build/discovery
+  cp -r agents/discovery/. build/discovery/
+  rm -rf build/discovery/test_*.py build/discovery/__pycache__
+  uv pip install --python-platform aarch64-manylinux_2_17 \
+    --python-version "$PY_VERSION" --link-mode=copy --only-binary :all: \
+    --target build/discovery \
+    strands-agents "strands-agents-tools[agent_core_browser]" \
+    bedrock-agentcore "mcp>=1.9,<2" httpx aiohttp
 fi
 
 # ── site_generator trigger (pure stdlib + boto3) ────────────────────

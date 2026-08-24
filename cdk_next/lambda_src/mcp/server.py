@@ -754,3 +754,90 @@ def untrust_submitter(email: str) -> dict:
         raise ValueError(f'{email!r} is not currently trusted')
     db.untrust_submitter(email)
     return {'untrusted': email}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Discovery proposals
+#
+# The discovery agent proposes; it never publishes. These write DRAFT# items
+# into the same queue human submissions land in, tagged with a reserved
+# submitter address so agent proposals are distinguishable at a glance.
+# ─────────────────────────────────────────────────────────────────────────────
+
+DISCOVERY_SUBMITTER = 'discovery-agent@dctech.events'
+
+
+@mcp.tool()
+def propose_group(name: str, website: str, ical: str, categories: list,
+                  source_url: str, evidence: str) -> dict:
+    """
+    Propose a newly-discovered group for review. The iCal feed is verified
+    before the proposal is accepted — a group whose feed does not parse is
+    worth nothing to the aggregator.
+
+    source_url: the page you found this group on.
+    evidence: one or two sentences on why this belongs on dctech.events.
+    """
+    _check_categories(categories)
+    slug = _slugify(name)
+    if db.get_group(slug):
+        raise ValueError(f'Group already exists: {slug}')
+
+    check = verify_ical_feed(ical)
+    if not check['ok']:
+        raise ValueError(f"iCal feed did not verify ({check['reason']}): {ical}")
+
+    draft_id = db.create_draft('group', {
+        'name': name,
+        'website': website,
+        'ical_url': ical,
+        'categories': categories,
+        # Provenance rides in `description` because _draft_item_to_dict
+        # whitelists readable fields and would drop a custom key.
+        'description': f'Discovered at {source_url}\n\n{evidence}',
+    }, submitter_email=DISCOVERY_SUBMITTER)
+    return {'draft_id': draft_id, 'proposed_slug': slug}
+
+
+@mcp.tool()
+def propose_event(title: str, date: str, url: str, location: str,
+                  source_url: str, evidence: str,
+                  end_date: str | None = None, cost: str | None = None,
+                  categories: list | None = None) -> dict:
+    """
+    Propose a one-off event (a conference, a summit — something with no group
+    feed behind it) for review. date/end_date are 'YYYY-MM-DD'.
+
+    Recurring meetups should be proposed as a *group* instead: one accepted
+    feed keeps paying out every month, one accepted event pays out once.
+    """
+    categories = categories or []
+    _check_categories(categories)
+
+    from event_utils import calculate_event_hash
+    if db.get_event_from_config(calculate_event_hash(date, '', title, url)):
+        raise ValueError(f'Event already on the calendar: {title} on {date}')
+
+    data = {'title': title, 'date': date, 'url': url, 'location': location,
+            'categories': categories, 'end_date': end_date, 'cost': cost,
+            'description': f'Discovered at {source_url}\n\n{evidence}'}
+    draft_id = db.create_draft(
+        'event', {k: v for k, v in data.items() if v is not None},
+        submitter_email=DISCOVERY_SUBMITTER)
+    return {'draft_id': draft_id}
+
+
+@mcp.tool()
+def list_discovery_proposals(limit: int | None = 200) -> list:
+    """
+    Every proposal this agent has made — pending, approved, and rejected.
+
+    This is the agent's memory. A rejected proposal is a human saying "not
+    this"; re-proposing it next week is the fastest way to make the whole
+    feature annoying enough to switch off.
+    """
+    drafts = db.get_drafts_by_submitter(DISCOVERY_SUBMITTER)
+    return [{k: d.get(k) for k in
+             ('id', 'draft_type', 'status', 'title', 'name', 'url',
+              'website', 'ical_url', 'created_at')}
+            for d in drafts[:limit]]

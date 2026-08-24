@@ -22,6 +22,9 @@ list_pending = server.list_pending_submissions
 submit = server.submit_event
 trust = server.trust_submitter
 untrust = server.untrust_submitter
+propose_group = server.propose_group
+propose_event = server.propose_event
+list_discovery = server.list_discovery_proposals
 
 
 PENDING = {"id": "d1", "draft_type": "event", "status": "pending",
@@ -50,9 +53,15 @@ def fake(monkeypatch):
     monkeypatch.setattr(server.db, "get_drafts_by_submitter", lambda uid: [])
     monkeypatch.setattr(server.db, "get_all_categories",
                         lambda: {"ai": {}, "data": {}})
-    monkeypatch.setattr(server.db, "create_draft",
-                        lambda dtype, data, email, sub_id=None: state["created"].append(
-                            (dtype, data, email, sub_id)) or "new-draft")
+    def _create_draft(dtype, data, email=None, sub_id=None, submitter_email=None):
+        actual_email = submitter_email if submitter_email is not None else email
+        state["created"].append((dtype, data, actual_email, sub_id))
+        return "new-draft"
+
+    monkeypatch.setattr(server.db, "create_draft", _create_draft)
+    monkeypatch.setattr(server.db, "get_group", lambda slug: None)
+    monkeypatch.setattr(server.db, "get_event_from_config", lambda guid: None)
+    monkeypatch.setattr(server, "verify_ical_feed", lambda url: {"ok": True, "reason": "ok"})
     return state
 
 
@@ -237,3 +246,89 @@ def test_untrust_revokes(fake):
     fake["trusted"].add("sub@example.com")
     assert untrust("Sub@Example.com")["untrusted"] == "sub@example.com"
     assert fake["untrusted"] == ["sub@example.com"]
+
+
+# ── Discovery proposal tools ────────────────────────────────────────
+
+def test_propose_group_creates_group_draft_with_discovery_submitter(fake):
+    result = propose_group(
+        name="DC Python",
+        website="https://example.com",
+        ical="https://example.com/events.ics",
+        categories=["ai"],
+        source_url="https://source.test",
+        evidence="Recurring DC meetup with active feed",
+    )
+    assert result["draft_id"] == "new-draft"
+    assert result["proposed_slug"] == "dc-python"
+    dtype, data, email, _ = fake["created"][0]
+    assert dtype == "group"
+    assert email == server.DISCOVERY_SUBMITTER
+    assert "Discovered at https://source.test" in data["description"]
+
+
+def test_propose_group_rejects_existing_group_slug(monkeypatch, fake):
+    monkeypatch.setattr(server.db, "get_group", lambda slug: {"slug": slug})
+    with pytest.raises(ValueError, match="Group already exists"):
+        propose_group(
+            name="DC Python",
+            website="https://example.com",
+            ical="https://example.com/events.ics",
+            categories=["ai"],
+            source_url="https://source.test",
+            evidence="x",
+        )
+
+
+def test_propose_group_rejects_unverified_feed(monkeypatch, fake):
+    monkeypatch.setattr(server, "verify_ical_feed", lambda url: {"ok": False, "reason": "404"})
+    with pytest.raises(ValueError, match="did not verify"):
+        propose_group(
+            name="DC Python",
+            website="https://example.com",
+            ical="https://example.com/events.ics",
+            categories=["ai"],
+            source_url="https://source.test",
+            evidence="x",
+        )
+
+
+def test_propose_event_rejects_existing_calendar_event(monkeypatch, fake):
+    monkeypatch.setattr(server.db, "get_event_from_config", lambda guid: {"guid": guid})
+    with pytest.raises(ValueError, match="already on the calendar"):
+        propose_event(
+            title="Talk",
+            date="2026-08-20",
+            url="https://example.com/e",
+            location="DC",
+            source_url="https://source.test",
+            evidence="x",
+        )
+
+
+def test_propose_event_creates_event_draft_with_discovery_submitter(fake):
+    result = propose_event(
+        title="Talk",
+        date="2026-08-20",
+        url="https://example.com/e",
+        location="DC",
+        source_url="https://source.test",
+        evidence="One-off conference",
+        categories=["data"],
+    )
+    assert result == {"draft_id": "new-draft"}
+    dtype, data, email, _ = fake["created"][0]
+    assert dtype == "event"
+    assert email == server.DISCOVERY_SUBMITTER
+    assert data["categories"] == ["data"]
+    assert "Discovered at https://source.test" in data["description"]
+
+
+def test_list_discovery_proposals_returns_all_statuses(monkeypatch, fake):
+    monkeypatch.setattr(server.db, "get_drafts_by_submitter", lambda submitter: [
+        {"id": "d1", "draft_type": "group", "status": "pending", "name": "G"},
+        {"id": "d2", "draft_type": "event", "status": "REJECTED", "title": "E"},
+    ])
+    rows = list_discovery()
+    assert [r["id"] for r in rows] == ["d1", "d2"]
+    assert rows[1]["status"] == "REJECTED"

@@ -65,7 +65,7 @@ ical_aggregator = NextIcalAggregatorStack(
 
 qa_agent = NextQaAgentStack(app, "NextQaAgentStack", mcp_url=api.mcp_url, env=env)
 discovery_agent = NextDiscoveryAgentStack(
-    app, "NextDiscoveryAgentStack", table=db.table, env=env
+    app, "NextDiscoveryAgentStack", mcp_url=api.mcp_url, env=env
 )
 
 ops = NextOpsStack(app, "NextOpsStack", table=db.table, env=env)
