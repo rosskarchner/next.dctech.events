@@ -62,3 +62,62 @@ def test_session_id_matches_the_live_botocore_constraint():
              .input_shape.members["runtimeSessionId"])
     assert shape.metadata["min"] == handler.SESSION_ID_MIN
     assert shape.metadata["max"] == handler.SESSION_ID_MAX
+
+
+# ── Step Functions task token ────────────────────────────────────────
+# Forwarded into the agent payload, never released here: this Lambda returns
+# seconds after the runtime accepts the invocation, and the pass takes minutes.
+
+
+class _FakeAgentCore:
+    def __init__(self):
+        self.calls = []
+
+    def invoke_agent_runtime(self, **kwargs):
+        self.calls.append(kwargs)
+        return {'statusCode': 200}
+
+
+def _invoke(event, monkeypatch):
+    import json
+    client = _FakeAgentCore()
+    monkeypatch.setattr(handler.boto3, 'client', lambda *a, **k: client)
+    result = handler.lambda_handler(event, None)
+    payload = json.loads(client.calls[0]['payload'].decode())
+    return result, payload
+
+
+def test_task_token_is_forwarded_into_the_agent_payload(monkeypatch):
+    _, payload = _invoke({'task_token': 'tok-abc'}, monkeypatch)
+    assert payload['task_token'] == 'tok-abc'
+
+
+def test_no_task_token_means_the_key_is_absent(monkeypatch):
+    # The agent reads its presence as "a state machine owns the rebuild", so
+    # an empty string must not look like a token.
+    _, payload = _invoke({}, monkeypatch)
+    assert 'task_token' not in payload
+    _, payload = _invoke({'task_token': ''}, monkeypatch)
+    assert 'task_token' not in payload
+
+
+def test_the_token_is_never_logged(monkeypatch, capsys):
+    # A token is a capability to complete someone else's execution.
+    result, _ = _invoke({'task_token': 'tok-secret'}, monkeypatch)
+    assert 'tok-secret' not in capsys.readouterr().out
+    assert 'tok-secret' not in str(result)
+
+
+def test_the_result_says_whether_something_is_waiting(monkeypatch):
+    result, _ = _invoke({'task_token': 'tok-abc'}, monkeypatch)
+    assert result['awaited'] is True
+    result, _ = _invoke({}, monkeypatch)
+    assert result['awaited'] is False
+
+
+def test_the_state_machine_run_id_becomes_the_qc_run_id(monkeypatch):
+    # The machine passes $$.Execution.Name, which is what makes a run
+    # revertible from the digest.
+    result, payload = _invoke(
+        {'run_id': 'monday-2026-08-31', 'task_token': 'tok'}, monkeypatch)
+    assert payload['run_id'] == result['run_id'] == 'monday-2026-08-31'

@@ -108,14 +108,117 @@ the queue. Use `submit_event` for anything found rather than vetted — a
 scraped calendar, a third-party listing — and `add_single_event` only when you
 mean to publish immediately.
 
+## Monday: one state machine, not four alarm clocks
+
+`dctech-events-next-monday` (`cdk_next/stacks/orchestration_stack.py`) runs the
+whole Monday chain in order, started by a single rule at **09:15 UTC**:
+
+```
+RefreshFeeds        iCal aggregator — the weekend's imports land first
+      |
+RunQualityControl   the QC agent; the execution waits on a task token the
+      |             agent releases itself when the pass is really done
+BuildSite           .sync — events.json now reflects QC's hides
+      |
+PublishWeekAhead    the link post, counting the clean calendar
+      |
+BuildSite           .sync — the post is live
+      |
+SendNewsletter      last, so it never links a post that is not up yet
+```
+
+Before this, Monday was four rules ordered only by wall clock, and the site
+build trigger *drops* work when a build is already running. Two real
+consequences: QC's overlay writes (which land on `EVENT#` items, so they *are*
+a rebuild trigger) were skipped when they collided with the 09:00 scheduled
+build, and the week-ahead post froze a count read from an `events.json` that
+predated QC — so it counted events QC had just hidden.
+
+`codebuild:startBuild.sync` is the load-bearing piece: it waits for the build.
+The project now also carries `concurrent_build_limit=1`, so overlapping builds
+queue instead of running two `s3 sync --delete` passes over one bucket.
+
+**QC is allowed to fail.** It improves the calendar; it does not produce it. A
+`States.ALL` catch on that step falls through to the build, so a crashed agent
+costs the week its QC pass and nothing else. The 1-hour task timeout covers a
+hard death that never reports at all.
+
+Run it by hand — the execution name becomes the QC run id, which is what the
+digest prints for `revert_qa_run`:
+
+```bash
+aws stepfunctions start-execution \
+  --state-machine-arn "$(aws stepfunctions list-state-machines \
+    --query "stateMachines[?name=='dctech-events-next-monday'].stateMachineArn" \
+    --output text)" \
+  --name "manual-$(date +%Y-%m-%d-%H%M)"
+```
+
+Rules that used to do this and no longer fire: `CalendarQcSchedule` and
+`NextUpdatesWeekAheadSchedule` are gone, `NextNewsletterSchedule` is kept but
+**disabled** so re-enabling it is the one-line fallback if the machine is ever
+removed. The daily 09:00 site build stays as the safety net for other days, and
+the Wednesday roundup keeps its own rule — nothing has to happen before it.
+
+## The calendar QC agent
+
+`dctechEventsCalendarQc` (`cdk_next/agents/calendar_qc/`) is a Strands agent on
+Bedrock AgentCore Runtime, run as the second step of the Monday state machine.
+AgentCore rather than Lambda because a pass runs well past the 15-minute
+ceiling and it needs the managed Browser tool.
+
+It makes **two passes**, deliberately separate:
+
+1. **Triage** — duplicates and out-of-area listings. Both *remove* an event, so
+   the prompt is built around reluctance: "skipping is always a valid answer,"
+   because a false positive costs a reader the listing they came for.
+2. **Polish** — titles, locations and categories that disagree with the event's
+   own page, on whatever triage did not remove. A correction leaves the event on
+   the calendar, so the bar is lower and hesitancy is not a virtue.
+
+One prompt cannot hold both instincts without blunting one, which is why
+`TRIAGE_PROMPT` and `POLISH_PROMPT` carry their own tool sets, writable fields
+and judgement sections, and only the site description, scope and page-reading
+mechanics are shared.
+
+Everything is written as *overlays* — per-event overrides merged in at render
+time. The feed value stays underneath, so nothing is destructive, and every
+write is stamped with the run id that `revert_qa_run` undoes in one call.
+
+**Tavily** (`tavily_extract`, `tavily_search`) sits in front of the browser as
+the cheaper first try, sharing the discovery agent's key — one Tavily account,
+referenced by name rather than duplicated. Extract reads the event page;
+search resolves a venue the page only names. The browser stays as the fallback,
+because Meetup and Eventbrite are what it was added for.
+
+The polish pass is a **revival**, and worth watching. It was built once on a
+cheaper model with only the browser, and dropped after producing zero overlays
+across four runs. Two things changed: it now runs on the same Sonnet 5 as
+triage, and it reads the canonical page instead of inferring from a title. If
+it still produces nothing, cut it again:
+
+```bash
+aws lambda invoke --function-name dctech-events-next-qa-trigger \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"dry_run":true,"limit":10}' /dev/stdout
+```
+
+`dry_run` withholds every write tool, so the agent can physically not write —
+a stronger guarantee than asking it not to. The digest is printed instead of
+emailed. Corrections show up under **Details corrected**; anything landing in
+**Other overlay fields written** is a field neither pass is supposed to touch
+and wants looking at.
+
 ## The /updates posts
 
 `dctech-events-next-updates-publisher`
-(`cdk_next/lambda_src/updates_publisher/`) runs twice a week, writing an
-`UPDATE#{publish_date}` item each time. The table's stream rebuilds the site,
+(`cdk_next/lambda_src/updates_publisher/`) writes an `UPDATE#{publish_date}`
+item twice a week — once from the Monday state machine, once from its own
+Wednesday rule. The table's stream rebuilds the site,
 and the social publisher cross-posts it.
 
-**Monday 10:30 UTC — the week ahead.** A *link post*: title, blurb, and a
+**Monday — the week ahead.** Published as a step in the Monday state machine
+above, not on a schedule of its own. A *link post*: title, blurb, and a
 pointer at `/week/<iso-week>/` for the week just starting. It has no page of
 its own — it appears on /updates/ and in the feed, but the link goes straight
 to the week. It stores no listing either, because the week page already merges

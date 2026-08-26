@@ -27,8 +27,9 @@ class FakeTool:
 
 ALL_TOOLS = [FakeTool(n) for n in (
     'list_pending_qa', 'get_events', 'get_event', 'get_overlay',
-    'set_overlay', 'resolve_qa_review', 'trigger_rebuild',
-    'delete_single_event', 'approve_submission', 'revert_qa_run',
+    'set_overlay', 'resolve_qa_review', 'list_categories', 'trigger_rebuild',
+    'add_category', 'delete_single_event', 'approve_submission',
+    'revert_qa_run',
 )]
 
 
@@ -166,14 +167,36 @@ def test_digest_reports_writes_the_model_never_mentioned():
     assert [r['guid'] for r in results['hidden']] == ['g3']
 
 
-def test_digest_surfaces_overlay_fields_this_agent_should_not_write():
-    # Only duplicate_of and hidden are in scope. Anything else appearing under
-    # this run's id is live and unexpected, so it must not be dropped silently.
-    rows = [{'guid': 'g9', 'title': 'Talk', 'comment': 'why',
+def test_corrections_get_their_own_section_not_the_unexpected_bucket():
+    # title / location / categories are the polish pass's output, so they are
+    # reported as corrections rather than as things nobody asked for.
+    rows = [{'guid': 'g9', 'title': 'Talk', 'comment': 'page says otherwise',
              'applied': {'title': 'Rewritten', 'categories': ['ai']},
              'restores_to': {}, 'removes': []}]
+    results = main.digest_from_overlays(rows)
+    assert results['other'] == []
+    assert results['polished'][0]['fields'] == \
+        {'categories': ['ai'], 'title': 'Rewritten'}
+    assert results['polished'][0]['reason'] == 'page says otherwise'
+
+
+def test_a_removal_and_a_correction_on_one_event_are_reported_separately():
+    rows = [{'guid': 'g9', 'title': 'Talk', 'comment': 'both',
+             'applied': {'hidden': True, 'location': 'Boston, MA'},
+             'restores_to': {}, 'removes': []}]
+    results = main.digest_from_overlays(rows)
+    assert [r['guid'] for r in results['hidden']] == ['g9']
+    assert results['polished'][0]['fields'] == {'location': 'Boston, MA'}
+
+
+def test_digest_still_surfaces_a_field_outside_both_passes():
+    # The bucket exists so a field neither pass is supposed to write cannot
+    # land on the live site unmentioned.
+    rows = [{'guid': 'g9', 'title': 'Talk', 'comment': 'why',
+             'applied': {'group_website': 'http://example.com'},
+             'restores_to': {}, 'removes': []}]
     other = main.digest_from_overlays(rows)['other']
-    assert other[0]['fields'] == {'categories': ['ai'], 'title': 'Rewritten'}
+    assert other[0]['fields'] == {'group_website': 'http://example.com'}
 
 
 def test_digest_does_not_flag_in_scope_fields_as_unexpected():
@@ -305,3 +328,214 @@ def test_falls_back_to_a_single_pass_without_the_runtime_sdk():
 def test_dry_run_defaults_off_so_serving_never_implies_a_write_mode():
     # run_qc's own default is the one that bit us; keep it visible.
     assert main.build_arg_parser().parse_args([]).dry_run is False
+
+
+# ── Step Functions task token ────────────────────────────────────────
+# The Monday state machine waits on the QC pass finishing. The trigger Lambda
+# cannot release the token — it returns seconds after the runtime accepts the
+# invocation — so the agent releases it itself.
+
+
+class FakeSfn:
+    def __init__(self, fail_on=None):
+        self.successes, self.failures = [], []
+        self.fail_on = fail_on
+
+    def send_task_success(self, **kwargs):
+        if self.fail_on == 'success':
+            raise RuntimeError('token expired')
+        self.successes.append(kwargs)
+
+    def send_task_failure(self, **kwargs):
+        if self.fail_on == 'failure':
+            raise RuntimeError('token expired')
+        self.failures.append(kwargs)
+
+
+@pytest.fixture
+def fake_sfn(monkeypatch):
+    client = FakeSfn()
+    fake_boto3 = type('boto3', (), {'client': staticmethod(lambda *a, **k: client)})
+    monkeypatch.setitem(sys.modules, 'boto3', fake_boto3)
+    return client
+
+
+RESULTS = {
+    'run_id': 'qc-2026-08-31-abcd1234',
+    'reviewed': 28,
+    'duplicates': [{'guid': 'a', 'title': 'A', 'reason': 'dup'}],
+    'hidden': [{'guid': 'b', 'title': 'B', 'reason': 'NYC'}],
+    'flagged': [],
+}
+
+
+def test_no_token_means_no_call_at_all(fake_sfn):
+    # A hand-run pass has no waiter; reporting to one would fail.
+    main.report_to_step_functions(None, results=RESULTS)
+    assert fake_sfn.successes == [] and fake_sfn.failures == []
+
+
+def test_success_releases_the_token(fake_sfn):
+    main.report_to_step_functions('tok-1', results=RESULTS)
+    assert len(fake_sfn.successes) == 1
+    assert fake_sfn.successes[0]['taskToken'] == 'tok-1'
+
+
+def test_success_output_is_counts_not_content(fake_sfn):
+    # SendTaskSuccess caps output at 256KB, and a state machine has no use for
+    # titles and reasons — the digest carries those.
+    import json
+    main.report_to_step_functions('tok-1', results=RESULTS)
+    out = json.loads(fake_sfn.successes[0]['output'])
+    assert out == {'run_id': 'qc-2026-08-31-abcd1234', 'dry_run': False,
+                   'reviewed': 28, 'duplicates': 1, 'hidden': 1, 'flagged': 0}
+
+
+def test_summary_of_a_clean_run(fake_sfn):
+    import json
+    main.report_to_step_functions('tok-1', results={'run_id': 'r', 'reviewed': 0})
+    out = json.loads(fake_sfn.successes[0]['output'])
+    assert (out['reviewed'], out['duplicates'], out['hidden']) == (0, 0, 0)
+
+
+def test_failure_releases_the_token_too(fake_sfn):
+    # Without this the execution sits on the token for the full hour, turning
+    # a crash into a silent stall.
+    main.report_to_step_functions('tok-1', error=ValueError('feed exploded'),
+                                  run_id='qc-1')
+    assert len(fake_sfn.failures) == 1
+    assert fake_sfn.failures[0]['error'] == 'ValueError'
+    assert 'feed exploded' in fake_sfn.failures[0]['cause']
+    assert 'qc-1' in fake_sfn.failures[0]['cause']
+
+
+def test_a_reporting_error_never_sinks_a_completed_pass(monkeypatch):
+    # The overlays are written and the digest is sent by this point. Raising
+    # here would turn a good run into a failed one for nothing.
+    client = FakeSfn(fail_on='success')
+    monkeypatch.setitem(sys.modules, 'boto3',
+                        type('boto3', (), {'client': staticmethod(lambda *a, **k: client)}))
+    main.report_to_step_functions('tok-1', results=RESULTS)  # must not raise
+
+
+def test_a_reporting_error_on_the_failure_path_is_also_swallowed(monkeypatch):
+    client = FakeSfn(fail_on='failure')
+    monkeypatch.setitem(sys.modules, 'boto3',
+                        type('boto3', (), {'client': staticmethod(lambda *a, **k: client)}))
+    main.report_to_step_functions('tok-1', error=RuntimeError('boom'))
+
+
+def test_cause_and_error_are_clipped_to_the_api_limits(fake_sfn):
+    main.report_to_step_functions('tok-1', error=ValueError('x' * 50000),
+                                  run_id='qc-1')
+    sent = fake_sfn.failures[0]
+    assert len(sent['error']) <= 256
+    assert len(sent['cause']) <= 32768
+
+
+# ── two passes, one queue ────────────────────────────────────────────
+# Polish runs on what triage left alone: correcting the title of an event that
+# has just been hidden is work nobody will ever see.
+
+
+def test_removed_guids_reads_the_written_rows_not_the_model():
+    rows = [
+        {'guid': 'g1', 'applied': {'duplicate_of': 'gX'}},
+        {'guid': 'g2', 'applied': {'hidden': True}},
+        {'guid': 'g3', 'applied': {'title': 'Corrected'}},
+    ]
+    # A model claiming g4 was hidden does not make it so.
+    claims = {'hidden': [{'guid': 'g4'}]}
+    assert main._removed_guids(rows, claims) == {'g1', 'g2'}
+
+
+def test_a_corrected_event_is_not_treated_as_removed():
+    rows = [{'guid': 'g3', 'applied': {'title': 'Corrected',
+                                       'location': 'Arlington, VA'}}]
+    assert main._removed_guids(rows, {}) == set()
+
+
+def test_removed_guids_falls_back_to_model_claims_in_a_dry_run():
+    # A dry run writes nothing, so list_qa_run has nothing to audit and the
+    # model's own report is all there is.
+    claims = {'duplicates': [{'guid': 'g1'}], 'hidden': [{'guid': 'g2'}]}
+    assert main._removed_guids(None, claims) == {'g1', 'g2'}
+
+
+def test_removed_guids_survives_a_claim_with_no_guid():
+    assert main._removed_guids(None, {'hidden': [{'title': 'no guid'}]}) == set()
+
+
+def test_removed_guids_on_an_empty_run():
+    assert main._removed_guids([], {}) == set()
+
+
+def test_both_passes_contribute_to_flagged_and_fetch_failures():
+    # Neither section leaves an overlay behind, so they concatenate rather
+    # than the second pass overwriting the first.
+    triage = {'flagged': [{'guid': 'g1'}], 'fetch_failures': [{'guid': 'g2'}]}
+    polish = {'flagged': [{'guid': 'g3'}], 'fetch_failures': [{'guid': 'g4'}]}
+    merged = main._merge_claims(triage, polish)
+    assert [r['guid'] for r in merged['flagged']] == ['g1', 'g3']
+    assert [r['guid'] for r in merged['fetch_failures']] == ['g2', 'g4']
+
+
+def test_merge_claims_omits_sections_neither_pass_reported():
+    assert main._merge_claims({}, {}) == {}
+    assert main._merge_claims(None, None) == {}
+
+
+def test_merge_claims_does_not_carry_applied_change_sections():
+    # duplicates / hidden / polished are re-derived from list_qa_run, never
+    # taken from a model's narrative.
+    merged = main._merge_claims({'duplicates': [{'guid': 'g1'}],
+                                 'polished': [{'guid': 'g2'}]}, {})
+    assert merged == {}
+
+
+def test_polish_gets_no_tool_that_removes_or_resolves():
+    chosen = {main._tool_name(t)
+              for t in main._select(ALL_TOOLS, main._POLISH_TOOLS, dry_run=False)}
+    assert 'resolve_qa_review' not in chosen
+    assert 'list_pending_qa' not in chosen
+    assert 'get_events' not in chosen
+
+
+def test_polish_can_read_the_category_list():
+    # A slug that does not exist renders as nothing, so the list is not
+    # optional.
+    chosen = {main._tool_name(t)
+              for t in main._select(ALL_TOOLS, main._POLISH_TOOLS, dry_run=False)}
+    assert 'list_categories' in chosen
+
+
+def test_polish_dry_run_cannot_write_either():
+    chosen = {main._tool_name(t)
+              for t in main._select(ALL_TOOLS, main._POLISH_TOOLS, dry_run=True)}
+    assert 'set_overlay' not in chosen
+    assert 'list_categories' in chosen
+
+
+def test_the_fields_the_digest_routes_match_the_fields_the_prompt_offers():
+    # If these drift, a correction the agent is told to make lands in the
+    # digest's "nobody asked for this" bucket.
+    import prompt
+    for field in main._POLISH_FIELDS:
+        assert f'`{field}`' in prompt.POLISH_PROMPT
+
+
+def test_the_polish_prompt_never_offers_a_removal_field():
+    import prompt
+    scope = prompt.POLISH_PROMPT.split('# Your task')[0]
+    assert 'duplicate_of' not in scope
+    assert '`hidden`' not in scope
+
+
+def test_the_polish_prompt_demands_provenance_in_comments():
+    # A trim invents nothing; a searched value is the riskiest edit there is.
+    # A comment that does not distinguish them makes a reviewer re-fetch the
+    # page to tell, which is the whole thing the comment exists to avoid.
+    import prompt
+    assert '# Comments' in prompt.POLISH_PROMPT
+    for phrase in ('from the feed', 'read from', 'resolved by search'):
+        assert phrase in prompt.POLISH_PROMPT

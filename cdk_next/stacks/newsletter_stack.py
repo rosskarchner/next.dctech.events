@@ -178,6 +178,12 @@ class NextNewsletterStack(cdk.Stack):
         events.Rule(
             self,
             "NextNewsletterSchedule",
+            # Disabled: the send is the last step of NextOrchestrationStack's
+            # Monday state machine, so it goes out only once the QC pass has
+            # finished and the week-ahead post it links is live. Kept as a
+            # disabled rule rather than deleted so re-enabling it is a
+            # one-line fallback if the state machine is ever taken out.
+            enabled=False,
             schedule=events.Schedule.expression("cron(0 11 ? * MON *)"),
             targets=[targets.LambdaFunction(self.sender_function)],
             description="Weekly next.dctech.events newsletter send (Mon 11:00 UTC)",

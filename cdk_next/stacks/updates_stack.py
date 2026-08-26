@@ -91,8 +91,9 @@ class NextUpdatesStack(cdk.Stack):
         # scanning EVENT# createdAt, which only the table records.
         table.grant_read_write_data(self.publisher_function)
 
-        # Two rules, one function. Wednesday 11:00 UTC is 7 AM EDT / 6 AM EST
-        # — up before the workday and ahead of the 13:30 UTC daily ops mail.
+        # Wednesday 11:00 UTC is 7 AM EDT / 6 AM EST — up before the workday
+        # and ahead of the 13:30 UTC daily ops mail. The roundup keeps its own
+        # rule because nothing has to happen before it.
         events.Rule(
             self,
             "NextUpdatesPublishSchedule",
@@ -101,26 +102,11 @@ class NextUpdatesStack(cdk.Stack):
             description="Publish the Wednesday dctech.events /updates roundup",
         )
 
-        # The Monday "week ahead" link post. A separate rule rather than a
-        # separate function: it is the same events.json read and the same
-        # write-once-per-day put, differing only in what it stores.
-        #
-        # 10:30 UTC, half an hour ahead of the Monday 11:00 newsletter send,
-        # so the two do not go out on top of each other.
-        events.Rule(
-            self,
-            "NextUpdatesWeekAheadSchedule",
-            schedule=events.Schedule.expression("cron(30 10 ? * MON *)"),
-            targets=[targets.LambdaFunction(
-                self.publisher_function,
-                event=events.RuleTargetInput.from_object(
-                    {"mode": "week_ahead"}
-                ),
-            )],
-            description=(
-                "Publish the Monday dctech.events /updates week-ahead link post"
-            ),
-        )
+        # The Monday "week ahead" link post has no rule of its own: it is a
+        # step in NextOrchestrationStack's Monday state machine, which invokes
+        # this same function with {"mode": "week_ahead"}. It has to run *after*
+        # the QC pass and the rebuild that follows it, or the count it freezes
+        # into the post counts events QC has just hidden.
 
         cdk.CfnOutput(
             self,

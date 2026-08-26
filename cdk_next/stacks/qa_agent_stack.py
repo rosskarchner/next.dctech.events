@@ -1,14 +1,17 @@
 """NextQaAgentStack — the weekly calendar quality-control agent.
 
-A Strands agent on Bedrock AgentCore Runtime that reviews newly-imported iCal
-events for duplicates and out-of-area listings. It reaches the data only
+A Strands agent on Bedrock AgentCore Runtime that makes two passes over each
+week's newly-imported iCal events: one for duplicates and out-of-area listings
+(which remove an event), then one for titles, locations and categories that
+disagree with the event's own page (which correct it). It reaches the data only
 through the site's own MCP server, so its fixes are byte-for-byte the fixes the
 /edit UI applies.
 
 AgentCore rather than a Lambda for two reasons: a full pass runs well past
 Lambda's 15-minute ceiling, and the managed Browser tool can read the Meetup
-and Eventbrite pages it checks locations against, which block a plain HTTP
-fetch.
+and Eventbrite pages it checks against, which block a plain HTTP fetch. Tavily
+sits in front of the browser as the cheaper first try — see the agent's
+`_load_search_key`.
 """
 import os
 
@@ -21,6 +24,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_s3_assets as s3_assets,
+    aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
 
@@ -102,6 +106,30 @@ class NextQaAgentStack(cdk.Stack):
                 resources=["*"],
             )
         )
+
+        # Tavily, for reading the event pages the polish pass compares entries
+        # against and for resolving venues those pages only name. The same
+        # secret the discovery agent created, referenced by name rather than
+        # duplicated: it is one Tavily account, and a second key would be a
+        # second thing to rotate. The `discovery/` in the path is historical.
+        search_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "SearchApiKeyRef", f"{config.PREFIX}/discovery/tavily"
+        )
+        search_secret.grant_read(role)
+        # The agent releases the Step Functions task token the Monday state
+        # machine is waiting on. It has to be the agent and not the trigger
+        # Lambda: the trigger returns as soon as the runtime accepts the
+        # invocation, minutes before the pass is done. Not scoped to one state
+        # machine ARN — a token is already an unguessable capability, and
+        # scoping it would make NextQaAgentStack depend on the orchestration
+        # stack that invokes it.
+        role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["states:SendTaskSuccess", "states:SendTaskFailure",
+                         "states:SendTaskHeartbeat"],
+                resources=["*"],
+            )
+        )
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=["logs:CreateLogGroup", "logs:CreateLogStream",
@@ -135,6 +163,7 @@ class NextQaAgentStack(cdk.Stack):
             environment_variables={
                 "DCTECH_MCP_URL": mcp_url,
                 "QC_TRIAGE_MODEL": TRIAGE_MODEL,
+                "SEARCH_SECRET_ARN": search_secret.secret_arn,
                 "ADMIN_EMAIL": config.NEWSLETTER_ADMIN_EMAIL,
                 "FROM_EMAIL": config.NEWSLETTER_FROM_EMAIL,
             },
@@ -154,6 +183,12 @@ class NextQaAgentStack(cdk.Stack):
             timeout=cdk.Duration.minutes(1),
             memory_size=256,
             environment={"AGENT_RUNTIME_ARN": self.runtime.attr_agent_runtime_arn},
+            # No async retries. This function starts a QC pass; retrying it
+            # starts a *second* pass rather than recovering the first. On
+            # 2026-08-26 the default of 2 turned one dry run into three
+            # concurrent passes that then starved each other of Bedrock
+            # throughput until all three died on read timeouts.
+            retry_attempts=0,
             log_group=logs.LogGroup(
                 self,
                 "CalendarQcTriggerLogGroup",
@@ -169,15 +204,10 @@ class NextQaAgentStack(cdk.Stack):
             )
         )
 
-        events.Rule(
-            self,
-            "CalendarQcSchedule",
-            # Monday early morning: after the weekend's feeds have imported,
-            # before anyone is looking at the site.
-            schedule=events.Schedule.cron(minute="0", hour="9", week_day="MON"),
-            targets=[targets.LambdaFunction(self.trigger)],
-            description="Weekly calendar quality-control pass",
-        )
+        # No schedule here. NextOrchestrationStack's Monday state machine
+        # invokes this trigger, because the pass has to finish before the site
+        # rebuild and the week-ahead post that depend on it — an ordering a
+        # second cron expression cannot express.
 
         cdk.CfnOutput(self, "CalendarQcRuntimeArn",
                       value=self.runtime.attr_agent_runtime_arn)

@@ -24,6 +24,7 @@ from stacks.ops_stack import NextOpsStack
 from stacks.social_stack import NextSocialStack
 from stacks.updates_stack import NextUpdatesStack
 from stacks.cicd_stack import NextCicdStack
+from stacks.orchestration_stack import NextOrchestrationStack
 
 app = cdk.App()
 env = cdk.Environment(account=config.ACCOUNT, region=config.REGION)
@@ -72,6 +73,11 @@ ops = NextOpsStack(app, "NextOpsStack", table=db.table, env=env)
 social = NextSocialStack(app, "NextSocialStack", env=env)
 updates = NextUpdatesStack(app, "NextUpdatesStack", table=db.table, env=env)
 cicd = NextCicdStack(app, "NextCicdStack", env=env)
+
+# Monday's chain. Deliberately last and dependency-free: it reaches the four
+# Lambdas and the CodeBuild project it sequences by name, so none of the stacks
+# that own them has to be deployed in step with it.
+orchestration = NextOrchestrationStack(app, "NextOrchestrationStack", env=env)
 
 # Tags cannot be added during `cdk import`; NextCognitoStack picks them up
 # on the ordinary deploy that follows.

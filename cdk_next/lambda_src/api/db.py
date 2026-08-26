@@ -470,6 +470,13 @@ def get_events_by_review_status(review_status, limit=None):
     if limit:
         kwargs['Limit'] = limit
     items = _query_all(table, **kwargs)
+    if limit:
+        # DynamoDB's Limit caps items *per page*, and _query_all then follows
+        # LastEvaluatedKey to the end — so the kwarg above keeps the per-page
+        # read cost down but does not bound the total. Truncating here is what
+        # actually honours the caller. Without it `limit` silently returned the
+        # whole queue, which made a bounded QC dry run impossible.
+        items = items[:limit]
     return [_event_item_to_dict(item) for item in items]
 
 

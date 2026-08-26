@@ -4,15 +4,24 @@ Runs on Bedrock AgentCore Runtime. Its tools are the site's own MCP server —
 the same one the /edit UI and a human operator use — so a fix applied here is
 byte-for-byte a fix applied there, and the two paths cannot drift apart.
 
-One pass over each week's new events, looking for duplicates and out-of-area
-listings — the two problems that warrant removing something from the site.
+Two passes over each week's new events, in order:
 
-A second "polish" pass (venues, titles, categories on a cheaper model) was
-built and dropped: across three dry runs and one live run it produced zero
-overlays, while costing a model call, browser sessions, and about half the
-runtime. The judgement it needed sat on the wrong side of the cost/quality
-line. Its rules live in git history if it is ever worth revisiting on a
-stronger model.
+1. **Triage** — duplicates and out-of-area listings, the two problems that
+   warrant removing something from the site. Reluctant by design.
+2. **Polish** — titles, locations and categories that do not match the event's
+   own page, on whatever pass 1 did not remove. A correction leaves the event
+   on the calendar, so the bar is lower.
+
+They are separate agent calls with separate prompts because those two bars are
+not the same instinct, and one prompt cannot hold both without blunting one.
+
+The polish pass is a revival. It was built once on a *cheaper* model with only
+the browser to read pages, and dropped after producing zero overlays across
+three dry runs and one live run — the judgement it needed sat on the wrong side
+of the cost/quality line. It now runs on the same model as triage and reads
+pages with `tavily_extract`, so it compares against the canonical description
+instead of inferring from a title. If it still produces nothing, cut it again;
+`--dry-run` is how to tell.
 
 Every write is stamped with a run id, so a whole run can be undone in one call
 (`revert_qa_run`) if it gets something wrong. The digest email carries that id.
@@ -26,7 +35,7 @@ from datetime import date
 
 import digest
 from mcp_sigv4 import mcp_transport
-from prompt import TRIAGE_PROMPT
+from prompt import POLISH_PROMPT, TRIAGE_PROMPT
 
 # Hiding an event is the one thing this agent does that a reader would notice
 # if it got it wrong, so it runs on the stronger model. Overridable so the tier
@@ -55,6 +64,17 @@ _WRITE_TOOLS = {'set_overlay', 'resolve_qa_review', 'trigger_rebuild',
 _TRIAGE_TOOLS = {'list_pending_qa', 'get_events', 'get_event', 'get_overlay',
                  'set_overlay', 'resolve_qa_review'}
 
+# The polish pass writes corrections, never removals. Deliberately without
+# `list_pending_qa` and `resolve_qa_review` (triage owns the queue), without
+# `get_events` (it judges each entry against its own page, not against the
+# corpus), and *with* `list_categories`, because a category slug that does not
+# exist renders as nothing at all.
+_POLISH_TOOLS = {'get_event', 'get_overlay', 'set_overlay', 'list_categories'}
+
+# Written by the polish pass. Kept next to the tool set so the digest and the
+# prompt cannot drift apart on what this agent is allowed to correct.
+_POLISH_FIELDS = ('title', 'location', 'categories')
+
 _DRY_RUN_NOTE = """
 
 # DRY RUN
@@ -63,6 +83,22 @@ The tools that write are not available to you on this run. Do not try to call
 them. Work through exactly the same judgement, and report in the same JSON
 shape what you *would* have changed.
 """
+
+
+def _load_search_key():
+    """Put the Tavily key where strands_tools.tavily looks for it.
+
+    Same secret the discovery agent uses, referenced by name rather than
+    duplicated: it is one Tavily account, and a second key would be a second
+    thing to rotate. The `discovery/` in the path is historical.
+    """
+    arn = os.environ.get('SEARCH_SECRET_ARN')
+    if not arn or os.environ.get('TAVILY_API_KEY'):
+        return
+    import boto3
+
+    value = boto3.client('secretsmanager').get_secret_value(SecretId=arn)
+    os.environ['TAVILY_API_KEY'] = value['SecretString'].strip()
 
 
 def _tool_name(tool):
@@ -119,7 +155,7 @@ def digest_from_overlays(rows, model_results=None):
     Only `flagged` and `fetch_failures` still come from the model — neither
     leaves an overlay behind, so there is nothing authoritative to read.
     """
-    results = {'duplicates': [], 'hidden': [], 'other': []}
+    results = {'duplicates': [], 'hidden': [], 'polished': [], 'other': []}
 
     for row in rows or []:
         applied = row.get('applied') or {}
@@ -134,10 +170,17 @@ def digest_from_overlays(rows, model_results=None):
             results['hidden'].append(
                 {'guid': guid, 'title': title, 'reason': reason})
 
+        corrected = {k: applied[k] for k in _POLISH_FIELDS if k in applied}
+        if corrected:
+            results['polished'].append(
+                {'guid': guid, 'title': title, 'fields': corrected,
+                 'reason': reason})
+
         # Anything else this run wrote. Nothing should land here today, so if
         # it does, the digest says so rather than quietly dropping a live
         # change nobody asked for.
-        unexpected = sorted(set(applied) - {'duplicate_of', 'hidden'})
+        unexpected = sorted(
+            set(applied) - {'duplicate_of', 'hidden'} - set(_POLISH_FIELDS))
         if unexpected:
             results['other'].append(
                 {'guid': guid, 'title': title,
@@ -151,13 +194,51 @@ def digest_from_overlays(rows, model_results=None):
     return results
 
 
-def _build_agent(model_id, system_prompt, tools, dry_run, with_browser=False):
+def _merge_claims(*reports):
+    """Combine what each pass said about things that leave no overlay behind.
+
+    `flagged` and `fetch_failures` are the only sections not re-derived from
+    `list_qa_run`, and both passes can contribute to them, so they concatenate
+    rather than overwrite. `reviewed` is the triage count — the queue is what
+    was reviewed, and polish sees a subset of it.
+    """
+    merged = {}
+    for report in reports:
+        for key in ('flagged', 'fetch_failures'):
+            rows = (report or {}).get(key) or []
+            if rows:
+                merged.setdefault(key, []).extend(rows)
+    return merged
+
+
+def _removed_guids(rows, claims):
+    """Events the triage pass took off the site, so polish can skip them.
+
+    Prefers `list_qa_run` rows, which are what was actually written. Falls
+    back to the model's own report, which is all a dry run has.
+    """
+    if rows is not None:
+        return {row.get('guid') for row in rows
+                if 'duplicate_of' in (row.get('applied') or {})
+                or (row.get('applied') or {}).get('hidden')}
+    claimed = ((claims or {}).get('duplicates') or []) + \
+              ((claims or {}).get('hidden') or [])
+    return {row.get('guid') for row in claimed if row.get('guid')}
+
+
+def _build_agent(model_id, system_prompt, tools, dry_run, with_browser=False,
+                 with_search=False):
     from strands import Agent
     from strands.models import BedrockModel
 
     if with_browser:
         from strands_tools.browser import AgentCoreBrowser
         tools = list(tools) + [AgentCoreBrowser(region=REGION).browser]
+    if with_search:
+        # Both are wanted: extract is the cheap first try on an event page,
+        # search is the only way to resolve a venue the page merely names.
+        from strands_tools.tavily import tavily_extract, tavily_search
+        tools = list(tools) + [tavily_extract, tavily_search]
 
     return Agent(
         model=BedrockModel(model_id=model_id, region_name=REGION,
@@ -167,8 +248,15 @@ def _build_agent(model_id, system_prompt, tools, dry_run, with_browser=False):
     )
 
 
-def run_qc(dry_run=False, limit=None, run_id=None):
-    """One full QC pass. Returns the results dict the digest renders."""
+def run_qc(dry_run=False, limit=None, run_id=None, own_rebuild=True):
+    """One full QC pass. Returns the results dict the digest renders.
+
+    `own_rebuild=False` withholds the rebuild this function would otherwise
+    kick off at the end. Set it when a caller is sequencing the build itself —
+    the Monday state machine runs a `codebuild:startBuild.sync` step straight
+    after this one, and two concurrent builds of the same project would have
+    two `s3 sync --delete` runs racing over the same bucket.
+    """
     from strands.tools.mcp import MCPClient
 
     run_id = run_id or f"qc-{date.today().isoformat()}-{uuid.uuid4().hex[:8]}"
@@ -189,9 +277,18 @@ def run_qc(dry_run=False, limit=None, run_id=None):
 
         guids = [e['guid'] for e in pending]
 
+        def audit(tag):
+            """What this run has actually written so far, per the table."""
+            if dry_run:
+                return None
+            return _tool_result(mcp.call_tool_sync(
+                f'{run_id}-{tag}', 'list_qa_run', {'run_id': run_id}),
+                expect_list=True)
+
+        # ── pass 1: what should come off the site ────────────────────
         triage = _build_agent(TRIAGE_MODEL, TRIAGE_PROMPT,
                               _select(tools, _TRIAGE_TOOLS, dry_run), dry_run,
-                              with_browser=True)
+                              with_browser=True, with_search=True)
         triage_out = triage(
             f"Run id: {run_id}\n"
             f"Review these {len(guids)} queued events for duplicates and "
@@ -200,16 +297,37 @@ def run_qc(dry_run=False, limit=None, run_id=None):
             f"— most duplicate pairs have their canonical half already approved "
             f"and outside the queue."
         )
-        results.update(_extract_json(triage_out))
-        reviewed = results.get('reviewed', len(guids))
+        triage_claims = _extract_json(triage_out)
+        reviewed = triage_claims.get('reviewed', len(guids))
 
-        if not dry_run:
-            # Re-derive the change sections from what was actually written,
-            # not from what the models said they wrote.
-            written = _tool_result(mcp.call_tool_sync(
-                f'{run_id}-audit', 'list_qa_run', {'run_id': run_id}),
-                expect_list=True)
-            results = {**digest_from_overlays(written, results),
+        # ── pass 2: what should be corrected ─────────────────────────
+        # Only on what survived pass 1. Polishing the title of an event that
+        # has just been hidden is work nobody will ever see.
+        removed = _removed_guids(audit('triage-audit'), triage_claims)
+        survivors = [g for g in guids if g not in removed]
+        polish_claims = {}
+        if survivors:
+            print(f'run {run_id}: polishing {len(survivors)} of {len(guids)} '
+                  f'({len(removed)} removed by triage)')
+            polish = _build_agent(TRIAGE_MODEL, POLISH_PROMPT,
+                                  _select(tools, _POLISH_TOOLS, dry_run),
+                                  dry_run, with_browser=True, with_search=True)
+            polish_out = polish(
+                f"Run id: {run_id}\n"
+                f"Check these {len(survivors)} events against their own event "
+                f"pages and correct what is wrong: {', '.join(survivors)}"
+            )
+            polish_claims = _extract_json(polish_out)
+
+        claims = {**triage_claims, **_merge_claims(triage_claims, polish_claims)}
+        if dry_run:
+            results.update(claims)
+            results['polished'] = polish_claims.get('polished') or []
+        else:
+            # Re-derive every applied-change section from what was actually
+            # written, not from what the models said they wrote. The audit runs
+            # after both passes so it sees corrections as well as removals.
+            results = {**digest_from_overlays(audit('audit'), claims),
                        'run_id': run_id, 'dry_run': False}
 
         results['reviewed'] = reviewed
@@ -217,7 +335,7 @@ def run_qc(dry_run=False, limit=None, run_id=None):
         changed = sum(len(results.get(key) or [])
                       for key, _, _ in digest._SECTIONS
                       if key != 'fetch_failures')
-        if changed and not dry_run:
+        if changed and not dry_run and own_rebuild:
             mcp.call_tool_sync(f'{run_id}-rebuild', 'trigger_rebuild', {})
 
     if not dry_run:
@@ -287,6 +405,53 @@ def _tool_result(result, expect_list=False):
     return values[0] if len(values) == 1 else values
 
 
+def _token_summary(results):
+    """The compact shape handed back to Step Functions.
+
+    Counts, not content. The full digest is emailed and the overlays are on
+    the events themselves; SendTaskSuccess caps output at 256KB, and a state
+    machine has no use for reasons and titles anyway.
+    """
+    return {
+        'run_id': results.get('run_id'),
+        'dry_run': bool(results.get('dry_run')),
+        'reviewed': results.get('reviewed', 0),
+        'duplicates': len(results.get('duplicates') or []),
+        'hidden': len(results.get('hidden') or []),
+        'flagged': len(results.get('flagged') or []),
+    }
+
+
+def report_to_step_functions(token, *, results=None, error=None, run_id=None):
+    """Release a Step Functions task token, if this run was started by one.
+
+    Never raises. A failure to report is worth logging loudly, but the pass
+    itself has already written its overlays and sent its digest — letting a
+    SendTaskSuccess error propagate would turn a completed run into a failed
+    one, and the execution has a timeout that covers being left waiting.
+    """
+    if not token:
+        return
+    try:
+        import boto3
+        sfn = boto3.client('stepfunctions', region_name=REGION)
+        if error is not None:
+            sfn.send_task_failure(
+                taskToken=token,
+                error=type(error).__name__[:256],
+                cause=f'run {run_id}: {error}'[:32768],
+            )
+            print(f'reported QC failure to Step Functions: {error}')
+        else:
+            sfn.send_task_success(
+                taskToken=token,
+                output=json.dumps(_token_summary(results or {})),
+            )
+            print('reported QC completion to Step Functions')
+    except Exception as exc:  # noqa: BLE001
+        print(f'ERROR could not release Step Functions task token: {exc}')
+
+
 try:
     from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
@@ -299,14 +464,30 @@ try:
         Registered as an async task for its whole duration: a QC pass runs for
         many minutes, and without this the runtime's health ping treats the
         silence as a hung agent and kills it around the 15-minute mark.
+
+        A `task_token` in the payload means a Step Functions execution is
+        waiting on this pass — see `report_to_step_functions`. Its presence
+        also means the caller owns the site rebuild, so this run does not
+        start one.
         """
         task_id = app.add_async_task('calendar_qc')
+        token = payload.get('task_token')
         try:
-            return run_qc(dry_run=bool(payload.get('dry_run')),
-                          limit=payload.get('limit'),
-                          run_id=payload.get('run_id'))
+            results = run_qc(dry_run=bool(payload.get('dry_run')),
+                             limit=payload.get('limit'),
+                             run_id=payload.get('run_id'),
+                             own_rebuild=not token)
+        except Exception as exc:  # noqa: BLE001 — the waiter has to be told
+            # Without this the execution sits on the token until its hour-long
+            # timeout, turning a crash into a silent stall.
+            report_to_step_functions(token, error=exc,
+                                     run_id=payload.get('run_id'))
+            raise
         finally:
             app.complete_async_task(task_id)
+
+        report_to_step_functions(token, results=results)
+        return results
 
 except ImportError:  # local dry runs don't need the runtime SDK
     app = None

@@ -23,6 +23,9 @@ _SECTIONS = (
                f"→ canonical {r.get('canonical', '?')}: {r.get('reason', '')}"),
     ('hidden', 'Hidden (out of area)',
      lambda r: f"{r.get('title', '?')} ({r.get('guid', '?')}): {r.get('reason', '')}"),
+    ('polished', 'Details corrected',
+     lambda r: f"{r.get('title', '?')} ({r.get('guid', '?')}) "
+               f"→ {r.get('fields')}: {r.get('reason', '')}"),
     ('other', 'Other overlay fields written',
      lambda r: f"{r.get('title', '?')} — {r.get('fields')} ({r.get('reason', '')})"),
     ('flagged', 'Flagged for you',
