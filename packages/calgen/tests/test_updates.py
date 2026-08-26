@@ -322,3 +322,122 @@ def test_summarize_free_post_truncates_long_prose_on_word_boundary(site_dir):
 def test_summarize_free_post_with_empty_body(site_dir):
     _write_free(site_dir, 'hello', '2026-08-05', body='')
     assert updates.summarize(updates.get_free_posts()[0]) == ''
+
+
+# ── Link posts ──────────────────────────────────────────────────────
+# The Monday "week ahead" post: a pointer at /week/, storing no listing of
+# its own because the page it points at keeps its own frozen capture.
+
+
+def _write_link_post(tmp_path, week_id, published_on, **extra):
+    d = tmp_path / updates.UPDATES_DIR
+    d.mkdir(exist_ok=True)
+    data = {
+        'post_kind': 'link',
+        'week_id': week_id,
+        'published_on': published_on,
+        'link_url': f'/week/{week_id}/',
+        'title': 'DC Tech Events for the week of August 31, 2026',
+        'summary': '23 events on the calendar for August 31–September 6: A, B, C.',
+        'event_count': 23,
+        **extra,
+    }
+    (d / f'{published_on}.yaml').write_text(yaml.dump(data), encoding='utf-8')
+
+
+def test_link_post_is_recognized_as_its_own_kind(site_dir):
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    post = updates.get_update_posts()[0]
+    assert post['kind'] == 'link'
+
+
+def test_link_post_carries_its_target(site_dir):
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    assert updates.get_update_posts()[0]['link_url'] == '/week/2026-W36/'
+
+
+def test_link_post_target_defaults_to_its_week_page(site_dir):
+    # Never leave a link post with a dead link, even if link_url is missing.
+    _write_link_post(site_dir, '2026-W36', '2026-08-31', link_url='')
+    assert updates.get_update_posts()[0]['link_url'] == '/week/2026-W36/'
+
+
+def test_link_post_url_is_its_target_not_a_page_under_updates(site_dir):
+    # The point of the kind: it appears on /updates/ but sends the reader
+    # straight to the week.
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    assert updates.get_update_posts()[0]['url'] == '/week/2026-W36/'
+
+
+def test_link_post_is_still_dated_by_its_publication_date(site_dir):
+    # It owns no page, but it still has to sort and display by date.
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    post = updates.get_update_posts()[0]
+    assert (post['year'], post['month'], post['day']) == (2026, 8, 31)
+    assert post['date_formatted'] == 'August 31, 2026'
+
+
+def test_link_post_owns_no_page(site_dir):
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    assert updates.get_paged_update_posts() == []
+    # So the /updates/ route finds nothing and the freezer builds nothing.
+    assert updates.get_update_post(2026, 8, 31) is None
+
+
+def test_a_roundup_still_owns_its_page(site_dir):
+    _write_post(site_dir, '2026-W33', date(2026, 8, 10))
+    assert [p['url'] for p in updates.get_paged_update_posts()] == \
+        ['/updates/2026/8/10/']
+
+
+def test_link_post_summarizes_from_its_stored_blurb(site_dir):
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    post = updates.get_update_posts()[0]
+    assert updates.summarize(post).startswith('23 events on the calendar')
+
+
+def test_link_post_with_no_blurb_says_nothing_rather_than_guessing(site_dir):
+    # It stores no events, so roundup wording ("N events this week: …") would
+    # be derived from nothing.
+    _write_link_post(site_dir, '2026-W36', '2026-08-31', summary='')
+    post = updates.get_update_posts()[0]
+    assert updates.summarize(post) == ''
+
+
+def test_a_roundup_is_not_mistaken_for_a_link_post(site_dir):
+    _write_post(site_dir, '2026-W33', date(2026, 8, 10))
+    assert updates.get_update_posts()[0]['kind'] == 'weekly'
+
+
+def test_post_kind_other_than_link_still_renders_as_a_roundup(site_dir):
+    _write_post(site_dir, '2026-W33', date(2026, 8, 10), post_kind='roundup')
+    assert updates.get_update_posts()[0]['kind'] == 'weekly'
+
+
+def test_monday_link_post_and_wednesday_roundup_coexist(site_dir):
+    # Same ISO week, different days — both live in _updates/ and both render.
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    _write_post(site_dir, '2026-W36', date(2026, 9, 2),
+                published_on=date(2026, 9, 2),
+                title='New on DC Tech Events: week of August 26, 2026',
+                added_since='2026-08-26')
+    posts = updates.get_update_posts()
+    assert [p['kind'] for p in posts] == ['weekly', 'link']
+    # The roundup links its own page; the link post links the week.
+    assert [p['url'] for p in posts] == \
+        ['/updates/2026/9/2/', '/week/2026-W36/']
+
+
+def test_paged_posts_exclude_link_posts_but_keep_roundups(site_dir):
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    _write_post(site_dir, '2026-W36', date(2026, 9, 2),
+                published_on=date(2026, 9, 2))
+    assert [p['kind'] for p in updates.get_paged_update_posts()] == ['weekly']
+    assert updates.get_update_post(2026, 9, 2)['kind'] == 'weekly'
+    assert updates.get_update_post(2026, 8, 31) is None
+
+
+def test_link_posts_interleave_with_free_posts_by_date(site_dir):
+    _write_link_post(site_dir, '2026-W36', '2026-08-31')
+    _write_free(site_dir, 'a-note', '2026-09-01')
+    assert [p['kind'] for p in updates.get_all_posts()] == ['post', 'link']

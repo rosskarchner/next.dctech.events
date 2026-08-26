@@ -27,8 +27,8 @@
 <div class="updates-container">
     <header class="updates-header">
         <h1>Updates</h1>
-        <p>Every event added to the calendar in the past week, posted every Wednesday.
-           <a href="/updates/feed.xml">Subscribe via RSS</a>.</p>
+        <p>The week ahead every Monday, and everything newly added to the calendar
+           every Wednesday. <a href="/updates/feed.xml">Subscribe via RSS</a>.</p>
     </header>
 
     {% if posts %}
@@ -38,14 +38,15 @@
             <h2><a href="{{ post.url }}">{{ post.title }}</a></h2>
             <p class="update-meta">
                 <time datetime="{{ post.published_on.strftime('%Y-%m-%d') }}">{{ post.date_formatted }}</time>
-                {% if post.kind == 'weekly' %}<span class="update-badge">Weekly roundup</span>{% endif %}
+                {% if post.kind == 'link' %}<span class="update-badge">The week ahead</span>
+                {% elif post.kind == 'weekly' %}<span class="update-badge">Weekly roundup</span>{% endif %}
             </p>
             {% if post.summary %}<p class="update-summary">{{ post.summary }}</p>{% endif %}
         </li>
         {% endfor %}
     </ul>
     {% else %}
-    <p>No updates have been published yet. The first roundup goes out Wednesday.</p>
+    <p>No updates have been published yet. The first post goes out Monday.</p>
     {% endif %}
 </div>
 {% endblock %}

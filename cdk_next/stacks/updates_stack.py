@@ -1,29 +1,37 @@
-"""NextUpdatesStack — the weekly /updates post publisher.
+"""NextUpdatesStack — the /updates post publishers.
 
-Replaces the external Bear Blog at updates.dctech.events. A Wednesday-morning
-Lambda snapshots every event *added* in the previous seven days into a single
-UPDATE#{publish_date} item; the events table's stream then fires the existing
-debounced rebuild, so the post is live on /updates/ within a couple of minutes
-with no extra build wiring here.
+Replaces the external Bear Blog at updates.dctech.events. One Lambda on two
+schedules writes UPDATE#{publish_date} items; the events table's stream then
+fires the existing debounced rebuild, so a post is live on /updates/ within a
+couple of minutes with no extra build wiring here.
+
+* **Monday 10:30 UTC** (mode: week_ahead) posts a *link post* — an entry on
+  /updates/ and in its feed whose link goes straight to /week/<week_id>/ for
+  the week just starting. It builds no page of its own.
+* **Wednesday 11:00 UTC** posts a *roundup* — a frozen snapshot of every event
+  added in the previous seven days, plus the ARCHIVE# capture of next week that
+  the following Monday's post will point at.
 
 That rebuild only happens because UPDATE# is listed in the site generator
 trigger's RELEVANT_PREFIXES (lambda_src/site_generator/trigger/handler.py).
 Drop it from that allowlist and posts go invisible until the daily
 safety-net build.
 
-The snapshot is the whole point. calgen's pipeline and get_events() both drop
-events dated before today, so a post rendered from live data would empty out
-as the events it announced happened — freezing the listing at publish time is
-what gives the archive permanent content.
+The roundup's snapshot is the whole point of that post's shape. calgen's
+pipeline and get_events() both drop events dated before today, so a post
+rendered from live data would empty out as the events it announced happened —
+freezing the listing at publish time is what gives the archive permanent
+content. The Monday post can get away with storing no listing — and with owning no page
+at all — only because /week/ has an ARCHIVE# capture of its own.
 
-Posts published before 2026-08-12 are keyed UPDATE#{iso_week} and list the
-events *happening* that week, which is what the post used to be. Both shapes
-render, because each snapshot carries its own title and summary.
+Three post shapes render, not two: posts published before 2026-08-12 are keyed
+UPDATE#{iso_week} and list the events *happening* that week, which is what the
+post used to be. All of them work, because each item carries its own title and
+summary and calgen keys the rendering off post_kind.
 
-The same stream also feeds a social publisher that cross-posts the permalink
-to Mastodon and Bluesky. It lives here rather than inside the weekly
-publisher so that free-form POST# announcements written in /edit are
-syndicated by the same code — see lambda_src/social_publisher/app.py.
+The same stream also feeds a social publisher that cross-posts to Mastodon and
+Bluesky — every UPDATE# kind, and free-form POST# announcements written in
+/edit, all through the same code. See lambda_src/social_publisher/app.py.
 """
 import os
 
@@ -83,14 +91,35 @@ class NextUpdatesStack(cdk.Stack):
         # scanning EVENT# createdAt, which only the table records.
         table.grant_read_write_data(self.publisher_function)
 
+        # Two rules, one function. Wednesday 11:00 UTC is 7 AM EDT / 6 AM EST
+        # — up before the workday and ahead of the 13:30 UTC daily ops mail.
         events.Rule(
             self,
             "NextUpdatesPublishSchedule",
-            # Wednesday 11:00 UTC — 7 AM EDT / 6 AM EST, so the post is up
-            # before the workday and ahead of the 13:30 UTC daily ops mail.
             schedule=events.Schedule.expression("cron(0 11 ? * WED *)"),
             targets=[targets.LambdaFunction(self.publisher_function)],
-            description="Publish the weekly dctech.events /updates post",
+            description="Publish the Wednesday dctech.events /updates roundup",
+        )
+
+        # The Monday "week ahead" link post. A separate rule rather than a
+        # separate function: it is the same events.json read and the same
+        # write-once-per-day put, differing only in what it stores.
+        #
+        # 10:30 UTC, half an hour ahead of the Monday 11:00 newsletter send,
+        # so the two do not go out on top of each other.
+        events.Rule(
+            self,
+            "NextUpdatesWeekAheadSchedule",
+            schedule=events.Schedule.expression("cron(30 10 ? * MON *)"),
+            targets=[targets.LambdaFunction(
+                self.publisher_function,
+                event=events.RuleTargetInput.from_object(
+                    {"mode": "week_ahead"}
+                ),
+            )],
+            description=(
+                "Publish the Monday dctech.events /updates week-ahead link post"
+            ),
         )
 
         cdk.CfnOutput(
@@ -99,7 +128,8 @@ class NextUpdatesStack(cdk.Stack):
             value=self.publisher_function.function_name,
             description=(
                 "Invoke with {\"published_on\": \"YYYY-MM-DD\"} to republish a "
-                "week (add \"dry_run\": true to preview it first)"
+                "roundup, or add \"mode\": \"week_ahead\" for the Monday link "
+                "post (\"dry_run\": true previews, \"force\": true overwrites)"
             ),
         )
 

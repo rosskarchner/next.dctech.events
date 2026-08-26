@@ -1,14 +1,27 @@
-"""Publish the weekly /updates post: everything added to the calendar this week.
+"""Publish the two weekly /updates posts.
 
-Runs Wednesday morning. Snapshots every event *added* in the previous seven
-days into a single `UPDATE#{publish_date}` DynamoDB item; the table's stream
-then triggers the usual debounced site rebuild, which renders
-/updates/<y>/<m>/<d>/ within ~90s.
+One function, two schedules, two shapes of `UPDATE#{publish_date}` item. Either
+write goes down the table's stream, which triggers the usual debounced site
+rebuild and renders /updates/<y>/<m>/<d>/ within ~90s, and also reaches the
+social publisher, which cross-posts it to Mastodon and Bluesky.
 
-Why a snapshot instead of rendering the post live: calgen's pipeline and
-`get_events()` both drop events dated before today, so a post rendered from
+* **Monday — the week ahead** (`mode: week_ahead`). A *link post*: title,
+  blurb, and a pointer at /week/<week_id>/. It stores no listing and builds no
+  page — see `_week_ahead_item`.
+* **Wednesday — what's new** (the default). A *roundup*: a frozen snapshot of
+  every event added in the previous seven days.
+
+Why the roundup is a snapshot and not a rendered view: calgen's pipeline and
+`get_events()` both drop anything dated before today, so a post rendered from
 live data would empty out as the events it announced happened. Freezing the
-listing at publish time is what makes the archive permanent.
+listing at publish time is what makes the archive permanent. The Monday post
+escapes that constraint by pointing at a page that has its own frozen capture.
+
+The Wednesday run also writes the ARCHIVE# capture of the *following* week,
+which is what Monday's post will point at — the two are the same pipeline read
+end to end.
+
+Everything below the two entry points describes the roundup.
 
 Two sources, each answering the question it is authoritative for:
 
@@ -49,6 +62,12 @@ EVENTS_URL = os.environ.get("EVENTS_URL", "https://dctech.events/events.json")
 # [publish_date - 7, publish_date) — so consecutive Wednesdays tile the
 # calendar exactly: nothing is announced twice, nothing falls between posts.
 WINDOW_DAYS = 7
+
+# Which post a run writes. Two EventBridge rules invoke this one function:
+# Monday's passes MODE_WEEK_AHEAD, Wednesday's passes nothing and gets the
+# roundup, which is also what a bare manual invoke still does.
+MODE_ROUNDUP = "roundup"
+MODE_WEEK_AHEAD = "week_ahead"
 
 # Fields worth freezing; anything else is presentation the templates re-derive.
 SNAPSHOT_FIELDS = (
@@ -141,6 +160,16 @@ def _events_added_in_window(events, by_guid, by_title, start, end):
     return selected
 
 
+def _this_week_bounds(publish_date):
+    """Monday and Sunday of the ISO week *containing* publish_date.
+
+    Companion to _next_week_bounds. The Monday post is about the week the
+    reader is standing in, not the one after it.
+    """
+    monday = publish_date - timedelta(days=publish_date.weekday())
+    return monday, monday + timedelta(days=6)
+
+
 def _next_week_bounds(publish_date):
     """Monday and Sunday of the ISO week *after* the one containing publish_date."""
     monday_this_week = publish_date - timedelta(days=publish_date.weekday())
@@ -165,29 +194,65 @@ def _events_in_week(all_events, monday, sunday):
     return selected
 
 
-def _archive_item(all_events, publish_date, today):
-    """The ARCHIVE# row for the week after publish_date, or None to skip it.
+def _archive_weeks(publish_date):
+    """The ISO weeks a run captures: the current one and the next.
 
-    Guarded against `today`, not `publish_date`, and that distinction is the
-    whole point. Targeting the week after publish_date always lands in the
-    future on a normal Wednesday run — but the handler accepts a
-    `published_on` override for re-running an old post, and under that
-    override the target week can already be over. events.json only ever
-    holds upcoming events, so capturing a finished week yields an empty or
-    truncated list, and writing it would destroy a good capture rather than
-    refresh it. Skipping is the only safe answer.
+    The current week is in the list because a capture accumulates rather than
+    replaces (see `_merge_week_events`). A single capture taken up to twelve
+    days early permanently missed anything added afterwards; re-merging the
+    week that is actually under way is what closes that gap.
     """
-    monday, sunday = _next_week_bounds(publish_date)
-    if monday <= today:
-        return None
-    events = _events_in_week(all_events, monday, sunday)
+    return [_this_week_bounds(publish_date), _next_week_bounds(publish_date)]
+
+
+def _merge_week_events(stored, live, today):
+    """A week's capture, accumulated instead of overwritten.
+
+    Split at `today`, because each side is authoritative for exactly one half:
+
+    * **Before today** the stored capture is the only record there is —
+      events.json holds nothing dated earlier, and organizers' feeds drop past
+      events too. Kept verbatim. This is what stops events from disappearing
+      as they happen.
+    * **Today onward** live data wins outright. It carries everything added
+      since the last merge, and it also reflects events that have since been
+      cancelled or deleted — which a plain union of the two sides would
+      quietly resurrect.
+
+    The halves are disjoint by date, so nothing has to be de-duplicated.
+
+    A pleasant consequence: capturing a week that is already over is now
+    harmless rather than destructive. The old one-shot capture had to refuse
+    it, because writing what events.json holds for a finished week meant
+    writing an empty list over a good snapshot.
+    """
+    cutoff = today.strftime("%Y-%m-%d")
+    merged = [e for e in stored if e.get("date") and e["date"] < cutoff]
+    merged += [e for e in live if e.get("date") and e["date"] >= cutoff]
+    merged.sort(key=lambda e: (e.get("date", ""), e.get("time") or ""))
+    return merged
+
+
+def _archive_item(stored_events, all_events, monday, sunday, today):
+    """The ARCHIVE# row for one ISO week, merged onto what is already stored.
+
+    Always returns an item: an empty week is a fact worth recording, since it
+    is what keeps /week/ from 404ing and what distinguishes "nothing on" from
+    "never captured".
+    """
+    week_id = _week_id(monday)
+    events = _merge_week_events(
+        stored_events, _events_in_week(all_events, monday, sunday), today
+    )
     return {
-        "PK": f"ARCHIVE#{_week_id(monday)}",
+        "PK": f"ARCHIVE#{week_id}",
         # SK=META keeps this inside the site exporter's existing scan.
         "SK": "META",
-        "week_id": _week_id(monday),
+        "week_id": week_id,
         "week_start": monday.strftime("%Y-%m-%d"),
         "week_end": sunday.strftime("%Y-%m-%d"),
+        # When the capture last took anything in, not when it began. A week is
+        # merged repeatedly now rather than captured once.
         "captured_at": datetime.now(timezone.utc)
                                .isoformat(timespec="seconds")
                                .replace("+00:00", "Z"),
@@ -196,23 +261,155 @@ def _archive_item(all_events, publish_date, today):
     }
 
 
-def _summarize(events, start, last_day, max_titles=3):
-    """The blurb calgen shows on /updates and in the feed."""
-    span = f"{start.strftime('%B %-d')}–{last_day.strftime('%-d')}"
-    if start.month != last_day.month:
-        span = f"{start.strftime('%B %-d')}–{last_day.strftime('%B %-d')}"
+def _stored_week_events(table, week_id):
+    item = table.get_item(
+        Key={"PK": f"ARCHIVE#{week_id}", "SK": "META"}
+    ).get("Item") or {}
+    return item.get("events") or []
 
-    count = len(events)
-    if not count:
-        return f"No new events were added between {span}."
 
+def _refresh_archives(table, all_events, publish_date, today):
+    """Merge and write this week's and next week's captures.
+
+    Runs on both schedules. Monday's is the valuable one for the current
+    week — it folds in everything added over the weekend, right as the week
+    the link post points at begins.
+    """
+    items = []
+    for monday, sunday in _archive_weeks(publish_date):
+        stored = _stored_week_events(table, _week_id(monday))
+        items.append(_archive_item(stored, all_events, monday, sunday, today))
+    return items
+
+
+def _span(start, last_day):
+    """August 5-11, or August 28-September 3 when it crosses a month."""
+    if start.month == last_day.month:
+        return f"{start.strftime('%B %-d')}–{last_day.strftime('%-d')}"
+    return f"{start.strftime('%B %-d')}–{last_day.strftime('%B %-d')}"
+
+
+def _count_phrase(events):
+    return f"{len(events)} event{'s' if len(events) != 1 else ''}"
+
+
+def _blurb(events, max_titles=3):
+    """"Python DC, DC Ruby, and 24 more" — the tail both summaries share."""
     titles = [e["title"] for e in events if e.get("title")][:max_titles]
     blurb = ", ".join(titles)
-    remaining = count - len(titles)
+    remaining = len(events) - len(titles)
     if remaining > 0:
         blurb += f", and {remaining} more"
-    plural = "s" if count != 1 else ""
-    return f"{count} event{plural} added between {span}: {blurb}."
+    return blurb
+
+
+def _summarize(events, start, last_day, max_titles=3):
+    """The blurb calgen shows on /updates and in the feed."""
+    span = _span(start, last_day)
+    if not events:
+        return f"No new events were added between {span}."
+    return (f"{_count_phrase(events)} added between {span}: "
+            f"{_blurb(events, max_titles)}.")
+
+
+def _summarize_week_ahead(events, monday, sunday, max_titles=3):
+    """The blurb for a link post: what is on, not what is new."""
+    span = _span(monday, sunday)
+    if not events:
+        return f"Nothing is on the calendar for {span} yet."
+    return (f"{_count_phrase(events)} on the calendar for {span}: "
+            f"{_blurb(events, max_titles)}.")
+
+
+def _week_ahead_item(all_events, publish_date):
+    """The Monday post: a pointer at /week/, not a second copy of the listing.
+
+    Deliberately carries no `events` key, which is what makes it a *link*
+    post rather than a snapshot. The Wednesday roundup has to freeze its
+    listing because nothing else records what was added that week; this post
+    does not, because /week/<week_id>/ already merges live events with the
+    ARCHIVE# capture the previous Wednesday's run took of this very week. The
+    link therefore keeps working after the week is over, which is the whole
+    reason this post can be a pointer at all — and why it needs no page under
+    /updates/ either. calgen renders it as an entry on the index and in the
+    feed whose link goes straight to `link_url`.
+    """
+    monday, sunday = _this_week_bounds(publish_date)
+    week_id = _week_id(publish_date)
+    events = _events_in_week(all_events, monday, sunday)
+    return {
+        "PK": f"UPDATE#{publish_date:%Y-%m-%d}",
+        "SK": "META",
+        # What tells calgen to render this as a link post instead of a
+        # listing. Absent on roundups, so they are unaffected.
+        "post_kind": "link",
+        "week_id": week_id,
+        # What dates the entry on /updates/ and orders it in the feed. No
+        # `week_start`: that field exists to file a post at
+        # /updates/<y>/<m>/<d>/, and a link post has no page there.
+        "published_on": publish_date.strftime("%Y-%m-%d"),
+        # Stored rather than derived in calgen so a re-point (say, at a month
+        # page) is a data change and not a deploy. It is also the post's only
+        # URL — the index, the feed and the social post all use it.
+        "link_url": f"/week/{week_id}/",
+        "title": f"DC Tech Events for the week of {monday.strftime('%B %-d, %Y')}",
+        "summary": _summarize_week_ahead(events, monday, sunday),
+        "published_at": datetime.now(timezone.utc)
+                                .isoformat(timespec="seconds")
+                                .replace("+00:00", "Z"),
+        "event_count": len(events),
+    }
+
+
+def _put_post(table, item, *, force=False):
+    """Write a post unless one is already published for that day.
+
+    Shared by both post kinds: a published post is a record of what was said
+    at the time, so a re-run must not silently rewrite it. `force` exists for
+    manual correction of a bad run.
+    """
+    try:
+        kwargs = {} if force else {
+            "ConditionExpression": "attribute_not_exists(PK)"
+        }
+        table.put_item(Item=item, **kwargs)
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            print(f"{item['PK']} already published; leaving it alone.")
+            return "already_published"
+        raise
+    return "published"
+
+
+def _publish_week_ahead(event, publish_date, today):
+    """The Monday run. See _week_ahead_item for why it stores no listing."""
+    all_events = _fetch_events()
+    table = _dynamodb.Table(TABLE_NAME)
+    item = _week_ahead_item(all_events, publish_date)
+    archives = _refresh_archives(table, all_events, publish_date, today)
+
+    if event.get("dry_run"):
+        print(json.dumps(item, indent=2))
+        for archive in archives:
+            print(json.dumps(archive, indent=2))
+        return {"status": "dry_run", "item": item, "archives": archives}
+
+    # Before the post, so a retry after a partial failure re-does both in a
+    # consistent order. Unconditional: a merge only ever adds to a capture.
+    _write_archives(table, archives)
+
+    status = _put_post(table, item, force=bool(event.get("force")))
+    if status == "published":
+        print(f"Published {item['PK']} -> {item['link_url']} "
+              f"({item['event_count']} events).")
+    return {"published_on": item["published_on"], "status": status,
+            "mode": MODE_WEEK_AHEAD, "event_count": item["event_count"]}
+
+
+def _write_archives(table, archives):
+    for archive in archives:
+        table.put_item(Item=archive)
+        print(f"Archived {archive['PK']} with {archive['event_count']} events.")
 
 
 def lambda_handler(event, context):
@@ -220,6 +417,10 @@ def lambda_handler(event, context):
     publish_date = datetime.now(timezone.utc).date()
     if event.get("published_on"):
         publish_date = datetime.strptime(event["published_on"], "%Y-%m-%d").date()
+
+    today = datetime.now(timezone.utc).date()
+    if (event.get("mode") or MODE_ROUNDUP) == MODE_WEEK_AHEAD:
+        return _publish_week_ahead(event, publish_date, today)
 
     start, end = _window(publish_date)
     last_day = end - timedelta(days=1)
@@ -254,41 +455,25 @@ def lambda_handler(event, context):
         "events": new_events,
     }
 
-    archive = _archive_item(all_events, publish_date,
-                            datetime.now(timezone.utc).date())
+    archives = _refresh_archives(table, all_events, publish_date, today)
 
     if event.get("dry_run"):
         print(json.dumps(item, indent=2))
-        if archive:
+        for archive in archives:
             print(json.dumps(archive, indent=2))
-        return {"status": "dry_run", "item": item, "archive": archive}
+        return {"status": "dry_run", "item": item, "archives": archives}
 
-    # Written before the post, and unconditionally. The archive is a capture
-    # of a week still in the future, so a re-run only ever replaces it with a
-    # fresher capture of the same week; doing it first means a retry after a
-    # partial failure re-does both in a consistent order.
-    if archive:
-        _dynamodb.Table(TABLE_NAME).put_item(Item=archive)
-        print(f"Archived {archive['PK']} with {archive['event_count']} events.")
+    # Written before the post, and unconditionally. A merge only ever adds to
+    # a capture, so a re-run cannot damage one; doing it first means a retry
+    # after a partial failure re-does both in a consistent order.
+    _write_archives(table, archives)
 
-    try:
-        # Never silently rewrite a published post: the archive is supposed to
-        # be a record of what was new that week. `force` exists for manual
-        # correction of a bad run.
-        kwargs = {} if event.get("force") else {
-            "ConditionExpression": "attribute_not_exists(PK)"
-        }
-        table.put_item(Item=item, **kwargs)
-    except ClientError as exc:
-        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            print(f"Post for {publish_date} already published; leaving it alone.")
-            return {"published_on": item["published_on"],
-                    "status": "already_published"}
-        raise
-
-    print(f"Published {item['PK']} with {len(new_events)} events.")
+    status = _put_post(table, item, force=bool(event.get("force")))
+    if status == "published":
+        print(f"Published {item['PK']} with {len(new_events)} events.")
     return {
         "published_on": item["published_on"],
-        "status": "published",
+        "status": status,
+        "mode": MODE_ROUNDUP,
         "event_count": len(new_events),
     }

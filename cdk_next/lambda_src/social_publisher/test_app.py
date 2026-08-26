@@ -261,3 +261,73 @@ def test_link_facet_covers_the_composed_post():
 
 def test_no_facets_when_there_is_no_link():
     assert networks.link_facets("just some words") == []
+
+
+# ── the Monday link post ─────────────────────────────────────────────
+
+
+def _link_post(**overrides):
+    item = {
+        "PK": "UPDATE#2026-08-31",
+        "SK": "META",
+        "post_kind": "link",
+        "week_id": "2026-W36",
+        "published_on": "2026-08-31",
+        "week_start": "2026-08-31",
+        "link_url": "/week/2026-W36/",
+        "title": "DC Tech Events for the week of August 31, 2026",
+        "summary": "23 events on the calendar for August 31–September 6: A, B, C.",
+        "event_count": Decimal("23"),
+    }
+    item.update(overrides)
+    return item
+
+
+def test_link_post_syndicates_its_target_not_its_permalink():
+    # A link post is its link; sending readers via /updates/ would be two hops
+    # to the listing the post exists to point at.
+    assert app._describe(_link_post())["url"] == \
+        "https://dctech.events/week/2026-W36/"
+
+
+def test_link_post_keeps_its_title_and_stored_summary():
+    post = app._describe(_link_post())
+    assert post["title"] == "DC Tech Events for the week of August 31, 2026"
+    assert post["summary"].startswith("23 events on the calendar")
+
+
+def test_link_post_is_still_keyed_on_its_own_pk_for_dedupe():
+    # The SOCIAL# record follows the post, not the target, so re-pointing a
+    # link post cannot cause a repost.
+    assert app._describe(_link_post())["pk"] == "UPDATE#2026-08-31"
+
+
+def test_link_post_with_no_target_falls_back_to_its_week_page():
+    # Never the /updates/ path: it is not built for a link post, so
+    # announcing it would be announcing a 404.
+    assert app._describe(_link_post(link_url=""))["url"] == \
+        "https://dctech.events/week/2026-W36/"
+
+
+def test_link_post_with_nothing_to_point_at_is_not_announced():
+    assert app._describe(_link_post(link_url="", week_id="")) is None
+
+
+def test_link_post_accepts_an_absolute_target():
+    item = _link_post(link_url="https://example.com/elsewhere/")
+    assert app._describe(item)["url"] == "https://example.com/elsewhere/"
+
+
+def test_a_roundup_ignores_a_stray_link_url():
+    # Only post_kind switches the behaviour, so a roundup that happens to
+    # carry link_url still syndicates its own permalink.
+    item = _weekly(link_url="/week/2026-W33/")
+    assert app._describe(item)["url"] == \
+        "https://dctech.events/updates/2026/8/10/"
+
+
+def test_link_post_composes_title_summary_and_target():
+    text = app.compose(app._describe(_link_post()), app.MASTODON_CHAR_LIMIT)
+    assert text.splitlines()[0] == \
+        "DC Tech Events for the week of August 31, 2026"
+    assert text.endswith("https://dctech.events/week/2026-W36/")

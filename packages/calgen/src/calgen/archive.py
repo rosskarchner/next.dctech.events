@@ -3,21 +3,23 @@
 `get_events()` and the pipeline both drop anything dated before today, and
 organizers' feeds drop past events too, so once a week is over there is no
 way to reconstruct what the calendar showed for it. The updates publisher
-therefore captures each ISO week the Wednesday *before* it starts and writes
-an `ARCHIVE#<week_id>` row; the site exporter lands those in `_archive/`.
+writes an `ARCHIVE#<week_id>` row for the current and coming week on every
+run, merging into whatever is already stored rather than replacing it; the
+site exporter lands those in `_archive/`.
 
 This module is a pure read of those files — it never invents a week. Two
 consequences worth knowing:
 
 * Coverage starts when archiving started. Weeks before that are simply gone,
   and no code here pretends otherwise.
-* A capture is taken up to a week ahead, so an event added after the capture
-  will be missing from it. The archive is "what the calendar showed", which
-  is close to but not identical with "what happened".
+* Because captures accumulate, a week is only as complete as the last merge
+  before it ended — an event added and held on the same day could slip
+  through. In practice a week is merged at least twice while it is still
+  upcoming and once while it is under way.
 
-Merging with live data is the caller's job — see `merge_events` — because for
-the current week and month both sources are partly right: the archive holds
-the days already past, live data holds the rest.
+Merging with live data is *also* the caller's job — see `merge_events` —
+because for the current week and month both sources are partly right: the
+archive holds the days already past, live data holds the rest.
 """
 import os
 

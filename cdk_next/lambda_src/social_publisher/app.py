@@ -1,11 +1,15 @@
 """Cross-post new /updates posts to Mastodon and Bluesky.
 
 Fed by the events table's DynamoDB stream rather than called from the
-publishers, so it covers both kinds of /updates post from one place: the
-Wednesday `UPDATE#{publish_date}` roundup written by the updates publisher, and
-the free-form `POST#{slug}` announcements published through /edit. Neither writer
-has to know this exists, and a social API outage can never block or duplicate
-the DynamoDB write that produced the post.
+publishers, so it covers every kind of /updates post from one place: the Monday
+`UPDATE#{publish_date}` week-ahead link post and the Wednesday roundup of the
+same key shape, both written by the updates publisher, and the free-form
+`POST#{slug}` announcements published through /edit. No writer has to know this
+exists, and a social API outage can never block or duplicate the DynamoDB write
+that produced the post.
+
+A link post has no page under /updates/, so it syndicates its target — see
+`_syndicated_url`.
 
 Idempotency is a `SOCIAL#{target_pk}` record holding the ids of whatever has
 already been posted. Streams deliver at least once and a failed batch is
@@ -108,6 +112,30 @@ def _first_paragraph(body):
     return ""
 
 
+def _syndicated_url(item, permalink):
+    """Which URL the social post carries.
+
+    A link post has no page under /updates/ — its link *is* its content — so
+    it syndicates its target. Every other post syndicates its own permalink.
+
+    The fallback for a link post is its week page, not `permalink`: that path
+    is never built for a link post, so handing it to Mastodon would be
+    announcing a 404.
+    """
+    if str(item.get("post_kind") or "") != "link":
+        return permalink
+
+    link_url = str(item.get("link_url") or "").strip()
+    if not link_url:
+        week_id = str(item.get("week_id") or "").strip()
+        if not week_id:
+            return None
+        link_url = f"/week/{week_id}/"
+    if link_url.startswith(("http://", "https://")):
+        return link_url
+    return f"{SITE_BASE_URL}/{link_url.lstrip('/')}"
+
+
 def _describe(item):
     """The post as {pk, title, summary, url}, or None if it is not postable."""
     pk = str(item.get("PK", ""))
@@ -120,15 +148,21 @@ def _describe(item):
             return None
         week_start = date.fromisoformat(str(raw_start))
         formatted = week_start.strftime("%B %-d, %Y")
+        # Unpadded on purpose: Flask's <int:> converter renders 8, not 08, so
+        # a zero-padded path is one the site never actually serves.
+        permalink = (f"{SITE_BASE_URL}/updates/{week_start.year}"
+                     f"/{week_start.month}/{week_start.day}/")
+        url = _syndicated_url(item, permalink)
+        if not url:
+            # A link post with nothing to point at. Nothing to announce, and
+            # better to say so than to publish a dead link.
+            return None
         return {
             "pk": pk,
             "title": str(item.get("title") or
                          f"DC Tech Events for the week of {formatted}"),
             "summary": _week_summary(item),
-            # Unpadded on purpose: Flask's <int:> converter renders 8, not 08,
-            # so a zero-padded path is one the site never actually serves.
-            "url": (f"{SITE_BASE_URL}/updates/{week_start.year}"
-                    f"/{week_start.month}/{week_start.day}/"),
+            "url": url,
         }
 
     if pk.startswith("POST#"):

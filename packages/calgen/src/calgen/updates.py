@@ -1,10 +1,10 @@
-"""The /updates blog — two kinds of post, one timeline.
+"""The /updates blog — three kinds of post, one timeline.
 
-*Weekly roundups* are snapshots, not derived views. `get_events()` and the
-pipeline both drop anything older than today, so a roundup rendered from live
-event data would quietly empty out as the events in it happened. A publisher
-instead writes one YAML file per week into `_updates/` at publish time,
-freezing that week's listing.
+*Weekly roundups* (`kind: 'weekly'`) are snapshots, not derived views.
+`get_events()` and the pipeline both drop anything older than today, so a
+roundup rendered from live event data would quietly empty out as the events in
+it happened. A publisher instead writes one YAML file per week into
+`_updates/` at publish time, freezing that week's listing.
 
 What a roundup lists changed on 2026-08-12: posts from then on carry a
 `published_on` date and list the events *added* that week, while older ones are
@@ -12,12 +12,23 @@ filed under `week_start` and list the events *happening* that week. Nothing
 here has to know which is which — a snapshot carries its own title and its own
 `summary`, so both render as themselves.
 
-*Free-form posts* are hand-written announcements authored in /edit, exported to
-`_posts/` as YAML with a Markdown body. They carry their own slug and date
-rather than being tied to a week.
+*Link posts* (`kind: 'link'`) are the Monday "week ahead" post: a title, a
+blurb, and a `link_url` pointing at /week/<week_id>/. They live in `_updates/`
+alongside roundups and are told apart by a `post_kind: link` key.
 
-Both are pure reads of on-disk files — this module never invents a post — and
-`get_all_posts()` interleaves them by date for the index and the feed.
+Two things make them unlike the others. They carry no events — they do not have
+to freeze a listing, because the page they point at merges live events with its
+own `_archive/` capture, so the link keeps working after the week is over. And
+they build no page: a link post's `url` *is* its target, so it appears on
+/updates/ and in the feed but sends the reader straight to the week. See
+`get_paged_update_posts`.
+
+*Free-form posts* (`kind: 'post'`) are hand-written announcements authored in
+/edit, exported to `_posts/` as YAML with a Markdown body. They carry their own
+slug and date rather than being tied to a week.
+
+All three are pure reads of on-disk files — this module never invents a post —
+and `get_all_posts()` interleaves them by date for the index and the feed.
 """
 import os
 from datetime import date, datetime
@@ -73,14 +84,25 @@ def _load_post(path):
     # Unpadded to match Flask's <int:> converter (and _month_url's existing
     # /{year}/{month}/ convention) — a padded literal here would not match the
     # path Frozen-Flask actually writes.
-    post['url'] = f"/updates/{filed_on.year}/{filed_on.month}/{filed_on.day}/"
     post['week_url'] = f"/week/{data['week_id']}/"
     post['week_start_formatted'] = filed_on.strftime('%B %-d, %Y')
     if not post.get('title'):
         post['title'] = (
             f"DC Tech Events for the week of {post['week_start_formatted']}"
         )
-    post['kind'] = 'weekly'
+    # A link post points somewhere instead of listing anything; the publisher
+    # says which by writing `post_kind`, and only ever writes it for those.
+    post['kind'] = 'link' if data.get('post_kind') == 'link' else 'weekly'
+    # Stored by the publisher so the target can be changed without a deploy,
+    # but defaulted here so a link post is never left with a dead link.
+    post['link_url'] = str(data.get('link_url') or '').strip() or post['week_url']
+    # A link post's `url` is its target: it builds no page under /updates/, so
+    # the index, the feed and the sitemap all send readers straight to the week
+    # it is announcing. Every other kind links the page it owns.
+    post['url'] = (
+        post['link_url'] if post['kind'] == 'link'
+        else f"/updates/{filed_on.year}/{filed_on.month}/{filed_on.day}/"
+    )
     post['published_on'] = filed_on
     post['date_formatted'] = post['week_start_formatted']
     return post
@@ -144,7 +166,7 @@ def get_free_post(slug):
 
 
 def get_all_posts():
-    """Weekly roundups and free-form posts interleaved, newest first."""
+    """Every kind of post interleaved by date, newest first."""
     posts = get_update_posts() + get_free_posts()
     # Slug is a stable tiebreaker so a free-form post published on a Monday
     # does not reorder between builds relative to that week's roundup.
@@ -170,9 +192,20 @@ def get_update_posts():
     return posts
 
 
+def get_paged_update_posts():
+    """The posts that own a page under /updates/.
+
+    Link posts do not: they are index-and-feed entries whose link goes
+    straight to /week/. Both the Frozen-Flask generator and the route below
+    read this rather than get_update_posts(), so a link post can never build a
+    page and its /updates/ path stays a 404.
+    """
+    return [post for post in get_update_posts() if post['kind'] != 'link']
+
+
 def get_update_post(year, month, day):
-    """The post whose week starts on the given date, or None."""
-    for post in get_update_posts():
+    """The post filed on the given date that owns a page, or None."""
+    for post in get_paged_update_posts():
         if (post['year'], post['month'], post['day']) == (year, month, day):
             return post
     return None
@@ -213,6 +246,11 @@ def summarize(post, max_titles=3):
     """Short human blurb used in the index and in feed descriptions."""
     if post.get('kind') == 'post':
         return _summarize_free_post(post)
+
+    # A link post stores no events, so there is nothing to derive a blurb
+    # from; the publisher always writes one.
+    if post.get('kind') == 'link':
+        return str(post.get('summary') or '').strip()
 
     # A roundup written from 2026-08-12 on states its own span ("12 events
     # added between August 5–11"), which nothing here could reconstruct: the

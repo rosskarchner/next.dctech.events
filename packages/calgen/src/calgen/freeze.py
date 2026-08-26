@@ -7,7 +7,7 @@ from calgen.app import (
     get_category_month_combos, get_events_by_slug, get_all_week_ids, get_all_months,
     get_recently_added,
 )
-from calgen.updates import get_free_posts, get_update_posts
+from calgen.updates import get_free_posts, get_paged_update_posts
 from calgen.site_config import get_config
 
 
@@ -123,7 +123,10 @@ def create_freezer(app):
 
     @freezer.register_generator
     def update_post():
-        for post in get_update_posts():
+        # Paged posts only. A link post's URL is the /week/ page it points at,
+        # which week_page already builds; generating /updates/<y>/<m>/<d>/ for
+        # one would freeze a page nothing links to.
+        for post in get_paged_update_posts():
             yield {'year': post['year'],
                    'month': post['month'],
                    'day': post['day']}

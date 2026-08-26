@@ -436,9 +436,10 @@ def _register_routes(app):
 
         Two deliberate omissions. `changefreq` is gone entirely — Google has
         not used it for years, and it was never a request anyway. `lastmod` is
-        emitted only for /updates posts, where `published_on` is a real
-        content date; every listing page is derived from the current event set
-        and has no per-page change date we can compute. Stamping build time on
+        emitted only for the /updates posts that own a page, where
+        `published_on` is a real content date; every listing page is derived
+        from the current event set and has no per-page change date we can
+        compute. Stamping build time on
         all of them, as this function used to, is worse than saying nothing:
         it makes every URL look freshly changed on every rebuild, and crawlers
         respond by discounting the field sitewide.
@@ -485,6 +486,10 @@ def _register_routes(app):
 
         urls.append({'loc': f"{base_url}/updates/"})
         for post in get_all_posts():
+            # A link post's url is the /week/ page it points at, already
+            # listed above — emitting it again would duplicate a <loc>.
+            if post.get('kind') == 'link':
+                continue
             urls.append({'loc': f"{base_url}{post['url']}",
                          'lastmod': post['published_on'].strftime('%Y-%m-%d')})
 
@@ -1362,6 +1367,11 @@ def _generate_updates_rss(posts, site_name, base_url):
             # Free-form posts carry their own rendered prose; the Markdown is
             # already HTML by this point, so ship it as the whole item body.
             body = [post.get('body_html', '')]
+        elif post.get('kind') == 'link':
+            # The item's own link is already the week page, so a "see the full
+            # week" link underneath it would point at where the reader is
+            # going anyway.
+            body = [f"<p>{summarize(post)}</p>"]
         else:
             body = [f"<p>{summarize(post)}</p>"]
             # A roundup of what was *added* spans months, so pointing at one

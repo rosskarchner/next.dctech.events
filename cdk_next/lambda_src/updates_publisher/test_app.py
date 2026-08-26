@@ -250,9 +250,16 @@ def test_event_without_a_date_is_skipped_rather_than_raising():
     assert scheduled(events, date(2026, 8, 17), date(2026, 8, 23)) == ["Dated"]
 
 
-def test_archive_item_is_keyed_and_bounded_by_the_coming_week():
+def archived(stored, live, today, monday=date(2026, 8, 17),
+             sunday=date(2026, 8, 23)):
+    item = app._archive_item(stored, live, monday, sunday, today)
+    return [e["title"] for e in item["events"]]
+
+
+def test_archive_item_is_keyed_and_bounded_by_its_week():
     events = [{"title": "Meetup", "date": "2026-08-18"}]
-    item = app._archive_item(events, date(2026, 8, 12), date(2026, 8, 12))
+    item = app._archive_item([], events, date(2026, 8, 17), date(2026, 8, 23),
+                             date(2026, 8, 12))
     assert item["PK"] == "ARCHIVE#2026-W34"
     assert item["SK"] == "META"
     assert (item["week_start"], item["week_end"]) == ("2026-08-17", "2026-08-23")
@@ -262,29 +269,287 @@ def test_archive_item_is_keyed_and_bounded_by_the_coming_week():
 def test_archive_item_is_written_even_when_the_week_is_empty():
     """An empty week is a fact worth recording — it is what stops the page
     from 404ing, and it distinguishes 'nothing on' from 'never captured'."""
-    item = app._archive_item([], date(2026, 8, 12), date(2026, 8, 12))
+    item = app._archive_item([], [], date(2026, 8, 17), date(2026, 8, 23),
+                             date(2026, 8, 12))
     assert item is not None
     assert item["event_count"] == 0
     assert item["events"] == []
 
 
-def test_backdated_rerun_does_not_overwrite_a_finished_week():
-    """A manual re-run passes `published_on`, which can point at a week that
-    is already over. events.json holds only upcoming events, so capturing it
-    now would write an empty list over a good capture."""
-    publish, today = date(2026, 8, 12), date(2026, 9, 30)
-    assert app._archive_item([], publish, today) is None
+def test_a_run_captures_this_week_and_next():
+    # Two weeks per run: next week to seed it, this week to fold in whatever
+    # was added since the last merge.
+    assert app._archive_weeks(date(2026, 8, 12)) == [
+        (date(2026, 8, 10), date(2026, 8, 16)),
+        (date(2026, 8, 17), date(2026, 8, 23)),
+    ]
 
 
-def test_no_archive_once_the_target_week_has_started():
-    publish = date(2026, 8, 12)          # targets Mon 2026-08-17
-    assert app._archive_item([], publish, date(2026, 8, 17)) is None   # first day
-    assert app._archive_item([], publish, date(2026, 8, 20)) is None   # mid-week
-    assert app._archive_item([], publish, date(2026, 8, 16)) is not None  # day before
-
-
-def test_consecutive_wednesday_runs_archive_consecutive_weeks():
+def test_consecutive_runs_cover_consecutive_weeks_without_a_gap():
     """No week may be skipped: a gap is a permanently missing archive."""
-    weeks = [app._archive_item([], d, d)["week_id"]
-             for d in (date(2026, 8, 12) + timedelta(days=7 * i) for i in range(4))]
-    assert weeks == ["2026-W34", "2026-W35", "2026-W36", "2026-W37"]
+    seen = []
+    for i in range(4):
+        for monday, _ in app._archive_weeks(date(2026, 8, 12) + timedelta(days=7 * i)):
+            week = app._week_id(monday)
+            if week not in seen:
+                seen.append(week)
+    assert seen == ["2026-W33", "2026-W34", "2026-W35", "2026-W36", "2026-W37"]
+
+
+# ── merging a capture instead of overwriting it ──────────────────────
+# The archive accumulates: a week is merged on every run, so an event added
+# after the first capture still reaches the permanent record, and an event
+# that has already happened is not dropped when it leaves events.json.
+
+
+STORED = [
+    {"title": "Already happened", "date": "2026-08-17"},
+    {"title": "Happens today", "date": "2026-08-20"},
+    {"title": "Still upcoming", "date": "2026-08-22"},
+]
+
+
+def test_a_late_addition_reaches_the_capture():
+    live = STORED + [{"title": "Added since", "date": "2026-08-22"}]
+    assert "Added since" in archived(STORED, live, date(2026, 8, 20))
+
+
+def test_past_events_survive_leaving_events_json():
+    # events.json holds nothing before today, so the stored half is the only
+    # record of the days of the week already gone. Here both 08-17 and 08-20
+    # have passed and only 08-22 is still live.
+    live = [{"title": "Still upcoming", "date": "2026-08-22"}]
+    assert archived(STORED, live, date(2026, 8, 21)) == [
+        "Already happened", "Happens today", "Still upcoming",
+    ]
+
+
+def test_today_is_taken_from_live_not_from_the_stored_capture():
+    # The boundary is inclusive of today on the live side: today's events are
+    # still in events.json, and live is the fresher of the two.
+    live = [{"title": "Happens today, rescheduled", "date": "2026-08-20",
+             "time": "19:00"}]
+    assert archived(STORED, live, date(2026, 8, 20)) == [
+        "Already happened", "Happens today, rescheduled",
+    ]
+
+
+def test_a_cancelled_upcoming_event_is_dropped_rather_than_resurrected():
+    # The reason for splitting at today instead of taking the union: live is
+    # authoritative for what is still to come, deletions included. On 08-20
+    # the 08-22 listing is gone from events.json, so it is gone here too.
+    assert archived(STORED, [], date(2026, 8, 20)) == ["Already happened"]
+
+
+def test_an_event_cancelled_after_it_happened_stays_in_the_record():
+    # Past days are read from the stored capture, which live cannot revise.
+    # "What the calendar showed" is the thing being archived.
+    assert archived(STORED, [], date(2026, 8, 23)) == [
+        "Already happened", "Happens today", "Still upcoming",
+    ]
+
+
+def test_merging_a_finished_week_keeps_it_intact():
+    """The failure mode the old one-shot capture had to refuse outright: a
+    backdated re-run whose target week is already over. events.json holds
+    nothing in that range, and a merge keeps the stored capture rather than
+    writing an empty list over it."""
+    item = app._archive_item(STORED, [], date(2026, 8, 17), date(2026, 8, 23),
+                             date(2026, 9, 30))
+    assert [e["title"] for e in item["events"]] == \
+        ["Already happened", "Happens today", "Still upcoming"]
+    assert item["event_count"] == 3
+
+
+def test_merging_a_wholly_future_week_is_just_the_live_listing():
+    live = [{"title": "Next month", "date": "2026-08-22"}]
+    assert archived([], live, date(2026, 8, 12)) == ["Next month"]
+
+
+def test_merged_events_stay_sorted_by_date_then_time():
+    stored = [{"title": "Early", "date": "2026-08-17", "time": "09:00"}]
+    live = [
+        {"title": "Late in the day", "date": "2026-08-22", "time": "19:00"},
+        {"title": "Earlier that day", "date": "2026-08-22", "time": "12:00"},
+    ]
+    assert archived(stored, live, date(2026, 8, 20)) == [
+        "Early", "Earlier that day", "Late in the day",
+    ]
+
+
+def test_events_without_a_date_are_dropped_from_a_merge():
+    stored = [{"title": "No date"}, {"title": "Dated", "date": "2026-08-17"}]
+    assert archived(stored, [], date(2026, 8, 20)) == ["Dated"]
+
+
+def test_refresh_reads_the_stored_capture_for_each_week():
+    class _ArchiveTable:
+        def __init__(self):
+            self.asked = []
+
+        def get_item(self, Key):
+            self.asked.append(Key["PK"])
+            return {"Item": {"events": STORED}} if Key["PK"] == "ARCHIVE#2026-W34" else {}
+
+    table = _ArchiveTable()
+    items = app._refresh_archives(table, [], date(2026, 8, 12), date(2026, 9, 30))
+    assert table.asked == ["ARCHIVE#2026-W33", "ARCHIVE#2026-W34"]
+    # W33 had nothing stored and nothing live; W34's capture came back intact.
+    assert [i["event_count"] for i in items] == [0, 3]
+
+
+# ── the Monday "week ahead" link post ────────────────────────────────
+
+
+def week_ahead(events, publish_date=date(2026, 8, 31)):
+    return app._week_ahead_item(events, publish_date)
+
+
+ON_THIS_WEEK = [
+    {"title": "Monday thing", "date": "2026-08-31", "time": "18:00"},
+    {"title": "Sunday thing", "date": "2026-09-06"},
+    {"title": "Next week", "date": "2026-09-07"},
+    {"title": "Last week", "date": "2026-08-30"},
+]
+
+
+def test_this_week_bounds_from_a_monday_are_that_monday_to_sunday():
+    assert app._this_week_bounds(date(2026, 8, 31)) == (
+        date(2026, 8, 31), date(2026, 9, 6))
+
+
+def test_this_week_bounds_from_midweek_still_gives_the_containing_week():
+    # The reader is standing in this week, not the next one — the opposite of
+    # _next_week_bounds, which the Wednesday archive capture uses.
+    assert app._this_week_bounds(date(2026, 9, 2)) == (
+        date(2026, 8, 31), date(2026, 9, 6))
+    assert app._this_week_bounds(date(2026, 9, 6)) == (
+        date(2026, 8, 31), date(2026, 9, 6))
+
+
+def test_link_post_points_at_the_week_page_for_its_own_week():
+    item = week_ahead(ON_THIS_WEEK)
+    assert item["week_id"] == "2026-W36"
+    assert item["link_url"] == "/week/2026-W36/"
+
+
+def test_link_post_is_dated_by_its_publication_date():
+    item = week_ahead(ON_THIS_WEEK)
+    assert item["PK"] == "UPDATE#2026-08-31"
+    assert item["published_on"] == "2026-08-31"
+
+
+def test_link_post_stores_no_week_start():
+    # week_start is what files a post at /updates/<y>/<m>/<d>/, and a link
+    # post has no page there.
+    assert "week_start" not in week_ahead(ON_THIS_WEEK)
+
+
+def test_link_post_is_marked_as_one():
+    assert week_ahead(ON_THIS_WEEK)["post_kind"] == "link"
+
+
+def test_link_post_stores_no_listing():
+    # The whole point: the events live on the page it links to, which has its
+    # own ARCHIVE# capture, so freezing them here would be a second copy.
+    item = week_ahead(ON_THIS_WEEK)
+    assert "events" not in item
+    assert item["event_count"] == 2
+
+
+def test_link_post_counts_only_events_inside_its_week():
+    assert week_ahead(ON_THIS_WEEK)["event_count"] == 2
+
+
+def test_link_post_title_names_the_monday_not_the_publish_date():
+    # A backdated re-run on a Wednesday still describes the week it covers.
+    item = week_ahead(ON_THIS_WEEK, publish_date=date(2026, 9, 2))
+    assert item["title"] == "DC Tech Events for the week of August 31, 2026"
+    assert item["PK"] == "UPDATE#2026-09-02"
+
+
+def test_link_post_summary_lists_titles_and_the_span():
+    summary = week_ahead(ON_THIS_WEEK)["summary"]
+    assert summary == ("2 events on the calendar for August 31–September 6: "
+                       "Monday thing, Sunday thing.")
+
+
+def test_link_post_summary_truncates_a_long_list():
+    events = [{"title": f"Thing {n}", "date": "2026-09-01"} for n in range(6)]
+    assert week_ahead(events)["summary"] == (
+        "6 events on the calendar for August 31–September 6: "
+        "Thing 0, Thing 1, Thing 2, and 3 more.")
+
+
+def test_link_post_summary_is_singular_for_one_event():
+    events = [{"title": "Only thing", "date": "2026-09-01"}]
+    assert week_ahead(events)["summary"].startswith("1 event on the calendar")
+
+
+def test_link_post_summary_when_the_week_is_empty():
+    assert week_ahead([])["summary"] == (
+        "Nothing is on the calendar for August 31–September 6 yet.")
+
+
+def test_span_stays_inside_one_month_when_it_can():
+    assert app._span(date(2026, 8, 5), date(2026, 8, 11)) == "August 5–11"
+    assert app._span(date(2026, 8, 28), date(2026, 9, 3)) == "August 28–September 3"
+
+
+def test_week_ahead_and_roundup_never_collide_on_a_key():
+    # Monday and Wednesday of the same ISO week share a week_id but not a PK,
+    # which is what lets both post kinds live in _updates/ side by side.
+    monday = week_ahead(ON_THIS_WEEK, publish_date=date(2026, 8, 31))
+    assert monday["week_id"] == app._week_id(date(2026, 9, 2))
+    assert monday["PK"] != f"UPDATE#{date(2026, 9, 2):%Y-%m-%d}"
+
+
+# ── write-once semantics, shared by both post kinds ──────────────────
+
+
+class _RecordingTable:
+    """Accepts a put, or refuses it the way DynamoDB does on a live key."""
+
+    def __init__(self, occupied=False):
+        self.occupied = occupied
+        self.puts = []
+
+    def put_item(self, **kwargs):
+        self.puts.append(kwargs)
+        if self.occupied and "ConditionExpression" in kwargs:
+            raise app.ClientError(
+                {"Error": {"Code": "ConditionalCheckFailedException",
+                           "Message": "already there"}},
+                "PutItem",
+            )
+        return {}
+
+
+def test_put_post_guards_an_already_published_day():
+    table = _RecordingTable(occupied=True)
+    assert app._put_post(table, {"PK": "UPDATE#2026-08-31"}) == "already_published"
+
+
+def test_put_post_writes_when_the_day_is_free():
+    table = _RecordingTable()
+    assert app._put_post(table, {"PK": "UPDATE#2026-08-31"}) == "published"
+    assert "ConditionExpression" in table.puts[0]
+
+
+def test_force_overwrites_a_published_post():
+    table = _RecordingTable(occupied=True)
+    assert app._put_post(table, {"PK": "UPDATE#2026-08-31"},
+                         force=True) == "published"
+    # No condition, so the occupied key does not refuse it.
+    assert "ConditionExpression" not in table.puts[0]
+
+
+def test_put_post_reraises_anything_that_is_not_a_key_collision():
+    class _Broken:
+        def put_item(self, **kwargs):
+            raise app.ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException",
+                           "Message": "slow down"}}, "PutItem")
+
+    with pytest.raises(app.ClientError):
+        app._put_post(_Broken(), {"PK": "UPDATE#2026-08-31"})

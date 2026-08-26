@@ -41,8 +41,10 @@
 
     <div class="e-content">
         <p>{{ summary }}</p>
-        {# A roundup of newly added events spans months, so "this week" would
-           send the reader to the wrong page. #}
+        {# Only paged posts reach this template — a link post has no page of
+           its own, so it is not a case here. A roundup of newly added events
+           spans months, so "this week" would send the reader to the wrong
+           page; a legacy roundup was one ISO week by definition. #}
         {% if post.added_since %}
             <p><a class="update-week-link" href="/">See everything coming up on {{ site_name }} &rarr;</a></p>
         {% else %}

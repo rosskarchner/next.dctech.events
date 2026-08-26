@@ -108,27 +108,73 @@ the queue. Use `submit_event` for anything found rather than vetted — a
 scraped calendar, a third-party listing — and `add_single_event` only when you
 mean to publish immediately.
 
-## The /updates post
+## The /updates posts
 
-Every Wednesday at 11:00 UTC, `dctech-events-next-updates-publisher`
-(`cdk_next/lambda_src/updates_publisher/`) writes one
-`UPDATE#{publish_date}` item listing every event *added* to the calendar in the
-previous seven days, and the table's stream rebuilds the site. Anything still
-in the moderation queue is a `DRAFT#` item that was never published, so it
-cannot appear.
+`dctech-events-next-updates-publisher`
+(`cdk_next/lambda_src/updates_publisher/`) runs twice a week, writing an
+`UPDATE#{publish_date}` item each time. The table's stream rebuilds the site,
+and the social publisher cross-posts it.
 
-The post is a frozen snapshot, not a query: calgen drops events dated before
-today, so a roundup rendered live would empty out as the events it announced
-happened. Preview or republish a week by hand:
+**Monday 10:30 UTC — the week ahead.** A *link post*: title, blurb, and a
+pointer at `/week/<iso-week>/` for the week just starting. It has no page of
+its own — it appears on /updates/ and in the feed, but the link goes straight
+to the week. It stores no listing either, because the week page already merges
+live events with its own `ARCHIVE#` capture, so the link keeps working after
+the week is over. This is the post that ran on Mondays before 2026-08-13, now
+pointing at the week page instead of duplicating it.
+
+**Wednesday 11:00 UTC — what's new.** A *roundup* listing every event *added*
+to the calendar in the previous seven days, at
+`/updates/<y>/<m>/<d>/`. Anything still in the moderation queue is a `DRAFT#`
+item that was never published, so it cannot appear. This one is a frozen
+snapshot rather than a query: calgen drops events dated before today, so a
+roundup rendered live would empty out as the events it announced happened.
+
+### Week archives
+
+Both runs also refresh the `ARCHIVE#<iso-week>` captures for the current and
+coming week. These are the site's only memory of what the calendar showed once
+a week is over — `get_events()` drops past events and organizers' feeds do too.
+
+A capture **accumulates** rather than overwrites, split at today:
+
+* **Before today**, the stored capture is kept verbatim. It is the only record
+  there is, so events are not lost as they happen.
+* **Today onward**, live `events.json` wins outright — it carries everything
+  added since the last merge, and it reflects cancellations, which a plain
+  union would resurrect.
+
+The two halves are disjoint by date, so nothing needs de-duplicating. This also
+makes re-running an old post safe: merging a finished week keeps its capture
+intact instead of writing an empty list over it.
+
+Coverage starts where archiving started — `2026-W34` and earlier were never
+captured, and `/week/` 404s for them.
+
+Preview or republish either by hand:
 
 ```bash
+# Wednesday roundup
 aws lambda invoke --function-name dctech-events-next-updates-publisher \
   --payload '{"published_on":"2026-08-19","dry_run":true}' /dev/stdout
+
+# Monday link post
+aws lambda invoke --function-name dctech-events-next-updates-publisher \
+  --payload '{"mode":"week_ahead","published_on":"2026-08-31","dry_run":true}' \
+  /dev/stdout
 ```
 
 Drop `dry_run` to write it, and add `"force": true` to overwrite a post that
-already exists. Posts published before 2026-08-12 are keyed by ISO week and
-list the events *happening* that week — the older meaning of the post.
+already exists. Both kinds key on the publication date, so Monday's and
+Wednesday's posts never collide even though they share an ISO week. `force`
+guards the post only — the archive merge is always applied, since it cannot
+destroy anything.
+
+Three post shapes render on /updates/, not two: posts published before
+2026-08-12 are keyed by ISO week and list the events *happening* that week —
+the original meaning of the post. calgen tells them apart by `post_kind`, and
+only the paged kinds build a page (`packages/calgen/src/calgen/updates.py`,
+`get_paged_update_posts`).
 
 ## Social cross-posting
 
@@ -137,10 +183,16 @@ Every new /updates post is announced on Mastodon
 ([@dctechevents.bsky.social](https://bsky.app/profile/dctechevents.bsky.social))
 by `dctech-events-next-social-publisher`
 (`cdk_next/lambda_src/social_publisher/`). It reads the events table's
-DynamoDB stream, filtered to `UPDATE#` and `POST#` keys, so it covers both the
-Wednesday weekly roundup and free-form announcements written in /edit without
-either publisher knowing it exists — and a social outage can never block the
-write that created the post.
+DynamoDB stream, filtered to `UPDATE#` and `POST#` keys, so it covers the
+Monday link post, the Wednesday roundup, and free-form announcements written in
+/edit without any publisher knowing it exists — and a social outage can never
+block the write that created the post.
+
+A link post syndicates its *target*, because it has no page of its own: the
+Monday post goes out to Mastodon and Bluesky linking straight to
+`/week/<iso-week>/`. Everything else links its own `/updates/` permalink.
+Dedupe is still keyed on the post's `UPDATE#`/`POST#` key, not on the URL, so
+re-pointing a link post cannot cause a repost.
 
 Credentials live in `dctech-events-next/mastodon` and
 `dctech-events-next/bluesky` (created by `NextSocialStack`, populated
