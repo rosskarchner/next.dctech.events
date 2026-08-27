@@ -2,10 +2,14 @@
 
 /just-added/ works by joining the site's events against `createdAt` on the
 table's EVENT# rows. The join has a fallback on (date, title) for submitted
-events, whose guid differs between the table and the site
-(next_dctech_events-p8o). That fallback only works if this exporter, calgen's
-reader, and updates_publisher all build the key identically — a mismatch does
-not raise, it just silently produces an empty page.
+events, which used to be the only thing that worked for them: their guid
+differed between the table and the site (next_dctech_events-p8o). The exporter
+now writes the table's guid and calgen honours it, so the guid half of the join
+hits for submitted events too and this fallback is belt-and-braces rather than
+load-bearing. It is still worth keeping and still worth testing — anything
+hand-authored in `_single_events/` has no guid — and it only works if this
+exporter, calgen's reader, and updates_publisher all build the key identically.
+A mismatch does not raise, it just silently produces an empty page.
 
 Run: python -m pytest test_export_added_at.py
 """

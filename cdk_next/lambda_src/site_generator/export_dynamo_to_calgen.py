@@ -133,12 +133,20 @@ def main():
 
         if source not in ('manual', 'submitted', None):
             continue
-        if item.get('hidden'):
-            continue
+        # Hidden events are written out and dropped at render instead of being
+        # withheld here. The skip used to be load-bearing for a different
+        # reason than it looked: calgen deduped over hidden events too, so a
+        # hidden event could absorb its visible twin and lose both listings.
+        # pipeline.process_events now dedups over visible events only, and
+        # app.get_events does the filtering — one place decides visibility.
         data = _clean(item, drop=internal)
         # keep description for manual events — calgen renders it
         if item.get('description'):
             data['description'] = _to_plain(item['description'])
+        # DynamoDB owns event identity. Without this, load_single_events
+        # recomputes a 32-char content hash over an 8-hex EVENT# key and an
+        # overlay on a submitted event can never match (next_dctech_events-p8o).
+        data['guid'] = guid
         slug = str(item.get('slug') or guid)
         _write_yaml(os.path.join('_single_events', f'{slug}.yaml'), data)
         n_single += 1

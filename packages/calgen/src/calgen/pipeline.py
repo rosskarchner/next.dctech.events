@@ -18,6 +18,7 @@ from dateutil import rrule
 
 from calgen.site_config import get_config
 from calgen.event_utils import calculate_event_hash, _normalize_title
+from calgen.overlay import apply_overlay
 from calgen.regions import EventRejected, load_region_plugin
 
 config = get_config()
@@ -32,8 +33,6 @@ CATEGORIES_DIR = '_categories'
 SINGLE_EVENTS_DIR = '_single_events'
 OVERLAY_DIR = '_overlay'
 RECURRING_EVENTS_DIR = '_recurring_events'
-
-_OVERLAY_PROTECTED_FIELDS = {'group', 'group_id', 'group_website', 'date', 'end_date', 'guid', 'source'}
 
 RECURRING_MAX_FUTURE_DAYS = 90
 
@@ -164,12 +163,19 @@ def load_single_events():
                     })
                     if parsed:
                         event['date'] = parsed.strftime('%Y-%m-%d')
-            event['guid'] = calculate_event_hash(
-                event.get('date', ''),
-                event.get('time', ''),
-                event.get('title', ''),
-                event.get('url'),
-            )
+            # DynamoDB owns event identity. A submitted event is keyed
+            # EVENT#<8 hex> there while this hash is 32 chars, so recomputing
+            # unconditionally meant _overlay/{guid}.yaml could never match one
+            # and an overlay on a submission silently did nothing
+            # (next_dctech_events-p8o). Only compute a guid when the exporter
+            # did not supply one.
+            if not event.get('guid'):
+                event['guid'] = calculate_event_hash(
+                    event.get('date', ''),
+                    event.get('time', ''),
+                    event.get('title', ''),
+                    event.get('url'),
+                )
             events.append(event)
         except Exception as e:
             print(f"Error loading single event {filename}: {e}")
@@ -312,11 +318,9 @@ def process_events(groups, categories, single_events, ical_events, recurring_eve
                 event.get('date', ''), event.get('time', ''),
                 event.get('title', ''), event.get('url'),
             )
-            override = event_overrides.get(processed['guid'])
-            if override:
-                for key, value in override.items():
-                    if key not in _OVERLAY_PROTECTED_FIELDS:
-                        processed[key] = value
+            # Overlay before region: `location` is overlay-editable and the
+            # region is derived from it.
+            apply_overlay(processed, event_overrides.get(processed['guid']))
             if not _apply_region(processed, region_plugin):
                 continue
             regular_events.append(processed)
@@ -335,16 +339,31 @@ def process_events(groups, categories, single_events, ical_events, recurring_eve
                 event.get('date', ''), event.get('time', ''),
                 event.get('title', ''), event.get('url'),
             )
+        apply_overlay(processed, event_overrides.get(processed['guid']))
         if not _apply_region(processed, region_plugin):
             continue
         submitted_events.append(processed)
 
-    recurring_expanded = [
-        e for e in expand_recurring_events(recurring_events, today=today)
-        if _apply_region(e, region_plugin)
-    ]
+    # Occurrences have no EVENT# row of their own, so nothing can write an
+    # overlay keyed to one today. Applied anyway so that "an overlay applies
+    # whatever the source" is literally true if occurrences are ever
+    # materialised, rather than being a fourth special case to discover later.
+    recurring_expanded = []
+    for occurrence in expand_recurring_events(recurring_events, today=today):
+        apply_overlay(occurrence, event_overrides.get(occurrence.get('guid')))
+        if _apply_region(occurrence, region_plugin):
+            recurring_expanded.append(occurrence)
+
     combined = recurring_expanded + submitted_events + regular_events
-    unique_events = remove_duplicates(combined)
+    # Dedup over visible events only. remove_duplicates keeps whichever of a
+    # pair it reaches first and merges the other away, and app.get_events
+    # filters `hidden` afterwards — so a hidden event reached first would
+    # absorb its visible twin and both listings would disappear. Hidden events
+    # stay in the output because get_events(include_hidden=True) is a real
+    # caller; they are just not eligible to swallow anything.
+    visible = [e for e in combined if not e.get('hidden')]
+    unique_events = remove_duplicates(visible)
+    unique_events += [e for e in combined if e.get('hidden')]
 
     def _sort_time(event):
         t = event.get('time', '')
