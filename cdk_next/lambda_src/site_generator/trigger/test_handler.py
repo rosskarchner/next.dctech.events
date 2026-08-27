@@ -42,13 +42,10 @@ def test_irrelevant_prefixes_are_skipped(pk, monkeypatch):
     assert result["started"] is False
 
 
-def test_a_build_is_started_even_while_one_is_running(monkeypatch):
+def test_a_build_is_attempted_even_while_one_is_running(monkeypatch):
     """The trigger used to skip here and say the scheduled build would catch
     up. That net is only daily, so a change landing during a build could sit
-    unpublished for a day (next_dctech_events-lux). The project now carries
-    concurrent_build_limit=1, so CodeBuild queues rather than overlapping —
-    serialising there means a queued build still happens, where a skipped one
-    never did."""
+    unpublished for a day (next_dctech_events-lux)."""
     started = {}
     monkeypatch.setattr(handler.codebuild, "start_build",
                         lambda **kw: started.setdefault(
@@ -58,6 +55,36 @@ def test_a_build_is_started_even_while_one_is_running(monkeypatch):
 
     assert result["started"] is True
     assert "build" in started
+
+
+def test_a_refused_build_is_raised_so_the_batch_is_retried(monkeypatch):
+    """concurrent_build_limit=1 makes StartBuild *fail*, not queue — which is
+    not what the limit sounds like. Raising hands the batch back to the event
+    source mapping, so the work is re-driven rather than dropped the way the
+    old skip dropped it."""
+    def refuse(**kw):
+        raise handler.codebuild.exceptions.AccountLimitExceededException(
+            {"Error": {"Code": "AccountLimitExceededException",
+                       "Message": "Concurrent build limit exceeded"}},
+            "StartBuild")
+
+    monkeypatch.setattr(handler.codebuild, "start_build", refuse)
+
+    with pytest.raises(Exception, match="Concurrent build limit"):
+        handler.lambda_handler({"Records": [_record("EVENT#x")]}, None)
+
+
+def test_another_codebuild_error_is_not_swallowed(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    def broken(**kw):
+        raise ClientError(
+            {"Error": {"Code": "InvalidInputException", "Message": "nope"}},
+            "StartBuild")
+
+    monkeypatch.setattr(handler.codebuild, "start_build", broken)
+    with pytest.raises(ClientError):
+        handler.lambda_handler({"Records": [_record("EVENT#x")]}, None)
 
 
 def test_the_trigger_no_longer_inspects_running_builds(monkeypatch):

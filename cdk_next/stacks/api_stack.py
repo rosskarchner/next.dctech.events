@@ -69,6 +69,18 @@ class NextApiStack(cdk.Stack):
             # queue digest in NextOpsStack.
             "ADMIN_EMAIL": config.NEWSLETTER_ADMIN_EMAIL,
             "QUEUE_URL": f"{config.BASE_URL}/edit/queue.html",
+            # Referenced by literal name, not by importing the project from
+            # NextSiteGeneratorStack — that stack is created after this one and
+            # a cross-stack import would make the dependency circular. Same
+            # convention the orchestration stack uses.
+            #
+            # Without this, POST /api/admin/rebuild answered 503 "Site
+            # generator not configured yet" and the MCP trigger_rebuild tool
+            # raised. Both went unnoticed because nothing had a button on the
+            # route, and because the QC agent's call to trigger_rebuild fails
+            # as an MCP error result that run_qc never inspects — the rebuild
+            # happened anyway via the DynamoDB stream trigger.
+            "CODEBUILD_PROJECT_NAME": f"{config.PREFIX}-site-generator",
         }
 
         self.api_function = lambda_.Function(
@@ -111,6 +123,17 @@ class NextApiStack(cdk.Stack):
 
         for fn in (self.api_function, self.mcp_function):
             table.grant_read_write_data(fn)
+            # On-demand site rebuilds: /api/admin/rebuild and MCP
+            # trigger_rebuild. Scoped to the one project.
+            fn.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["codebuild:StartBuild"],
+                    resources=[
+                        f"arn:aws:codebuild:{config.REGION}:{config.ACCOUNT}:"
+                        f"project/{config.PREFIX}-site-generator"
+                    ],
+                )
+            )
             fn.add_to_role_policy(
                 iam.PolicyStatement(
                     actions=[

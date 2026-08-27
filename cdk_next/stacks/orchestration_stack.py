@@ -32,9 +32,10 @@ expresses:
 
 `codebuild:startBuild.sync` is the load-bearing integration: it *waits* for
 the build, so the chain never races ahead of the site it just published.
-The stream-fed trigger still fires during a run, and now starts a build rather
-than skipping; the project's concurrent_build_limit of 1 makes CodeBuild queue
-it behind this machine's. That is why BUILD_TIMEOUT allows for a wait.
+The stream-fed trigger still fires during a run and now attempts a build rather
+than skipping. The project's concurrent_build_limit of 1 makes that attempt fail
+rather than queue, so the trigger raises and its event source mapping re-drives
+the batch once this machine's build is done.
 
 Referenced by function name rather than by cross-stack import, matching the
 reasoning NextUpdatesStack already applies to the social secrets: this stack

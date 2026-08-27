@@ -222,6 +222,10 @@
   }
 
   function init() {
+    // Without this a non-admin sees the whole editor and every request 403s.
+    // The server was always safe (_admin_check on each route); the page was
+    // just misleading.
+    if (!DctechAuth.requireAdmin()) return;
     el('new-post').addEventListener('click', startNewPost);
     el('cancel-edit').addEventListener('click', cancelEdit);
     el('delete-post').addEventListener('click', deletePost);
