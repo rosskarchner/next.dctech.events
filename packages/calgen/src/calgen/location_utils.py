@@ -39,26 +39,79 @@ _STATE_ABBR_TO_NAME = {
 }
 
 
+# Which state each DC-metro city is actually in. Scoped to the metro on
+# purpose: within it a mismatch is a fact rather than a judgement, and outside
+# it the same city name is often ambiguous (Arlington is in VA here, and in TX
+# and MA elsewhere). A feed saying "Arlington, DC" is stating something
+# impossible — DC has no Arlington — and it silently files the event under the
+# wrong region facet, because extract_location_info reads the trailing state
+# (next_dctech_events-ubw).
+_DC_METRO_CITY_STATE = {
+    'arlington': 'VA', 'alexandria': 'VA', 'reston': 'VA', 'tysons': 'VA',
+    'mclean': 'VA', 'vienna': 'VA', 'herndon': 'VA', 'ashburn': 'VA',
+    'sterling': 'VA', 'fairfax': 'VA', 'falls church': 'VA', 'chantilly': 'VA',
+    'fredericksburg': 'VA', 'manassas': 'VA', 'leesburg': 'VA',
+    'springfield': 'VA', 'annandale': 'VA', 'centreville': 'VA',
+    'bethesda': 'MD', 'silver spring': 'MD', 'rockville': 'MD',
+    'college park': 'MD', 'greenbelt': 'MD', 'gaithersburg': 'MD',
+    'hanover': 'MD', 'pasadena': 'MD', 'annapolis': 'MD', 'laurel': 'MD',
+    'bowie': 'MD', 'hyattsville': 'MD',
+    'washington': 'DC',
+}
+
+# Only a swap *within* the metro's three states is corrected. If a feed claims
+# "Arlington, TX" we leave it — that is a real place, and deciding it was meant
+# to be Virginia is a guess the out-of-area pass should make, not this.
+_DC_METRO_STATES = frozenset({'DC', 'MD', 'VA'})
+
+
+def correct_improbable_state(city, state):
+    """The state a DC-metro city is really in, or `state` unchanged.
+
+    Returns the input untouched unless the city is known *and* the claimed
+    state is one of the metro's own — so a genuinely out-of-area listing is
+    left for a human or the QC agent to judge.
+    """
+    if not city or not state:
+        return state
+    known = _DC_METRO_CITY_STATE.get(str(city).strip().casefold())
+    claimed = str(state).strip().upper()
+    if known and claimed in _DC_METRO_STATES and claimed != known:
+        return known
+    return state
+
+
 def normalize_location(location):
-    """Tidy a location string from a feed: collapse a repeated trailing
-    "City, ST" and squeeze empty comma segments.
+    """Tidy a location string from a feed.
+
+    Two defects, both machine-generated and both spanning whole platforms
+    rather than being one organiser's typo, so both are fixed once here instead
+    of by a moderator or weekly by the QC agent.
 
     Meetup's iCal LOCATION already ends in "City, ST" and then appends the city
-    and state again, so a majority of imported events display them twice:
+    and state again, so a majority of imported events displayed them twice
+    (next_dctech_events-8so):
 
         Rockville Memorial Library, Rockville Town Square Plaza,
         21 Maryland Ave, Rockville, MD, Rockville, MD
 
-    That is machine-generated noise rather than an organiser's typo — it spans
-    every Meetup-sourced group — so it is fixed once here instead of by a
-    moderator, or weekly by the QC agent (next_dctech_events-8so).
+    And a DC-metro city is sometimes paired with a state it is not in —
+    "Arlington, DC", which is impossible, DC has no Arlington. That one matters
+    beyond looking wrong: the site derives an event's region from the trailing
+    state, so it files the event under the wrong region facet and a reader
+    filtering by area never sees it (next_dctech_events-ubw).
 
-    A trailing two-letter state is upper-cased while we are here; Meetup emits
-    a lowercase one often enough ("Arlington, va") that it shows on the site.
+    Every "City, ST" pair is corrected, not just the trailing one, and only
+    then is a repeat collapsed. Correcting the tail alone is not enough — the
+    production case was "Arlington, DC, Arlington, DC", whose halves only match
+    once *both* are fixed. Collapsing first is not enough either, because
+    "Rockville, MD, Rockville, VA" does not match until the impossible VA
+    becomes MD.
 
-    Deliberately conservative: only an *exact* repeat of the final two segments
-    is dropped, and only from the end. A venue that genuinely repeats a word
-    keeps it.
+    Deliberately conservative in both passes: only an exact repeat of the final
+    two segments is dropped and only from the end, so a venue that genuinely
+    repeats a word keeps it; and only a swap within the metro's own states is
+    corrected, so "Arlington, TX" is left as the real place it is.
     """
     if not location:
         return location
@@ -68,17 +121,21 @@ def normalize_location(location):
     if not parts:
         return ''
 
+    # Upper-case and sanity-check every state segment. Meetup emits a lowercase
+    # one often enough ("Arlington, va") that it showed on the site.
+    for i in range(1, len(parts)):
+        if len(parts[i]) != 2 or parts[i].upper() not in _STATE_ABBR_TO_NAME:
+            continue
+        parts[i] = parts[i].upper()
+        parts[i] = correct_improbable_state(parts[i - 1], parts[i])
+
     # "…, Rockville, MD, Rockville, MD" -> "…, Rockville, MD". Looped so a
     # triple collapses too.
     while len(parts) >= 4:
-        tail = [p.casefold() for p in parts[-2:]]
-        before = [p.casefold() for p in parts[-4:-2]]
-        if tail != before:
+        if [p.casefold() for p in parts[-2:]] != \
+           [p.casefold() for p in parts[-4:-2]]:
             break
         parts = parts[:-2]
-
-    if len(parts[-1]) == 2 and parts[-1].upper() in _STATE_ABBR_TO_NAME:
-        parts[-1] = parts[-1].upper()
 
     return ', '.join(parts)
 

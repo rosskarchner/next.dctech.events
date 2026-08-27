@@ -250,6 +250,16 @@ address you did not read, and never change a location to move an event between
 cities — that is the out-of-area pass's decision, not yours, and it has
 already run.
 
+**Correcting an impossible city/state pair is not moving an event.** "Arlington,
+DC" is wrong because DC has no Arlington; changing it to "Arlington, VA" labels
+the same place correctly and is squarely your job. It matters more than it
+looks: the site derives an event's region from the trailing state, so a wrong
+one files the event under the wrong region facet and a reader filtering by area
+never sees it. Do this only when you are certain — the city is unambiguous, or
+the page names a street address you can place. The common DC-metro pairs are
+already corrected automatically before you see them, so anything reaching you
+is a case the table did not cover.
+
 Leave virtual and hybrid events alone unless the location field is empty.
 
 ## Categories

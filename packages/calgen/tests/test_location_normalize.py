@@ -70,8 +70,22 @@ def test_a_venue_that_genuinely_repeats_a_word_keeps_it():
 
 
 def test_a_near_repeat_is_not_collapsed():
-    assert normalize_location('Rockville, MD, Rockville, VA') == \
-        'Rockville, MD, Rockville, VA'
+    # Two genuinely different places, both outside the metro table so no state
+    # correction applies.
+    assert normalize_location('Portland, OR, Portland, ME') == \
+        'Portland, OR, Portland, ME'
+
+
+def test_a_repeat_that_only_matches_after_correction_still_collapses():
+    # "Rockville, VA" is not a place. Correcting it to MD makes the two halves
+    # identical, so correction has to run before the collapse.
+    assert normalize_location('Rockville, MD, Rockville, VA') == 'Rockville, MD'
+
+
+def test_correction_reaches_the_inner_pair_too():
+    # The production case: correcting only the trailing pair would leave
+    # "Arlington, DC, Arlington, VA", whose halves never match.
+    assert normalize_location('Arlington, DC, Arlington, DC') == 'Arlington, VA'
 
 
 def test_only_the_end_is_collapsed():
@@ -88,3 +102,60 @@ def test_the_region_parser_still_agrees_after_normalizing():
            'Arlington, va')
     assert extract_location_info(raw) == extract_location_info(
         normalize_location(raw))
+
+
+# ── Impossible city/state pairs ────────────────────────────────────
+# The site derives an event's region from the trailing state, so a wrong one
+# files the event under the wrong region facet and a reader filtering by area
+# never sees it (next_dctech_events-ubw). Within the DC metro a mismatch is a
+# fact rather than a judgement, so it is corrected here rather than by a model.
+
+
+@pytest.mark.parametrize('raw,expected', [
+    # The case actually found in production, on a GDG-DC DevFest listing.
+    ('3351 Fairfax Dr, 3351 Fairfax Drive, Arlington, DC, Arlington, DC',
+     '3351 Fairfax Dr, 3351 Fairfax Drive, Arlington, VA'),
+    ('Bethesda, VA', 'Bethesda, MD'),
+    ('Rockville, DC', 'Rockville, MD'),
+    ('Reston, MD', 'Reston, VA'),
+    ('Silver Spring, VA', 'Silver Spring, MD'),
+])
+def test_an_impossible_metro_pair_is_corrected(raw, expected):
+    assert normalize_location(raw) == expected
+
+
+@pytest.mark.parametrize('clean', [
+    'Arlington, VA', 'Bethesda, MD', 'Washington, DC', 'Annapolis, MD',
+])
+def test_a_correct_pair_is_untouched(clean):
+    assert normalize_location(clean) == clean
+
+
+@pytest.mark.parametrize('outside', [
+    # Real places. Deciding these were meant to be local is a guess, and the
+    # out-of-area pass is what should be making it.
+    'Arlington, TX',
+    'Arlington, MA',
+    'Springfield, IL',
+    'Boston, MA',
+    'Somewhere, NY',
+])
+def test_a_city_outside_the_metro_is_left_alone(outside):
+    assert normalize_location(outside) == outside
+
+
+def test_an_unknown_city_is_left_alone():
+    assert normalize_location('Nowheresville, VA') == 'Nowheresville, VA'
+
+
+def test_correction_survives_the_doubling_collapse():
+    # Both passes act on the same trailing segment; order must not matter.
+    assert normalize_location('Fuse, 3351 Fairfax Dr, Arlington, DC, Arlington, DC') \
+        == 'Fuse, 3351 Fairfax Dr, Arlington, VA'
+
+
+def test_the_region_parser_now_reads_the_corrected_state():
+    from calgen.location_utils import extract_location_info
+    raw = 'Arlington, DC'
+    assert extract_location_info(raw) == ('Washington', 'DC')
+    assert extract_location_info(normalize_location(raw)) == ('Arlington', 'VA')
