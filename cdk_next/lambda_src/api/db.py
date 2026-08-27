@@ -19,12 +19,17 @@ from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import ClientError
 
 CONFIG_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'dctech-events-next')
 
 REVIEW_STATUSES = (
     'pending_qa', 'approved', 'flagged', 'pending_discovery_review', 'discovered',
 )
+
+# Distinguishes "caller passed None" from "caller passed nothing" — needed
+# because None is a meaningful value for update_event's expect_overrides_rev.
+_UNSET = object()
 
 _table = None
 
@@ -513,8 +518,23 @@ def get_event_from_config(guid):
     return _event_item_to_dict(item) if item else None
 
 
-def update_event(guid, data, overrides=None):
-    """Update an EVENT#{guid} entity in the config table with the given fields."""
+def update_event(guid, data, overrides=None, *, expect_overrides_rev=_UNSET):
+    """Update an EVENT#{guid} entity in the config table with the given fields.
+
+    `expect_overrides_rev` makes the write conditional on the overlay's `_rev`,
+    which is what stops two overlay writers from silently clobbering each other.
+    The overlay is stored as a whole map, so a lost race does not lose one field
+    — it loses the loser's entire overlay including its `_qa_run` stamp, which
+    would leave revert_qa_run restoring a state that never existed.
+
+    * `_UNSET` (default) — no condition. Every pre-existing caller keeps its
+      old behaviour, which is why this is opt-in rather than automatic.
+    * `None` — require that no overlay revision exists yet (first write).
+    * int — require that revision exactly.
+
+    Raises botocore ConditionalCheckFailedException on a mismatch;
+    set_event_overlay is what turns that into a retry or an OverlayConflict.
+    """
     table = _get_table()
     date = data.get('date', '')
     time_val = data.get('time', '00:00')
@@ -553,6 +573,14 @@ def update_event(guid, data, overrides=None):
     }
     if expr_names:
         kwargs['ExpressionAttributeNames'] = expr_names
+    if expect_overrides_rev is not _UNSET:
+        if expect_overrides_rev is None:
+            kwargs['ConditionExpression'] = (
+                Attr('overrides').not_exists() | Attr('overrides._rev').not_exists()
+            )
+        else:
+            kwargs['ConditionExpression'] = Attr('overrides._rev').eq(
+                expect_overrides_rev)
     table.update_item(**kwargs)
 
 
@@ -570,6 +598,406 @@ def promote_draft_to_event(draft):
     data['submitted_by'] = draft.get('submitter_email', '')
     put_event(guid, data, source='submitted', review_status='approved')
     return guid
+
+
+# ─── Event overlays ───────────────────────────────────────────────
+#
+# An overlay is the `overrides` map on an EVENT# item: the editorial layer that
+# sits on top of whatever the event's source said. It lives here rather than in
+# the MCP server because two callers must produce byte-identical results — the
+# QA agent through mcp/server.py, and a human through the /edit UI — and
+# build_lambdas.sh copies this module into the MCP bundle. Same reasoning as
+# build_event_draft_data / promote_draft for the submission path.
+#
+# Keys starting with an underscore are private bookkeeping, never overlay
+# values. export_dynamo_to_calgen strips them, so calgen never sees them, and
+# check_overlay_fields refuses to let a caller write them directly:
+#
+#   _comment      why the most recent write happened
+#   _qa_run       {run_id, prior: {field: old}, added: [field]} — most recent
+#                 run only, which is all revert_qa_run can undo
+#   _rev          revision counter, the conditional-write token
+#   _edited_by    'someone@example.com' | 'agent:qa' | 'agent:mcp'
+#   _edited_at    ISO8601 Z
+#   _field_edits  {field: {by, at}} — per-field provenance, so a reviewer can
+#                 tell which half of an overlay was the agent's
+
+# Set by the pipeline from the source feed. Overriding these would mean
+# overriding the event's identity, not its presentation. calgen keeps its own
+# copy of this set for the render side — see packages/calgen/src/calgen/overlay.py.
+OVERLAY_PROTECTED_FIELDS = frozenset({
+    'group', 'group_id', 'group_website', 'date', 'end_date', 'guid', 'source',
+})
+
+# What a human or agent may actually write. An allowlist, not a denylist:
+# before this existed, `time`, `url`, `description` and even a typo like
+# `titel` were all writable through set_overlay and would sit in the overlay
+# doing nothing. The /edit UI generates its form from this tuple, so it can
+# never offer a field the write path rejects.
+OVERLAY_EDITABLE_FIELDS = (
+    'title', 'time', 'end_time', 'location', 'location_type', 'url', 'cost',
+    'city', 'state', 'description', 'categories', 'all_day',
+    'hidden', 'duplicate_of',
+)
+
+_OVERLAY_PRIVATE_KEYS = ('_comment', '_qa_run', '_rev', '_edited_by',
+                         '_edited_at', '_field_edits')
+
+
+class OverlayConflict(Exception):
+    """Someone else wrote this overlay between the caller's read and write."""
+
+    def __init__(self, guid, current_rev, current_overlay):
+        super().__init__(
+            f'Overlay for {guid} changed since it was read '
+            f'(now at revision {current_rev})'
+        )
+        self.guid = guid
+        self.current_rev = current_rev
+        self.current_overlay = current_overlay
+
+
+def public_overlay(overrides):
+    """The overlay minus its private bookkeeping — what actually renders."""
+    return {k: v for k, v in (overrides or {}).items() if not k.startswith('_')}
+
+
+def overlay_bookkeeping(overrides):
+    """The private half, for a UI that wants to show provenance."""
+    overrides = overrides or {}
+    stamp = overrides.get('_qa_run') or {}
+    return {
+        'rev': _to_plain(overrides.get('_rev') or 0),
+        'comment': overrides.get('_comment', ''),
+        'edited_by': overrides.get('_edited_by', ''),
+        'edited_at': overrides.get('_edited_at', ''),
+        'field_edits': _to_plain(overrides.get('_field_edits') or {}),
+        'run_id': stamp.get('run_id'),
+        'prior': _to_plain(stamp.get('prior') or {}),
+        'added': list(stamp.get('added') or []),
+    }
+
+
+def valid_category_slugs():
+    return set(get_all_categories().keys())
+
+
+def validate_category_slugs(categories):
+    unknown = sorted(set(categories or []) - valid_category_slugs())
+    if unknown:
+        raise ValueError(
+            f'Unknown category slug(s): {unknown}. '
+            f'Valid slugs: {sorted(valid_category_slugs())}'
+        )
+
+
+def check_overlay_fields(fields):
+    """Reject anything a caller must not write. Raises ValueError."""
+    protected = sorted(set(fields) & OVERLAY_PROTECTED_FIELDS)
+    if protected:
+        raise ValueError(f'Cannot set protected overlay field(s): {protected}')
+    private = sorted(k for k in fields if k.startswith('_'))
+    if private:
+        raise ValueError(f'Cannot set reserved overlay key(s): {private}')
+    unknown = sorted(set(fields) - set(OVERLAY_EDITABLE_FIELDS))
+    if unknown:
+        raise ValueError(
+            f'Not an overlay-editable field: {unknown}. '
+            f'Editable: {sorted(OVERLAY_EDITABLE_FIELDS)}'
+        )
+
+
+def get_event_overlay(guid):
+    """The raw overlay for one event, private keys included. {} if none."""
+    event = get_event_from_config(guid)
+    if not event:
+        return {}
+    return event.get('overrides') or {}
+
+
+def effective_event(event):
+    """The event as it will render: the record with its overlay merged on top.
+
+    Only allowlisted fields are merged, so legacy junk or a field written
+    before the allowlist existed cannot change what a caller sees here.
+    """
+    merged = dict(event or {})
+    overlay = (event or {}).get('overrides') or {}
+    for field in OVERLAY_EDITABLE_FIELDS:
+        if field in overlay:
+            merged[field] = _to_plain(overlay[field])
+    return merged
+
+
+def _now_iso():
+    return datetime.now(_tz.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
+
+
+def _validate_overlay_values(guid, fields):
+    """Value-level checks the field allowlist cannot express."""
+    if 'categories' in fields:
+        validate_category_slugs(fields['categories'])
+
+    target = fields.get('duplicate_of')
+    if target:
+        if target == guid:
+            raise ValueError('An event cannot be a duplicate of itself')
+        if not get_event_from_config(target):
+            # A duplicate_of pointing outside the corpus is silently ignored at
+            # render (calgen's remove_duplicates requires the target be present),
+            # so the merge would look done and the event would keep showing.
+            raise ValueError(f'No such event to merge into: {target}')
+
+
+def _stamp_qa_run(existing, fields, clear, run_id):
+    """Record what this run found, so revert_qa_run can put it back.
+
+    The snapshot is of the state before the run *first* touched each field, so a
+    second write in the same run does not overwrite it. Fields with no prior
+    value go in `added` rather than getting a sentinel in `prior`, because a
+    sentinel would not survive the DynamoDB round trip.
+    """
+    stamp = dict(existing.get('_qa_run') or {})
+    if stamp.get('run_id') != run_id:
+        stamp = {'run_id': run_id, 'prior': {}, 'added': []}
+    prior = dict(stamp.get('prior') or {})
+    added = list(stamp.get('added') or [])
+    for key in list(fields) + list(clear):
+        if key in prior or key in added:
+            continue
+        if key in existing:
+            prior[key] = existing[key]
+        else:
+            added.append(key)
+    stamp['prior'] = prior
+    stamp['added'] = added
+    return stamp
+
+
+def _build_overlay(existing, fields, clear, comment, run_id, actor):
+    """The overlay map to store, given the one that is already there."""
+    updated = dict(existing)
+
+    if run_id:
+        updated['_qa_run'] = _stamp_qa_run(existing, fields, clear, run_id)
+
+    for key in clear:
+        updated.pop(key, None)
+    updated.update(fields)
+
+    if comment:
+        updated['_comment'] = comment
+
+    who = actor or (f'agent:{"qa" if run_id else "mcp"}')
+    when = _now_iso()
+    updated['_rev'] = int(_to_plain(existing.get('_rev') or 0)) + 1
+    updated['_edited_by'] = who
+    updated['_edited_at'] = when
+
+    # Per-field provenance, so "the agent set the location, you set the title"
+    # is answerable. Entries for cleared fields go away with the field.
+    field_edits = dict(_to_plain(existing.get('_field_edits') or {}))
+    for key in clear:
+        field_edits.pop(key, None)
+    for key in fields:
+        field_edits[key] = {'by': who, 'at': when}
+    if field_edits:
+        updated['_field_edits'] = field_edits
+    else:
+        updated.pop('_field_edits', None)
+
+    return updated
+
+
+def _put_overlay(guid, event, overlay, expected_rev):
+    """One conditional write of an overlay map."""
+    update_event(
+        guid,
+        # Pass the event's real date and time: update_event rewrites GSI1 from
+        # them unconditionally, so omitting them writes 'DATE#' and corrupts
+        # the index.
+        {'date': event.get('date', ''), 'time': event.get('time') or '00:00'},
+        overrides=overlay,
+        expect_overrides_rev=expected_rev,
+    )
+
+
+def _overlay_result(guid, event, overlay):
+    effective = effective_event({**event, 'overrides': overlay})
+    book = overlay_bookkeeping(overlay)
+    return {
+        'guid': guid,
+        'overlay': public_overlay(overlay),
+        'effective': effective,
+        'rev': book['rev'],
+        'edited_by': book['edited_by'],
+        'edited_at': book['edited_at'],
+    }
+
+
+_OVERLAY_WRITE_ATTEMPTS = 3
+
+
+def set_event_overlay(guid, fields, comment=None, *, run_id=None, actor=None,
+                      clear=(), expected_rev=_UNSET):
+    """Merge `fields` into an event's overlay. The single overlay writer.
+
+    `clear` removes overlay fields outright, which is how the UI says "stop
+    overriding this and fall back to what the source says".
+
+    `run_id` tags the write as part of a batch (the QA agent's weekly pass) and
+    records each field's prior value so revert_qa_run can restore it. Leave it
+    unset for a hand edit; pass `actor` instead.
+
+    `expected_rev` is the revision the caller last read:
+
+    * omitted — re-read, re-merge and retry on a collision. The default because
+      it is the forgiving one: correct for the agent and for bulk actions, where
+      a field-level merge is exactly the intended outcome and there is no human
+      to consult.
+    * an int, or None meaning "there was no overlay" — the write is conditional,
+      and a concurrent change raises OverlayConflict so the caller can show the
+      user what happened. This is what a UI editing from a form wants, and it is
+      opt-in so that forgetting it cannot make an ordinary write fail.
+    """
+    check_overlay_fields(fields)
+    check_overlay_fields({k: None for k in clear})
+    _validate_overlay_values(guid, fields)
+
+    conditional = expected_rev is not _UNSET
+    attempts = 1 if conditional else _OVERLAY_WRITE_ATTEMPTS
+
+    for attempt in range(attempts):
+        event = get_event_from_config(guid)
+        if not event:
+            raise ValueError(f'No such event: {guid}')
+        existing = dict(event.get('overrides') or {})
+        stored_rev = int(_to_plain(existing.get('_rev') or 0)) or None
+
+        if conditional and expected_rev != stored_rev:
+            raise OverlayConflict(guid, stored_rev, public_overlay(existing))
+
+        overlay = _build_overlay(existing, fields, clear, comment, run_id, actor)
+        try:
+            _put_overlay(guid, event, overlay,
+                         expected_rev if conditional else stored_rev)
+        except ClientError as exc:
+            if exc.response['Error']['Code'] != 'ConditionalCheckFailedException':
+                raise
+            if conditional:
+                current = get_event_overlay(guid)
+                raise OverlayConflict(
+                    guid, _to_plain(current.get('_rev') or 0),
+                    public_overlay(current)) from exc
+            if attempt == attempts - 1:
+                raise
+            continue
+        return _overlay_result(guid, event, overlay)
+
+
+def clear_event_overlay(guid, *, actor=None, comment=None, expected_rev=_UNSET):
+    """Drop every public overlay field, keeping the audit trail.
+
+    Deliberately not `overrides = {}`: an all-private map reads as no overlay to
+    both public_overlay and the exporter, so the site sees the source's own
+    values again while who-cleared-it-and-when survives. The `_qa_run` stamp
+    goes, because there is no longer anything for it to revert.
+    """
+    event = get_event_from_config(guid)
+    if not event:
+        raise ValueError(f'No such event: {guid}')
+    existing = dict(event.get('overrides') or {})
+    stored_rev = int(_to_plain(existing.get('_rev') or 0)) or None
+    if expected_rev is not _UNSET and expected_rev != stored_rev:
+        raise OverlayConflict(guid, stored_rev, public_overlay(existing))
+
+    overlay = {
+        '_rev': (stored_rev or 0) + 1,
+        '_edited_by': actor or 'agent:mcp',
+        '_edited_at': _now_iso(),
+        '_comment': comment or 'overlay cleared',
+    }
+    try:
+        _put_overlay(guid, event, overlay,
+                     expected_rev if expected_rev is not _UNSET else stored_rev)
+    except ClientError as exc:
+        if exc.response['Error']['Code'] != 'ConditionalCheckFailedException':
+            raise
+        current = get_event_overlay(guid)
+        raise OverlayConflict(guid, _to_plain(current.get('_rev') or 0),
+                              public_overlay(current)) from exc
+    return _overlay_result(guid, event, overlay)
+
+
+def events_in_qa_run(run_id):
+    """Every (event, stamp) pair carrying an overlay written by `run_id`.
+
+    Scans past events too: the run may have hidden an event or a dated one, and
+    those still need to be revertible.
+    """
+    matched = []
+    for event in get_all_events(include_past=True):
+        stamp = (event.get('overrides') or {}).get('_qa_run') or {}
+        if stamp.get('run_id') == run_id:
+            matched.append((event, stamp))
+    return matched
+
+
+def describe_qa_run(run_id):
+    """What one run changed, and what each field was before it."""
+    return [
+        {
+            'guid': event['guid'],
+            'title': event.get('title', ''),
+            'date': event.get('date', ''),
+            'group': event.get('group', ''),
+            'comment': (event.get('overrides') or {}).get('_comment', ''),
+            'applied': public_overlay(event.get('overrides')),
+            'restores_to': _to_plain(stamp.get('prior') or {}),
+            'removes': list(stamp.get('added') or []),
+        }
+        for event, stamp in events_in_qa_run(run_id)
+    ]
+
+
+def revert_qa_run(run_id, *, actor=None):
+    """Undo one run: fields it introduced go, fields it overwrote come back.
+
+    Overlay fields written by another run or by hand are untouched, so this is
+    safe on an event edited since — for those fields. A field the run wrote and
+    a human then overwrote is restored to the run's snapshot, losing the human's
+    value; the UI warns about exactly that before letting someone overwrite an
+    agent field.
+    """
+    reverted = []
+    for event, stamp in events_in_qa_run(run_id):
+        overrides = dict(event.get('overrides') or {})
+        for key in stamp.get('added') or []:
+            overrides.pop(key, None)
+        for key, value in (stamp.get('prior') or {}).items():
+            overrides[key] = value
+        overrides.pop('_qa_run', None)
+        # The comment described this run's edit; it describes nothing once the
+        # edit is gone.
+        overrides.pop('_comment', None)
+
+        field_edits = dict(_to_plain(overrides.get('_field_edits') or {}))
+        for key in stamp.get('added') or []:
+            field_edits.pop(key, None)
+        if field_edits:
+            overrides['_field_edits'] = field_edits
+        else:
+            overrides.pop('_field_edits', None)
+
+        overrides['_rev'] = int(_to_plain(overrides.get('_rev') or 0)) + 1
+        overrides['_edited_by'] = actor or 'agent:revert'
+        overrides['_edited_at'] = _now_iso()
+
+        _put_overlay(event['guid'], event, overrides, _UNSET)
+        reverted.append({'guid': event['guid'],
+                         'title': event.get('title', ''),
+                         'overlay': public_overlay(overrides)})
+    return {'run_id': run_id, 'reverted': len(reverted), 'events': reverted}
 
 
 def bulk_delete_events(guids, actor_email):

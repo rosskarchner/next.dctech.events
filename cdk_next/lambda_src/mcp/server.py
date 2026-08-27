@@ -41,21 +41,11 @@ def _slugify(text: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')
 
 
-def _valid_category_slugs() -> set:
-    return set(db.get_all_categories().keys())
-
-
-def _check_categories(categories) -> None:
-    unknown = sorted(set(categories) - _valid_category_slugs())
-    if unknown:
-        raise ValueError(
-            f'Unknown category slug(s): {unknown}. '
-            f'Valid slugs: {sorted(_valid_category_slugs())}'
-        )
-
-
-_OVERLAY_PROTECTED_FIELDS = {'group', 'group_id', 'group_website', 'date',
-                             'end_date', 'guid', 'source'}
+# Category and overlay rules live in db.py, not here: the /edit UI writes
+# overlays through the same functions, and a second copy of the rules would let
+# the browser path and the agent path drift apart. See the "Event overlays"
+# section of db.py.
+_check_categories = db.validate_category_slugs
 
 # Compact projection to keep responses well under MCP message size limits.
 # Shared by get_events and list_pending_qa; get_event returns the full record.
@@ -63,26 +53,6 @@ _EVENT_FIELDS = [
     'guid', 'title', 'date', 'url', 'location', 'location_type',
     'group', 'group_id', 'source', 'categories',
 ]
-
-
-# Keys inside `overrides` that start with an underscore are private bookkeeping
-# (_comment, _qa_run) — never overlay values. export_dynamo_to_calgen strips
-# them, so calgen never sees them. Callers may not write them directly; the
-# tools below own them.
-
-
-def _check_overlay_fields(fields) -> None:
-    invalid = set(fields) & _OVERLAY_PROTECTED_FIELDS
-    if invalid:
-        raise ValueError(f'Cannot set protected overlay field(s): {sorted(invalid)}')
-    private = sorted(k for k in fields if k.startswith('_'))
-    if private:
-        raise ValueError(f'Cannot set reserved overlay key(s): {private}')
-
-
-def _public_overlay(overrides) -> dict:
-    """The overlay minus its private bookkeeping keys — what actually renders."""
-    return {k: v for k, v in (overrides or {}).items() if not k.startswith('_')}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -346,10 +316,7 @@ def add_category(slug: str, name: str, description: str) -> dict:
 @mcp.tool()
 def get_overlay(guid: str) -> dict:
     """Return the overlay (overrides) fields for one event guid (empty dict if none)."""
-    event = db.get_event_from_config(guid)
-    if not event:
-        return {}
-    return event.get('overrides') or {}
+    return db.get_event_overlay(guid)
 
 
 @mcp.tool()
@@ -359,51 +326,22 @@ def set_overlay(guid: str, fields: dict, comment: str,
     Merge `fields` into the event's `overrides`, preserving existing overlay
     fields. `comment` is recorded alongside as `_comment`.
 
-    Supported fields: duplicate_of, hidden, location, title, categories.
+    Editable fields: title, time, end_time, location, location_type, url, cost,
+    city, state, description, categories, all_day, hidden, duplicate_of.
     Protected fields (set by the pipeline from the source feed, not
     overridable) are rejected: group, group_id, group_website, date,
     end_date, guid, source.
+
+    `duplicate_of` must name an event that exists — a dangling one is silently
+    ignored at render, so the merge would look done and the event would keep
+    showing.
 
     `run_id` tags the write as part of a batch (the QA agent's weekly pass),
     recording each field's prior value so revert_qa_run can restore it. Pass
     it for automated writes; leave it unset for hand edits.
     """
-    _check_overlay_fields(fields)
-    event = db.get_event_from_config(guid)
-    if not event:
-        raise ValueError(f'No such event: {guid}')
-    existing = dict(event.get('overrides') or {})
-
-    if run_id:
-        # Record what each field looked like *before this run first touched
-        # it* — so reverting restores the prior value rather than blindly
-        # deleting, and a second write in the same run doesn't clobber the
-        # original snapshot. Keys with no prior value are tracked separately
-        # in `added` (a sentinel value wouldn't survive the DynamoDB round
-        # trip), and revert deletes those outright.
-        stamp = dict(existing.get('_qa_run') or {})
-        if stamp.get('run_id') != run_id:
-            stamp = {'run_id': run_id, 'prior': {}, 'added': []}
-        prior = dict(stamp.get('prior') or {})
-        added = list(stamp.get('added') or [])
-        for key in fields:
-            if key in prior or key in added:
-                continue
-            if key in existing:
-                prior[key] = existing[key]
-            else:
-                added.append(key)
-        stamp['prior'] = prior
-        stamp['added'] = added
-        existing['_qa_run'] = stamp
-
-    existing.update(fields)
-    if comment:
-        existing['_comment'] = comment
-    db.update_event(guid, {'date': event.get('date', ''),
-                           'time': event.get('time') or '00:00'},
-                    overrides=existing)
-    return {'guid': guid, 'overlay': _public_overlay(existing)}
+    result = db.set_event_overlay(guid, fields, comment, run_id=run_id)
+    return {'guid': result['guid'], 'overlay': result['overlay']}
 
 
 @mcp.tool()
@@ -461,39 +399,13 @@ def resolve_qa_review(guid: str, status: str) -> dict:
 # request: list what a run changed, and undo the whole run if it got it wrong.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _events_in_qa_run(run_id: str) -> list:
-    """Every event carrying an overlay written by `run_id`, with its stamp.
-
-    Scans all events (past included) — the run may have hidden an event or
-    dated one, and those still need to be revertible.
-    """
-    matched = []
-    for event in db.get_all_events(include_past=True):
-        stamp = (event.get('overrides') or {}).get('_qa_run') or {}
-        if stamp.get('run_id') == run_id:
-            matched.append((event, stamp))
-    return matched
-
-
 @mcp.tool()
 def list_qa_run(run_id: str) -> list:
     """
     List every overlay written by one QA agent run — what it changed, and what
     each field was before. Pair with revert_qa_run to undo the run.
     """
-    return [
-        {
-            'guid': event['guid'],
-            'title': event.get('title', ''),
-            'date': event.get('date', ''),
-            'group': event.get('group', ''),
-            'comment': (event.get('overrides') or {}).get('_comment', ''),
-            'applied': _public_overlay(event.get('overrides')),
-            'restores_to': stamp.get('prior') or {},
-            'removes': stamp.get('added') or [],
-        }
-        for event, stamp in _events_in_qa_run(run_id)
-    ]
+    return db.describe_qa_run(run_id)
 
 
 @mcp.tool()
@@ -503,27 +415,11 @@ def revert_qa_run(run_id: str) -> dict:
     are removed, fields it overwrote are restored to their previous value.
 
     Overlay fields written by other runs or by hand are left alone, so this is
-    safe on an event that has been edited since.
+    safe on an event that has been edited since — for those fields. A field the
+    run wrote and a human has since overwritten is restored to the run's
+    snapshot, losing the human's value.
     """
-    reverted = []
-    for event, stamp in _events_in_qa_run(run_id):
-        overrides = dict(event.get('overrides') or {})
-        for key in stamp.get('added') or []:
-            overrides.pop(key, None)
-        for key, value in (stamp.get('prior') or {}).items():
-            overrides[key] = value
-        overrides.pop('_qa_run', None)
-        # The comment described this run's edit; it no longer describes
-        # anything once the edit is gone.
-        overrides.pop('_comment', None)
-        db.update_event(event['guid'],
-                        {'date': event.get('date', ''),
-                         'time': event.get('time') or '00:00'},
-                        overrides=overrides)
-        reverted.append({'guid': event['guid'],
-                         'title': event.get('title', ''),
-                         'overlay': _public_overlay(overrides)})
-    return {'run_id': run_id, 'reverted': len(reverted), 'events': reverted}
+    return db.revert_qa_run(run_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

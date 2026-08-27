@@ -24,6 +24,17 @@ list_pending_qa = server.list_pending_qa
 resolve_qa_review = server.resolve_qa_review
 
 
+def rendered(store, guid):
+    """The overlay as calgen would see it — private bookkeeping stripped.
+
+    Assertions go through this rather than comparing the stored map directly:
+    an overlay also carries `_rev`, `_edited_by`, `_edited_at` and friends, and
+    a revert deliberately leaves those behind as the audit trail. What these
+    tests are about is which *overlay fields* survive.
+    """
+    return server.db.public_overlay(store[guid].get("overrides"))
+
+
 @pytest.fixture
 def store(monkeypatch):
     """An in-memory stand-in for the EVENT# items db.* reads and writes."""
@@ -39,7 +50,9 @@ def store(monkeypatch):
     monkeypatch.setattr(server.db, "get_all_events",
                         lambda include_past=False: [dict(e) for e in events.values()])
 
-    def _update(guid, data, overrides=None):
+    # **kw absorbs expect_overrides_rev: the real update_event takes it to make
+    # the write conditional, and an in-memory store has no race to lose.
+    def _update(guid, data, overrides=None, **kw):
         events[guid]["overrides"] = overrides
 
     monkeypatch.setattr(server.db, "update_event", _update)
@@ -166,7 +179,7 @@ def test_revert_removes_fields_the_run_introduced(store):
     result = revert_qa_run("r1")
 
     assert result["reverted"] == 1
-    assert store["g1"]["overrides"] == {}
+    assert rendered(store, "g1") == {}
 
 
 def test_revert_restores_a_value_the_run_overwrote(store):
@@ -185,7 +198,7 @@ def test_revert_leaves_overlay_fields_the_run_never_touched(store):
 
     revert_qa_run("r1")
 
-    assert store["g1"]["overrides"] == {"location": "Set By Hand"}
+    assert rendered(store, "g1") == {"location": "Set By Hand"}
 
 
 def test_revert_uses_the_earliest_snapshot_within_a_run(store):
@@ -205,8 +218,8 @@ def test_revert_spans_every_event_in_the_run(store):
     set_overlay("g2", {"duplicate_of": "g1"}, "qc", run_id="r1")
 
     assert revert_qa_run("r1")["reverted"] == 2
-    assert store["g1"]["overrides"] == {}
-    assert store["g2"]["overrides"] == {}
+    assert rendered(store, "g1") == {}
+    assert rendered(store, "g2") == {}
 
 
 def test_revert_leaves_other_runs_alone(store):
@@ -228,4 +241,4 @@ def test_revert_is_idempotent(store):
     revert_qa_run("r1")
     # The stamp is gone, so a second revert finds nothing to undo.
     assert revert_qa_run("r1")["reverted"] == 0
-    assert store["g1"]["overrides"] == {}
+    assert rendered(store, "g1") == {}
