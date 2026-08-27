@@ -184,12 +184,26 @@ def add_single_event(
 
 @mcp.tool()
 def update_single_event(guid: str, fields: dict) -> dict:
-    """Update fields on an existing single event (looked up by guid)."""
+    """Correct the stored record of an event that has no upstream feed.
+
+    The create/update pair with add_single_event, for fixing what the author
+    got wrong. This is *not* the editorial path — use set_overlay for that, so
+    the change is attributable and revertible.
+
+    Refuses iCal events: the aggregator rewrites those rows from the feed every
+    four hours, so an edit here would report success and vanish. Overlays are
+    the only thing that survives, which is what set_overlay writes.
+    """
     if 'categories' in fields:
         _check_categories(fields['categories'])
     event = db.get_event_from_config(guid)
     if not event:
         raise ValueError(f'No such event: {guid}')
+    if event.get('source') == 'ical':
+        raise ValueError(
+            f'{guid} is an iCal event — its record is rewritten from the feed '
+            f'every few hours. Use set_overlay to change it.'
+        )
     merged = {k: v for k, v in event.items() if k not in ('id', 'guid')}
     merged.update(fields)
     db.put_event(guid, merged, source=event.get('source', 'manual'),

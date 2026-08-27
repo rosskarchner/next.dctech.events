@@ -242,3 +242,29 @@ def test_revert_is_idempotent(store):
     # The stamp is gone, so a second revert finds nothing to undo.
     assert revert_qa_run("r1")["reverted"] == 0
     assert rendered(store, "g1") == {}
+
+
+# ── update_single_event is not the editorial path ───────────────────
+
+
+def test_update_single_event_refuses_an_ical_event(store, monkeypatch):
+    """The aggregator rewrites an iCal row from the feed every four hours, so
+    an edit here would report success and then vanish. Before this guard it
+    was a silent no-op that looked like a win."""
+    store["g1"]["source"] = "ical"
+    monkeypatch.setattr(server.db, "put_event",
+                        lambda *a, **kw: pytest.fail("should not have written"))
+
+    with pytest.raises(ValueError, match="use set_overlay|Use set_overlay"):
+        server.update_single_event("g1", {"title": "Nope"})
+
+
+def test_update_single_event_still_edits_a_manual_event(store, monkeypatch):
+    store["g1"]["source"] = "manual"
+    written = {}
+    monkeypatch.setattr(server.db, "put_event",
+                        lambda guid, data, **kw: written.update({guid: data}))
+
+    server.update_single_event("g1", {"title": "Corrected"})
+
+    assert written["g1"]["title"] == "Corrected"

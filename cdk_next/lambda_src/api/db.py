@@ -1000,47 +1000,126 @@ def revert_qa_run(run_id, *, actor=None):
     return {'run_id': run_id, 'reverted': len(reverted), 'events': reverted}
 
 
-def bulk_delete_events(guids, actor_email):
-    """Hide multiple events (manual/submitted records only)."""
+# ─── Bulk moderation ──────────────────────────────────────────────
+#
+# All of these go through set_event_overlay, and that is the whole point.
+# They used to write the *top-level* `hidden` / `categories` / `duplicate_of`
+# columns, which meant:
+#
+#   * For iCal events they did nothing at all. An iCal event's EVENT# row
+#     contributes only _overlay/{guid}.yaml to the build — its body comes from
+#     _cache/ical/, and export_dynamo_to_calgen skips writing a _single_events
+#     file for any source outside ('manual','submitted',None). So the top-level
+#     column never reached calgen. The bulk toolbar these were written for was
+#     a no-op on most of the calendar.
+#   * `categories` was reset from the group by the aggregator every four hours
+#     anyway, so even where it landed it did not last.
+#   * They called update_event with no `date`, and update_event rewrites GSI1
+#     from `data['date']` unconditionally — so they wrote the literal 'DATE#'
+#     and corrupted the index. Latent only because nothing reads
+#     get_events_by_date. Going through the overlay writer fixes this for free:
+#     it passes the event's real date and time.
+#
+# Each returns {'updated': int, 'failed': [{'guid', 'error'}]} rather than
+# raising, because one bad guid in a selection of forty should not read as
+# total failure. None of them use the conditional write: a human ticking forty
+# boxes must not get a conflict because the agent touched one of them.
+
+
+def _bulk_overlay(guids, fields, comment, actor, clear=()):
+    updated, failed = 0, []
     for guid in guids:
-        manual = get_event_from_config(guid)
-        if manual:
-            update_event(guid, {'hidden': True})
+        try:
+            set_event_overlay(guid, dict(fields), comment,
+                              actor=actor, clear=clear)
+            updated += 1
+        except (ValueError, OverlayConflict) as exc:
+            failed.append({'guid': guid, 'error': str(exc)})
+    return {'updated': updated, 'failed': failed}
+
+
+def bulk_delete_events(guids, actor_email, comment='hidden in bulk'):
+    """Hide multiple events. Named for history; it has never deleted anything."""
+    return _bulk_overlay(guids, {'hidden': True}, comment, actor_email)
+
+
+def bulk_unhide_events(guids, actor_email, comment='unhidden in bulk'):
+    """Stop hiding multiple events.
+
+    Clears the overlay field rather than setting `hidden: False`, so the event
+    falls back to whatever its source says instead of carrying a permanent
+    override that happens to agree.
+    """
+    return _bulk_overlay(guids, {}, comment, actor_email, clear=('hidden',))
 
 
 def bulk_hard_delete_events(guids, actor_email):
-    """Permanently delete multiple events (manual/submitted records only)."""
+    """Permanently delete multiple events.
+
+    Not editorial and not revertible, so this is deliberately not reachable
+    from the /edit UI — a moderator gets `hide`. It also does not do what it
+    appears to for an iCal event: the aggregator rewrites the row within four
+    hours and the deletion takes the overlay with it, so the event comes back
+    unmoderated. Kept for the rare stale manual record, via MCP.
+    """
     table = _get_table()
     for guid in guids:
         table.delete_item(Key={'PK': f'EVENT#{guid}', 'SK': 'META'})
 
 
 def delete_event(guid):
-    """Permanently delete a single event."""
+    """Permanently delete a single event. See bulk_hard_delete_events."""
     table = _get_table()
     table.delete_item(Key={'PK': f'EVENT#{guid}', 'SK': 'META'})
 
 
-def bulk_set_category(guids, category_slug, actor_email):
-    """Add a category to multiple events (manual/submitted records only)."""
+def bulk_set_category(guids, category_slug, actor_email,
+                      comment='category added in bulk'):
+    """Add one category to multiple events, keeping the ones already there.
+
+    Reads the *effective* categories, so repeatedly adding does not drop a
+    category an earlier overlay set.
+    """
+    updated, failed = 0, []
     for guid in guids:
-        event = get_event_from_config(guid)
-        if event:
-            cats = list(event.get('categories', []))
-            if category_slug not in cats:
-                cats.append(category_slug)
-                update_event(guid, {'categories': cats})
+        try:
+            event = get_event_from_config(guid)
+            if not event:
+                raise ValueError(f'No such event: {guid}')
+            cats = list(effective_event(event).get('categories') or [])
+            if category_slug in cats:
+                continue
+            cats.append(category_slug)
+            set_event_overlay(guid, {'categories': cats}, comment,
+                              actor=actor_email)
+            updated += 1
+        except (ValueError, OverlayConflict) as exc:
+            failed.append({'guid': guid, 'error': str(exc)})
+    return {'updated': updated, 'failed': failed}
 
 
-def bulk_combine_events(guids, target_guid, actor_email):
-    """Mark multiple events as duplicates of a target event (manual/submitted records only)."""
-    if target_guid in guids:
-        guids = [g for g in guids if g != target_guid]
+def bulk_combine_events(guids, target_guid, actor_email,
+                        comment='merged in bulk', hide_children=True):
+    """Mark multiple events as duplicates of `target_guid`.
 
-    for guid in guids:
-        manual = get_event_from_config(guid)
-        if manual:
-            update_event(guid, {'duplicate_of': target_guid})
+    `hide_children` also sets `hidden`, which is redundant at render — calgen's
+    remove_duplicates already drops a child, and it credits the parent's
+    `also_published_by` before the hidden filter runs — but it is deliberately
+    belt-and-braces: if the canonical event later leaves its feed, the dangling
+    `duplicate_of` stops being honoured and the child would resurrect as a stray
+    listing. Hidden, it stays gone until a human looks at it.
+    """
+    guids = [g for g in guids if g != target_guid]
+    fields = {'duplicate_of': target_guid}
+    if hide_children:
+        fields['hidden'] = True
+    return _bulk_overlay(guids, fields, comment, actor_email)
+
+
+def bulk_unmerge_events(guids, actor_email, comment='unmerged in bulk'):
+    """Undo a merge: stop pointing at a canonical event, and stop hiding."""
+    return _bulk_overlay(guids, {}, comment, actor_email,
+                         clear=('duplicate_of', 'hidden'))
 
 
 # ─── RECURRING EVENT operations ───────────────────────────────────
