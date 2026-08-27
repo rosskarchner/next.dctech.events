@@ -477,3 +477,66 @@ def test_bulk_unmerge_undoes_both_fields(store):
     db.bulk_combine_events(["g2"], "g1", "a@b.c")
     db.bulk_unmerge_events(["g2"], "a@b.c")
     assert db.public_overlay(overlay_of(store, "g2")) == {}
+
+
+# ── Value types ────────────────────────────────────────────────────
+# The name allowlist does not constrain values. Two manual events were found in
+# production carrying {'title': True, 'hidden': True, 'categories': True} —
+# checkbox values from the old admin form, inert only because overlays did not
+# apply to manual events then (next_dctech_events-9jk).
+
+
+def test_the_exact_junk_found_in_production_is_now_refused(store):
+    with pytest.raises(ValueError, match="title must be a string"):
+        db.set_event_overlay("g1", {"title": True, "hidden": True,
+                                    "categories": True}, "why")
+
+
+def test_a_boolean_is_not_accepted_for_a_string_field(store):
+    # bool is not a str subclass, but spelling this out guards the reverse
+    # mistake of accepting True for a text field via truthiness.
+    with pytest.raises(ValueError, match="not true/false"):
+        db.set_event_overlay("g1", {"location": True}, "why")
+
+
+def test_a_string_is_not_accepted_for_a_boolean_field(store):
+    # The form-encoded "true" that started all this.
+    with pytest.raises(ValueError, match="hidden must be true or false"):
+        db.set_event_overlay("g1", {"hidden": "true"}, "why")
+
+
+def test_categories_must_be_a_list(store):
+    with pytest.raises(ValueError, match="categories must be a list"):
+        db.set_event_overlay("g1", {"categories": "ai"}, "why")
+
+
+def test_categories_must_hold_strings(store):
+    with pytest.raises(ValueError, match="list of strings"):
+        db.set_event_overlay("g1", {"categories": ["ai", 7]}, "why")
+
+
+def test_a_number_is_not_accepted_for_a_string_field(store):
+    with pytest.raises(ValueError, match="title must be a string"):
+        db.set_event_overlay("g1", {"title": 42}, "why")
+
+
+def test_none_is_allowed_and_means_no_value(store):
+    # Distinct from clear(), which removes the key; a stored None is how a
+    # caller says "override this to empty".
+    db.set_event_overlay("g1", {"location": None}, "no venue given")
+    assert overlay_of(store, "g1")["location"] is None
+
+
+def test_well_typed_values_still_pass(store):
+    db.set_event_overlay("g1", {"title": "Real Title", "hidden": True,
+                                "all_day": False, "categories": ["ai"]},
+                         "why")
+    rendered = db.public_overlay(overlay_of(store, "g1"))
+    assert rendered == {"title": "Real Title", "hidden": True,
+                        "all_day": False, "categories": ["ai"]}
+
+
+def test_every_editable_field_has_a_declared_type(store):
+    # A field added to the allowlist without a type would silently accept
+    # anything, which is the hole this closes.
+    assert set(db.OVERLAY_EDITABLE_FIELDS) == set(db._OVERLAY_FIELD_TYPES)

@@ -733,8 +733,46 @@ def _now_iso():
     return datetime.now(_tz.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
+# What each editable field is allowed to hold. The allowlist covers *names*;
+# this covers *values*, which is a separate failure. Two manual events were
+# found in production carrying {'title': True, 'hidden': True,
+# 'categories': True} — boolean flags where values belong, almost certainly
+# from the old forked admin form submitting checkbox values for every named
+# field. They were inert only because overlays did not apply to manual events
+# at the time (next_dctech_events-9jk).
+_OVERLAY_FIELD_TYPES = {
+    'title': str, 'location': str, 'location_type': str, 'url': str,
+    'cost': str, 'city': str, 'state': str, 'description': str,
+    'time': str, 'end_time': str, 'duplicate_of': str,
+    'hidden': bool, 'all_day': bool,
+    'categories': list,
+}
+
+_TYPE_NAMES = {str: 'a string', bool: 'true or false', list: 'a list'}
+
+
+def _check_overlay_types(fields):
+    for key, value in fields.items():
+        expected = _OVERLAY_FIELD_TYPES.get(key)
+        if expected is None or value is None:
+            continue
+        # bool is a subclass of int but not of str, so the only pair needing
+        # care is the reverse: a bool must not satisfy a str field.
+        if expected is str and isinstance(value, bool):
+            raise ValueError(
+                f'{key} must be {_TYPE_NAMES[str]}, not true/false')
+        if not isinstance(value, expected):
+            raise ValueError(
+                f'{key} must be {_TYPE_NAMES[expected]}, '
+                f'got {type(value).__name__}')
+        if expected is list and any(not isinstance(v, str) for v in value):
+            raise ValueError(f'{key} must be a list of strings')
+
+
 def _validate_overlay_values(guid, fields):
     """Value-level checks the field allowlist cannot express."""
+    _check_overlay_types(fields)
+
     if 'categories' in fields:
         validate_category_slugs(fields['categories'])
 
