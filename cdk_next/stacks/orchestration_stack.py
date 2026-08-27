@@ -3,13 +3,14 @@
 Monday used to be four independent EventBridge rules ordered only by wall
 clock: the QC pass at 09:00, the daily site build also at 09:00, the
 week-ahead link post at 10:30, the newsletter at 11:00. Nothing waited for
-anything, and the site build trigger *drops* work when a build is already
-running ("build already in progress; skipping"), so the collisions were not
-harmless:
+anything, and at the time the site build trigger *dropped* work when a build
+was already running, so the collisions were not harmless:
 
 * QC writes overlays onto EVENT# items, which is a rebuild trigger. Landing
   those writes inside the 09:00 scheduled build meant the trigger skipped, and
-  nothing queued another build.
+  nothing queued another build. (The trigger no longer skips — see
+  next_dctech_events-lux — but the ordering below is still what makes the
+  week-ahead post count a clean calendar.)
 * The week-ahead post freezes a count read from the published events.json. If
   no build had run since QC, that count included the events QC had just
   hidden.
@@ -30,9 +31,10 @@ expresses:
     SendNewsletter      last, so it never links a post that is not up yet
 
 `codebuild:startBuild.sync` is the load-bearing integration: it *waits* for
-the build, which is what removes the skip-on-collision race from this chain.
-The stream-fed trigger still fires during a run and still skips — correctly,
-because the build it sees in progress is this machine's.
+the build, so the chain never races ahead of the site it just published.
+The stream-fed trigger still fires during a run, and now starts a build rather
+than skipping; the project's concurrent_build_limit of 1 makes CodeBuild queue
+it behind this machine's. That is why BUILD_TIMEOUT allows for a wait.
 
 Referenced by function name rather than by cross-stack import, matching the
 reasoning NextUpdatesStack already applies to the social secrets: this stack

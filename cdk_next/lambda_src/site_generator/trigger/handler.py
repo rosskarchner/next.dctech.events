@@ -1,8 +1,20 @@
 """DynamoDB-Streams-fed CodeBuild trigger for the static site generator.
 
-Batched by the event source mapping (60s window); guards against overlapping
-builds by skipping when a build is already running — the 4-hour scheduled
-build and the on-demand /admin/rebuild route cover anything missed.
+Batched by the event source mapping (60s window), then started unconditionally.
+
+It used to skip when a build was already running, on the grounds that "the
+scheduled build will catch up". That safety net is only daily, so a change
+landing during a build could sit unpublished for up to 24 hours — which is what
+happened when an event was hidden by hand and CodeBuild had to be force-invoked
+(next_dctech_events-lux). Overlay writes are especially exposed, because they
+arrive as EVENT# stream records in the same burst as the aggregator's own churn.
+
+The skip existed for a real reason: every build ends in `s3 sync --delete` over
+the whole site bucket, and two overlapping builds can have the older one
+deleting what the newer just wrote. That is now prevented a level down — the
+project carries concurrent_build_limit=1, so CodeBuild queues a second build
+instead of running it. Serialising there rather than here means a queued build
+still happens, where a skipped one never did.
 """
 import os
 
@@ -32,14 +44,6 @@ def lambda_handler(event, context):
     if not relevant:
         print(f'No site-relevant changes in {len(records)} records; skipping')
         return {'started': False, 'reason': 'no relevant changes'}
-
-    in_progress = codebuild.list_builds_for_project(
-        projectName=PROJECT_NAME, sortOrder='DESCENDING')['ids'][:5]
-    if in_progress:
-        statuses = codebuild.batch_get_builds(ids=in_progress)['builds']
-        if any(b['buildStatus'] == 'IN_PROGRESS' for b in statuses):
-            print('Build already in progress; skipping (scheduled build will catch up)')
-            return {'started': False, 'reason': 'build in progress'}
 
     build = codebuild.start_build(projectName=PROJECT_NAME)
     build_id = build['build']['id']

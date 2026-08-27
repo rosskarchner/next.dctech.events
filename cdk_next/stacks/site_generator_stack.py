@@ -105,9 +105,11 @@ class NextSiteGeneratorStack(cdk.Stack):
             # One build at a time. Every build ends in `s3 sync --delete` over
             # the whole site bucket, so two overlapping builds can have an
             # older one deleting files a newer one just wrote. CodeBuild queues
-            # the second rather than refusing it, which is also what lets the
-            # Monday state machine call startBuild.sync while the stream-fed
-            # trigger is firing.
+            # the second rather than refusing it, which is what lets the Monday
+            # state machine call startBuild.sync while the stream-fed trigger
+            # is firing — and what let that trigger stop skipping when a build
+            # was already running, since serialising here means a contended
+            # build is queued rather than dropped (next_dctech_events-lux).
             concurrent_build_limit=1,
             timeout=cdk.Duration.minutes(30),
         )
