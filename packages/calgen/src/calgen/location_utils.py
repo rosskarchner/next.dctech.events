@@ -39,6 +39,50 @@ _STATE_ABBR_TO_NAME = {
 }
 
 
+def normalize_location(location):
+    """Tidy a location string from a feed: collapse a repeated trailing
+    "City, ST" and squeeze empty comma segments.
+
+    Meetup's iCal LOCATION already ends in "City, ST" and then appends the city
+    and state again, so a majority of imported events display them twice:
+
+        Rockville Memorial Library, Rockville Town Square Plaza,
+        21 Maryland Ave, Rockville, MD, Rockville, MD
+
+    That is machine-generated noise rather than an organiser's typo — it spans
+    every Meetup-sourced group — so it is fixed once here instead of by a
+    moderator, or weekly by the QC agent (next_dctech_events-8so).
+
+    A trailing two-letter state is upper-cased while we are here; Meetup emits
+    a lowercase one often enough ("Arlington, va") that it shows on the site.
+
+    Deliberately conservative: only an *exact* repeat of the final two segments
+    is dropped, and only from the end. A venue that genuinely repeats a word
+    keeps it.
+    """
+    if not location:
+        return location
+
+    parts = [p.strip() for p in str(location).split(',')]
+    parts = [p for p in parts if p]
+    if not parts:
+        return ''
+
+    # "…, Rockville, MD, Rockville, MD" -> "…, Rockville, MD". Looped so a
+    # triple collapses too.
+    while len(parts) >= 4:
+        tail = [p.casefold() for p in parts[-2:]]
+        before = [p.casefold() for p in parts[-4:-2]]
+        if tail != before:
+            break
+        parts = parts[:-2]
+
+    if len(parts[-1]) == 2 and parts[-1].upper() in _STATE_ABBR_TO_NAME:
+        parts[-1] = parts[-1].upper()
+
+    return ', '.join(parts)
+
+
 def extract_location_info(address):
     """
     Extract city and state from an address string.

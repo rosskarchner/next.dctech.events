@@ -18,6 +18,7 @@ import recurring_ical_events
 
 from calgen.site_config import get_config
 from calgen.event_utils import _normalize_title
+from calgen.location_utils import normalize_location
 
 config = get_config()
 timezone_name = config.get('timezone', 'US/Eastern')
@@ -203,7 +204,10 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
                 event_url = url_match.group(0) if url_match else (group.get('website', '') if group else '')
 
             is_virtual = False
-            ical_location = str(event.get('location', ''))
+            # Normalized here rather than downstream so the tidy value is what
+            # gets cached, rendered, and compared — Meetup doubles the trailing
+            # "City, ST" on most of its feeds (next_dctech_events-8so).
+            ical_location = normalize_location(str(event.get('location', '')))
             resolved_location = ical_location
             if event_url:
                 ld_data = fetch_json_ld_data(event_url)
@@ -214,7 +218,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
                     title = _normalize_title(ld_data['title'])
                 is_virtual = ld_data.get('is_virtual', False)
                 if not ical_location and ld_data.get('location'):
-                    resolved_location = ld_data['location']
+                    resolved_location = normalize_location(ld_data['location'])
 
             if not is_virtual:
                 virtual_keywords = ['virtual', 'online', 'remote', 'zoom', 'webinar', 'livestream', 'live stream', 'internet']
