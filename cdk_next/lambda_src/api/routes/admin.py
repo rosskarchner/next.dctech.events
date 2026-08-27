@@ -80,17 +80,6 @@ def _promote_approved_draft(draft_id, draft_type, merged):
     return promote_draft(draft_id, draft_type, merged)
 
 
-def dashboard(event, jinja_env):
-    """GET /admin/dashboard — Main admin view."""
-    claims, err = _admin_check(event)
-    if err:
-        return err
-
-    template = jinja_env.get_template('admin/dashboard.html')
-    html = template.render(claims=claims)
-    return _html(200, html, event)
-
-
 # ─── Draft Queue ──────────────────────────────────────────────────
 
 def get_queue(event, jinja_env):
@@ -138,6 +127,13 @@ def get_approve_form(event, jinja_env, draft_id):
 
 def get_draft_row(event, jinja_env, draft_id):
     """GET /admin/draft/{id}/row — Return just the queue row."""
+    # The gateway authorizer on /admin/* checks for a valid token but not for
+    # the admins group, so without this any signed-in user could read any
+    # draft — submitter_email included.
+    claims, err = _admin_check(event)
+    if err:
+        return err
+
     draft = db_get_draft(draft_id)
     template = jinja_env.get_template('partials/draft_row.html')
     html = template.render(draft=draft)
@@ -272,17 +268,6 @@ def trigger_rebuild_json(event, jinja_env):
 
 
 # ─── Newsletter Subscribers ──────────────────────────────────────────
-
-def get_subscribers(event, jinja_env):
-    """GET /admin/subscribers — Newsletter subscribers page."""
-    claims, err = _admin_check(event)
-    if err:
-        return err
-
-    template = jinja_env.get_template('admin/subscribers.html')
-    html = template.render(claims=claims)
-    return _html(200, html, event)
-
 
 def get_subscribers_json(event, jinja_env):
     """GET /api/admin/subscribers — Return subscribers as JSON."""

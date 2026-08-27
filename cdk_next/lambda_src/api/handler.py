@@ -12,7 +12,7 @@ import traceback
 
 from jinja2 import Environment, FileSystemLoader
 
-from routes import public, submit, admin
+from routes import public, submit, admin, events
 
 # Set up Jinja2 template environment
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -129,6 +129,44 @@ def lambda_handler(event, context):
         if path == '/api/admin/rebuild' and http_method == 'POST':
             return add_cors(admin.trigger_rebuild_json(event, jinja_env))
 
+        # ── Events and overlays (the human QA surface) ──────────────
+        # /bulk is matched before the {guid} block below, or it parses as a
+        # guid — the same trap the drafts routes navigate with /approve and
+        # /reject.
+        if path == '/api/admin/events' and http_method == 'GET':
+            return add_cors(events.list_events_json(event, jinja_env))
+
+        if path == '/api/admin/events/bulk' and http_method == 'POST':
+            return add_cors(events.bulk_json(event, jinja_env))
+
+        if path.startswith('/api/admin/events/'):
+            rest = path[len('/api/admin/events/'):].split('/')
+            guid, tail = rest[0], (rest[1] if len(rest) > 1 else '')
+            if guid:
+                if tail == 'overlay' and http_method == 'PUT':
+                    return add_cors(
+                        events.put_overlay_json(event, jinja_env, guid))
+                if tail == 'overlay' and http_method == 'DELETE':
+                    return add_cors(
+                        events.delete_overlay_json(event, jinja_env, guid))
+                if tail == 'review-status' and http_method == 'PUT':
+                    return add_cors(
+                        events.put_review_status_json(event, jinja_env, guid))
+                if not tail and http_method == 'GET':
+                    return add_cors(
+                        events.get_event_json(event, jinja_env, guid))
+
+        if path.startswith('/api/admin/qa-runs/'):
+            rest = path[len('/api/admin/qa-runs/'):].split('/')
+            run_id, tail = rest[0], (rest[1] if len(rest) > 1 else '')
+            if run_id:
+                if tail == 'revert' and http_method == 'POST':
+                    return add_cors(
+                        events.revert_qa_run_json(event, jinja_env, run_id))
+                if not tail and http_method == 'GET':
+                    return add_cors(
+                        events.get_qa_run_json(event, jinja_env, run_id))
+
         if path.startswith('/api/admin/drafts/') and path.endswith('/approve') and http_method == 'POST':
             draft_id = path.split('/')[4]
             return add_cors(admin.approve_draft_json(event, jinja_env, draft_id))
@@ -181,14 +219,11 @@ def lambda_handler(event, context):
             return add_cors(submit.my_submissions(event, jinja_env))
 
         # Admin routes (authenticated + admin group)
-        if path == '/admin' and http_method == 'GET':
-            return add_cors(admin.dashboard(event, jinja_env))
-
+        # No /admin or /admin/subscribers: both rendered templates that do not
+        # exist in this fork (admin/dashboard.html, admin/subscribers.html) and
+        # returned 500. The live UI is the static one under /edit/.
         if path == '/admin/queue' and http_method == 'GET':
             return add_cors(admin.get_queue(event, jinja_env))
-
-        if path == '/admin/subscribers' and http_method == 'GET':
-            return add_cors(admin.get_subscribers(event, jinja_env))
 
         if path == '/admin/rebuild' and http_method == 'POST':
             return add_cors(admin.trigger_rebuild_json(event, jinja_env))
