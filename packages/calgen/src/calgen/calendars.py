@@ -20,6 +20,37 @@ from calgen.site_config import get_config
 from calgen.event_utils import _normalize_title
 from calgen.location_utils import normalize_location
 
+# Cancellation markers organisers put in a title when their platform has no
+# STATUS field to set, or when they want it visible in a listing. Deliberately
+# only *decorated* forms: a bare substring match would drop "How to Cancel Your
+# Subscription" and any talk about cancellation policy. Seen in the wild as
+# "*** Cancelled ***" on an Eventbrite feed (next_dctech_events-kqt).
+_CANCELLED_IN_TITLE = (
+    re.compile(r'\*+\s*cancell?ed\s*\*+', re.I),          # *** Cancelled ***
+    re.compile(r'[\[(]\s*cancell?ed\s*[\])]', re.I),       # [CANCELLED], (canceled)
+    re.compile(r'^\s*cancell?ed\s*[:\-\u2013\u2014]', re.I),   # CANCELLED: Foo
+    re.compile(r'[:\-\u2013\u2014]\s*cancell?ed\s*$', re.I),   # Foo - CANCELLED
+)
+
+
+def title_says_cancelled(title):
+    """Whether a title carries a decorated cancellation marker."""
+    text = str(title or '')
+    return any(pattern.search(text) for pattern in _CANCELLED_IN_TITLE)
+
+
+def ical_says_cancelled(component):
+    """Whether the VEVENT's own STATUS property says CANCELLED.
+
+    The iCal standard's answer, and the cheap one: no page fetch, no scraping,
+    works for every feed that bothers to set it. Until now cancellation was
+    detected only by scraping schema.org eventStatus off the event page, which
+    needs a URL, a reachable page, and JSON-LD on it — three ways to miss.
+    """
+    status = component.get('status')
+    return str(status or '').strip().upper() == 'CANCELLED'
+
+
 config = get_config()
 timezone_name = config.get('timezone', 'US/Eastern')
 local_tz = pytz.timezone(timezone_name)
@@ -195,6 +226,12 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
                     end_date_str = dtend.strftime('%Y-%m-%d')
 
             title = _normalize_title(str(event.get('summary', 'Untitled Event')))
+            if ical_says_cancelled(event):
+                print(f"  Skipping cancelled event (STATUS): {title}")
+                return
+            if title_says_cancelled(title):
+                print(f"  Skipping cancelled event (title): {title}")
+                return
             url_field = event.get('url')
             if url_field:
                 event_url = str(url_field)
