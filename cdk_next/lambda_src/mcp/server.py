@@ -169,6 +169,8 @@ def add_single_event(
     from event_utils import calculate_event_hash
     categories = categories or []
     _check_categories(categories)
+    date = db.validate_event_date(date)
+    end_date = db.validate_event_date(end_date, 'end_date')
     guid = calculate_event_hash(date, '', title, url)
     if db.get_event_from_config(guid):
         raise ValueError(f'Event already exists: {guid}')
@@ -196,6 +198,12 @@ def update_single_event(guid: str, fields: dict) -> dict:
     """
     if 'categories' in fields:
         _check_categories(fields['categories'])
+    fields = dict(fields)
+    for key in ('date', 'end_date'):
+        if key in fields:
+            fields[key] = db.validate_event_date(fields[key], key)
+    if 'time' in fields:
+        fields['time'] = db.validate_event_time(fields['time'])
     event = db.get_event_from_config(guid)
     if not event:
         raise ValueError(f'No such event: {guid}')
@@ -261,6 +269,8 @@ def add_recurring_event(
     """
     categories = categories or []
     _check_categories(categories)
+    date = db.validate_event_date(date)
+    time = db.validate_event_time(time)
     if not rrule.strip():
         raise ValueError('rrule must be a non-empty RFC-5545 RRULE string')
     file_id = _slugify(title)
@@ -723,6 +733,10 @@ def propose_event(title: str, date: str, url: str, location: str,
     """
     categories = categories or []
     _check_categories(categories)
+    # This tool calls db.create_draft directly rather than going through
+    # build_event_draft_data, so it does not inherit that function's checks.
+    date = db.validate_event_date(date)
+    end_date = db.validate_event_date(end_date, 'end_date')
 
     from event_utils import calculate_event_hash
     if db.get_event_from_config(calculate_event_hash(date, '', title, url)):

@@ -98,6 +98,84 @@ def _from_plain(val):
     return val
 
 
+# ─── Date and time validation ─────────────────────────────────────
+#
+# DynamoDB sort keys are strings, and put_event writes GSI1SK/GSI4SK straight
+# from an event's date. So a date stored as free text does not merely look
+# wrong, it sorts wrong: two rows holding 'June 6th 2025' sorted as though the
+# year were "June", and `date >= '2026-08-27'` was true for them because "J"
+# comes after "2". Any range query over GSI4 — which is how get_all_events
+# bounds a month or "today forward" — is silently misled by one
+# (next_dctech_events-eex).
+#
+# calgen tolerated this because load_single_events runs the string through
+# dateparser defensively. Nothing upstream checked, so the bad value reached the
+# table and stayed there for eight months.
+#
+# Rejected rather than parsed: guessing at free text needs dateparser, which
+# this Lambda does not bundle, and an explicit error tells the caller what shape
+# to send instead of quietly picking a year.
+
+_ISO_DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+_HH_MM = re.compile(r'^\d{2}:\d{2}$')
+
+
+def validate_event_date(value, field='date'):
+    """Return `value` as 'YYYY-MM-DD', or raise ValueError.
+
+    A real date object is formatted; a string must already be ISO-8601 *and* a
+    date that exists — '2026-02-30' matches the pattern and is not a day.
+    Empty is passed through for callers where the field is optional.
+    """
+    if value is None or value == '':
+        return value
+    if isinstance(value, _date_type):
+        return value.strftime('%Y-%m-%d')
+    text = str(value).strip()
+    if not _ISO_DATE.match(text):
+        raise ValueError(
+            f"{field} must be an ISO-8601 date like '2026-09-08', got {value!r}")
+    try:
+        _date_type.fromisoformat(text)
+    except ValueError:
+        raise ValueError(f'{field} is not a real date: {value!r}') from None
+    return text
+
+
+def _validate_hh_mm(value, field):
+    text = str(value).strip()
+    if not _HH_MM.match(text):
+        raise ValueError(
+            f"{field} must be 24-hour 'HH:MM' like '18:30', got {value!r}")
+    hours, minutes = int(text[:2]), int(text[3:])
+    if hours > 23 or minutes > 59:
+        raise ValueError(f'{field} is not a real time: {value!r}')
+    return text
+
+
+def validate_event_time(value, field='time'):
+    """Return `value` as 'HH:MM', or raise ValueError.
+
+    Empty and None are valid: an all-day event has no time, and calgen writes
+    '' for a midnight start.
+
+    A multi-day event may instead carry a {date: 'HH:MM'} map — a conference
+    that starts at 14:00 on its first day and 10:00 on the rest. calgen renders
+    that shape deliberately (app.py's `isinstance(original_time, dict)`), so it
+    is validated per entry rather than refused. Its keys are dates and are
+    checked as such; they are not sort keys, but a bad one would render.
+    """
+    if value is None or value == '':
+        return value
+    if isinstance(value, dict):
+        return {
+            validate_event_date(day, f'{field} key'):
+                _validate_hh_mm(at, f'{field}[{day}]')
+            for day, at in value.items()
+        }
+    return _validate_hh_mm(value, field)
+
+
 # ─── DRAFT operations ─────────────────────────────────────────────
 
 def normalize_categories(data):
@@ -133,6 +211,13 @@ def build_event_draft_data(data):
     if not title or not date_val:
         return None, 'Event title and date are required.'
 
+    # Returned as a message rather than raised: this function's contract is
+    # (draft, error) and both callers render the error to whoever submitted.
+    try:
+        date_val = validate_event_date(date_val)
+    except ValueError as exc:
+        return None, str(exc)
+
     if timing == 'specific' and not time_str:
         hour = data.get('time_hour', '')
         minute = data.get('time_minute', '00')
@@ -144,6 +229,11 @@ def build_event_draft_data(data):
             elif ampm == 'AM' and h == 12:
                 h = 0
             time_str = f'{h:02d}:{minute}'
+
+    try:
+        time_str = validate_event_time(time_str)
+    except ValueError as exc:
+        return None, str(exc)
 
     draft_data = {
         'title': title,
@@ -352,6 +442,14 @@ def put_event(guid, data, source='manual', review_status='approved', created_at=
 
     Used by the migration script, the iCal aggregator, and MCP tools.
     """
+    # The GSI1/GSI4 sort keys are built from these below, so a free-text
+    # date does not just look wrong, it sorts wrong (next_dctech_events-eex).
+    data = dict(data)
+    data['date'] = validate_event_date(data.get('date'))
+    if 'end_date' in data:
+        data['end_date'] = validate_event_date(data.get('end_date'), 'end_date')
+    if 'time' in data:
+        data['time'] = validate_event_time(data.get('time'))
     table = _get_table()
     now = created_at or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     date_val = str(data.get('date', '') or '')
