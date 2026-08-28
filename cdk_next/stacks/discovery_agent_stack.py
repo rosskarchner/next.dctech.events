@@ -163,6 +163,10 @@ class NextDiscoveryAgentStack(cdk.Stack):
             schedule=events.Schedule.cron(minute="0", hour="9", week_day="THU"),
             targets=[targets.LambdaFunction(self.trigger)],
             description="Weekly event discovery pass",
+            # Disabled 2026-08-28 pending review of the runaway-cost incident
+            # in next-stack-bedrock-cost-incident memory. Flip back to True
+            # (the implicit default) to re-enable.
+            enabled=False,
         )
 
         cdk.CfnOutput(self, "DiscoveryRuntimeArn",
