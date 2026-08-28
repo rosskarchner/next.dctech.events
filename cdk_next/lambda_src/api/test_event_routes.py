@@ -573,3 +573,79 @@ def test_the_broken_admin_dashboard_route_is_gone(store):
     assert not hasattr(events_routes, "dashboard")
     response = handler.lambda_handler(request("/admin", "GET"), None)
     assert response["statusCode"] == 404
+
+
+# ── Month and category filters ─────────────────────────────────────
+
+
+def test_filtering_by_month(store):
+    store["man1"]["date"] = "2026-10-05"
+    payload = call("/api/admin/events", query={"month": "2026-09"})[1]
+    assert {r["guid"] for r in payload["events"]} == {"ical1", "ical2"}
+
+
+def test_the_month_filter_also_works_on_the_review_queue(store):
+    # The queue comes from GSI5, which has no date bound — so the month has to
+    # be applied in the filter or it would silently do nothing here.
+    store["ical2"]["date"] = "2026-10-05"
+    payload = call("/api/admin/events",
+                   query={"review_status": "pending_qa", "month": "2026-09"})[1]
+    assert payload["mode"] == "review_status"
+    assert [r["guid"] for r in payload["events"]] == ["ical1"]
+
+
+def test_a_malformed_month_is_a_400(store):
+    status, payload = call("/api/admin/events", query={"month": "September"})
+    assert status == 400
+    assert "YYYY-MM" in payload["error"]
+
+
+def test_the_available_months_are_offered(store):
+    store["man1"]["date"] = "2026-10-05"
+    payload = call("/api/admin/events")[1]
+    assert payload["months"] == ["2026-10", "2026-09"]
+
+
+def test_choosing_a_month_does_not_collapse_the_month_picker(store):
+    # The picker must keep offering every month, or you could not switch away
+    # from the one you just chose.
+    store["man1"]["date"] = "2026-10-05"
+    payload = call("/api/admin/events", query={"month": "2026-09"})[1]
+    assert payload["months"] == ["2026-10", "2026-09"]
+    assert {r["guid"] for r in payload["events"]} == {"ical1", "ical2"}
+
+
+def test_filtering_by_category(store):
+    payload = call("/api/admin/events", query={"category": "ai"})[1]
+    assert [r["guid"] for r in payload["events"]] == ["man1"]
+
+
+def test_the_category_filter_reads_the_effective_categories(store):
+    # A category added by overlay is the one showing on the site, so it is the
+    # one to filter on — the record still says [].
+    db.set_event_overlay("ical1", {"categories": ["cloud"]}, "corrected")
+    payload = call("/api/admin/events", query={"category": "cloud"})[1]
+    assert [r["guid"] for r in payload["events"]] == ["ical1"]
+
+
+def test_an_overlay_can_filter_an_event_out_of_its_records_category(store):
+    # man1's record says ['ai']; the overlay replaces that wholesale.
+    db.set_event_overlay("man1", {"categories": ["cloud"]}, "recategorized")
+    assert call("/api/admin/events", query={"category": "ai"})[1]["events"] == []
+    assert [r["guid"] for r in
+            call("/api/admin/events", query={"category": "cloud"})[1]["events"]] \
+        == ["man1"]
+
+
+def test_a_category_nothing_has_returns_an_empty_list_not_an_error(store):
+    status, payload = call("/api/admin/events", query={"category": "gaming"})
+    assert status == 200
+    assert payload["events"] == []
+
+
+def test_month_and_category_compose(store):
+    db.set_event_overlay("ical1", {"categories": ["ai"]}, "tagged")
+    store["man1"]["date"] = "2026-10-05"
+    payload = call("/api/admin/events",
+                   query={"month": "2026-09", "category": "ai"})[1]
+    assert [r["guid"] for r in payload["events"]] == ["ical1"]

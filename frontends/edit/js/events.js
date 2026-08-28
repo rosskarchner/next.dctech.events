@@ -28,7 +28,8 @@
   let merging = null;
   let lastUndo = null;
 
-  const view = { state: 'pending_qa', source: '', q: '', includePast: false };
+  const view = { state: 'pending_qa', source: '', month: '', category: '',
+                 q: '', includePast: false };
 
   // ── data ────────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@
       params.set('state', view.state);
     }
     if (view.source) params.set('source', view.source);
+    if (view.month) params.set('month', view.month);
+    if (view.category) params.set('category', view.category);
     if (view.q) params.set('q', view.q);
     if (view.includePast) params.set('include_past', '1');
     return params.toString();
@@ -62,6 +65,7 @@
       // and get swept into the next bulk action.
       const visible = new Set(allEvents.map(e => e.guid));
       selected = new Set([...selected].filter(g => visible.has(g)));
+      renderMonths(payload.months || []);
       renderTable();
       renderFooter(payload);
       renderBulkState();
@@ -74,14 +78,44 @@
     const response = await fetch(DctechAuth.getApiUrl('/api/categories'));
     if (!response.ok) return;
     categoriesBySlug = await response.json();
-    const select = document.getElementById('bulk-category');
+    const options = Object.entries(categoriesBySlug)
+      .sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0]))
+      .map(([slug, cat]) =>
+        `<option value="${escapeHtml(slug)}">${escapeHtml(cat.name || slug)}</option>`)
+      .join('');
+
+    const bulk = document.getElementById('bulk-category');
+    if (bulk) bulk.innerHTML = '<option value="">Add category…</option>' + options;
+
+    const filter = document.getElementById('filter-category');
+    if (filter) filter.innerHTML = '<option value="">Any category</option>' + options;
+  }
+
+  function monthLabel(month) {
+    // 'YYYY-MM' -> 'September 2026'. Parsed as UTC noon so a timezone west of
+    // UTC cannot roll it back into the previous month.
+    const [year, mon] = month.split('-');
+    const when = new Date(Date.UTC(Number(year), Number(mon) - 1, 15));
+    return when.toLocaleDateString(undefined,
+      { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
+
+  function renderMonths(months) {
+    const select = document.getElementById('filter-month');
     if (!select) return;
-    select.innerHTML = '<option value="">Add category…</option>' +
-      Object.entries(categoriesBySlug)
-        .sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0]))
-        .map(([slug, cat]) =>
-          `<option value="${escapeHtml(slug)}">${escapeHtml(cat.name || slug)}</option>`)
+    // The API returns the months present *before* its own month filter runs,
+    // so the list stays complete and you can switch away from the month you
+    // just chose. Keep the current value even if it somehow drops out, or the
+    // select would silently reset and widen the results.
+    const options = [...months];
+    if (view.month && !options.includes(view.month)) options.push(view.month);
+    options.sort().reverse();
+
+    select.innerHTML = '<option value="">Any month</option>' +
+      options.map(m =>
+        `<option value="${escapeHtml(m)}">${escapeHtml(monthLabel(m))}</option>`)
         .join('');
+    select.value = view.month;
   }
 
   async function errorText(response) {
@@ -687,6 +721,12 @@
     });
     on('filter-source', 'change', async (e) => {
       view.source = e.target.value; await loadEvents();
+    });
+    on('filter-month', 'change', async (e) => {
+      view.month = e.target.value; expandedGuid = null; await loadEvents();
+    });
+    on('filter-category', 'change', async (e) => {
+      view.category = e.target.value; expandedGuid = null; await loadEvents();
     });
     on('filter-past', 'change', async (e) => {
       view.includePast = e.target.checked; await loadEvents();

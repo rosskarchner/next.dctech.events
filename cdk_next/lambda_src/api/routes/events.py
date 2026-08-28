@@ -21,8 +21,12 @@ the MCP tools present, so the two admin surfaces cannot drift, and it means the
 browser cannot round-trip a forged `_qa_run` into a write and have anything
 trust it.
 """
+import re
+
 import db
 from routes.admin import _admin_check, _json, _post_payload
+
+_MONTH = re.compile(r'^\d{4}-\d{2}$')
 
 # What the table renders per row, and what a merge has to be checked against.
 _EFFECTIVE_FIELDS = ('title', 'location', 'categories', 'hidden', 'duplicate_of')
@@ -91,6 +95,21 @@ def _matches(row, params):
     if group_id and row.get('group_id') != group_id:
         return False
 
+    # Applied here rather than only as the GSI4 query bound, because the
+    # review_status path comes from GSI5 and never sees that bound. Without
+    # this, picking a month while looking at the queue would silently do
+    # nothing.
+    month = (params.get('month') or '').strip()
+    if month and not str(row.get('date') or '').startswith(month):
+        return False
+
+    # Against the *effective* categories: a category the moderator or the agent
+    # added by overlay is the one showing on the site, so it is the one to
+    # filter on.
+    category = (params.get('category') or '').strip()
+    if category and category not in (row['effective'].get('categories') or []):
+        return False
+
     query = (params.get('q') or '').strip().casefold()
     if query:
         haystack = ' '.join(str(row['effective'].get(f) or '')
@@ -123,10 +142,14 @@ def _matches(row, params):
 def list_events_json(event, jinja_env):
     """GET /api/admin/events — the QA table's one request.
 
-    Filters: month (YYYY-MM), include_past, source, review_status, group_id,
-    q, state, limit. `review_status` alone goes through GSI5, which is much
-    cheaper than a GSI4 sweep and — more to the point — has no date bound, so
-    it returns past-dated events still sitting in the queue.
+    Filters: month (YYYY-MM), include_past, source, category, review_status,
+    group_id, q, state, limit. `review_status` alone goes through GSI5, which is
+    much cheaper than a GSI4 sweep and — more to the point — has no date bound,
+    so it returns past-dated events still sitting in the queue.
+
+    Returns `months`, the distinct months present *before* the month filter is
+    applied, so a caller can offer a month picker that only lists months with
+    something in them rather than guessing a range.
     """
     claims, err = _admin_check(event)
     if err:
@@ -137,6 +160,9 @@ def list_events_json(event, jinja_env):
     review_status = (params.get('review_status') or '').strip() or None
     include_past = str(params.get('include_past') or '') in ('1', 'true', 'yes')
 
+    if month and not _MONTH.match(month):
+        return _json(400, {'error': "month must look like 'YYYY-MM'"})
+
     if review_status:
         if review_status not in db.REVIEW_STATUSES:
             return _json(400, {'error': f'Unknown review_status: {review_status}',
@@ -144,17 +170,28 @@ def list_events_json(event, jinja_env):
         events = db.get_events_by_review_status(review_status)
         mode = 'review_status'
     else:
-        try:
-            events = db.get_all_events(date_prefix=month,
-                                       include_past=include_past)
-        except (ValueError, AttributeError):
-            return _json(400, {'error': "month must look like 'YYYY-MM'"})
+        # The month is applied in _matches rather than as get_all_events'
+        # date_prefix, for two reasons. It has to work in the review_status
+        # path as well, which comes from GSI5 and never sees that bound; and
+        # narrowing the query would leave `months` below containing only the
+        # month already chosen, collapsing the picker that offered it.
+        #
+        # Choosing a month is an explicit statement about the range wanted, so
+        # it implies past events — otherwise picking a month gone by would
+        # silently return nothing until Include past was also ticked.
+        events = db.get_all_events(include_past=include_past or bool(month))
         mode = 'all'
 
     # Effective values for the whole corpus first: _duplicate_state has to ask
     # about events that may themselves be filtered out of the response.
     by_guid = {e['guid']: _effective(e) for e in events if e.get('guid')}
     rows = [_row(e, by_guid) for e in events]
+
+    # Before filtering, so choosing a month does not empty the picker that
+    # offered it.
+    months = sorted({str(r.get('date') or '')[:7]
+                     for r in rows if r.get('date')}, reverse=True)
+
     rows = [r for r in rows if _matches(r, params)]
 
     try:
@@ -167,6 +204,7 @@ def list_events_json(event, jinja_env):
         'count': len(rows),
         'truncated': len(rows) > limit,
         'mode': mode,
+        'months': months,
         'editable_fields': list(db.OVERLAY_EDITABLE_FIELDS),
     })
 
