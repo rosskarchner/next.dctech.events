@@ -15,6 +15,13 @@ MODEL = os.environ.get('DISCOVERY_MODEL', 'us.anthropic.claude-sonnet-5')
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
 MAX_TOKENS = int(os.environ.get('DISCOVERY_MAX_TOKENS', '16000'))
 
+# A normal run makes ~30 tool calls. This is a backstop, not a tuning knob —
+# on 2026-08-24 a strands_tools browser concurrency bug (overlapping
+# `_async_navigate` tasks) threw mid-run, the agent kept retrying the tool,
+# and each retry resent the whole (growing) transcript: one session alone
+# reached 65 tool calls and 824 calls that day burned 102M input tokens.
+MAX_TOOL_CALLS = int(os.environ.get('DISCOVERY_MAX_TOOL_CALLS', '40'))
+
 _WRITE_TOOLS = {'propose_group', 'propose_event', 'set_overlay',
                 'resolve_qa_review', 'trigger_rebuild', 'add_single_event',
                 'update_single_event', 'delete_single_event', 'add_group',
@@ -118,9 +125,25 @@ def _load_search_key():
 
 def _build_agent(system_prompt, tools, dry_run):
     from strands import Agent
+    from strands.hooks.events import BeforeToolCallEvent
     from strands.models import BedrockModel
     from strands_tools.browser import AgentCoreBrowser
     from strands_tools.tavily import tavily_search, tavily_extract
+
+    class _ToolCallBudget:
+        """Cancels tool calls once a run has made too many of them."""
+
+        def __init__(self, max_calls):
+            self.max_calls = max_calls
+            self.count = 0
+
+        def __call__(self, event: BeforeToolCallEvent):
+            self.count += 1
+            if self.count > self.max_calls:
+                event.cancel_tool = (
+                    f'Tool call budget ({self.max_calls}) exceeded for this run. '
+                    'Stop calling tools and report your findings so far as final JSON.'
+                )
 
     tools = list(tools) + [AgentCoreBrowser(region=REGION).browser,
                            tavily_search, tavily_extract]
@@ -129,6 +152,7 @@ def _build_agent(system_prompt, tools, dry_run):
                            max_tokens=MAX_TOKENS),
         system_prompt=system_prompt + (_DRY_RUN_NOTE if dry_run else ''),
         tools=tools,
+        hooks=[_ToolCallBudget(MAX_TOOL_CALLS)],
     )
 
 

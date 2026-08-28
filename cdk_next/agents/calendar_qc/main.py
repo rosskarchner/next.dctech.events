@@ -48,6 +48,13 @@ REGION = os.environ.get('AWS_REGION', 'us-east-1')
 # after doing most of the work. Set it explicitly and generously.
 MAX_TOKENS = int(os.environ.get('QC_MAX_TOKENS', '16000'))
 
+# Per-event tool-call budget, not a tuning knob — a backstop against a run
+# that gets stuck retrying a failing tool. The discovery agent's browser tool
+# hit exactly this on 2026-08-24 (see its MAX_TOOL_CALLS comment) and burned
+# 102M tokens in one day; this agent shares that same browser tool.
+QC_TOOL_CALLS_PER_EVENT = int(os.environ.get('QC_TOOL_CALLS_PER_EVENT', '5'))
+QC_MIN_TOOL_CALLS = int(os.environ.get('QC_MIN_TOOL_CALLS', '40'))
+
 # Tools that change something. Withheld entirely in dry-run mode — the agent
 # can then physically not write, which is a stronger guarantee than asking it
 # not to.
@@ -227,8 +234,9 @@ def _removed_guids(rows, claims):
 
 
 def _build_agent(model_id, system_prompt, tools, dry_run, with_browser=False,
-                 with_search=False):
+                 with_search=False, max_tool_calls=QC_MIN_TOOL_CALLS):
     from strands import Agent
+    from strands.hooks.events import BeforeToolCallEvent
     from strands.models import BedrockModel
 
     if with_browser:
@@ -240,11 +248,27 @@ def _build_agent(model_id, system_prompt, tools, dry_run, with_browser=False,
         from strands_tools.tavily import tavily_extract, tavily_search
         tools = list(tools) + [tavily_extract, tavily_search]
 
+    class _ToolCallBudget:
+        """Cancels tool calls once a run has made too many of them."""
+
+        def __init__(self, max_calls):
+            self.max_calls = max_calls
+            self.count = 0
+
+        def __call__(self, event: BeforeToolCallEvent):
+            self.count += 1
+            if self.count > self.max_calls:
+                event.cancel_tool = (
+                    f'Tool call budget ({self.max_calls}) exceeded for this run. '
+                    'Stop calling tools and report your findings so far as final JSON.'
+                )
+
     return Agent(
         model=BedrockModel(model_id=model_id, region_name=REGION,
                            max_tokens=MAX_TOKENS),
         system_prompt=system_prompt + (_DRY_RUN_NOTE if dry_run else ''),
         tools=tools,
+        hooks=[_ToolCallBudget(max_tool_calls)],
     )
 
 
@@ -286,9 +310,10 @@ def run_qc(dry_run=False, limit=None, run_id=None, own_rebuild=True):
                 expect_list=True)
 
         # ── pass 1: what should come off the site ────────────────────
-        triage = _build_agent(TRIAGE_MODEL, TRIAGE_PROMPT,
-                              _select(tools, _TRIAGE_TOOLS, dry_run), dry_run,
-                              with_browser=True, with_search=True)
+        triage = _build_agent(
+            TRIAGE_MODEL, TRIAGE_PROMPT, _select(tools, _TRIAGE_TOOLS, dry_run),
+            dry_run, with_browser=True, with_search=True,
+            max_tool_calls=max(QC_MIN_TOOL_CALLS, QC_TOOL_CALLS_PER_EVENT * len(guids)))
         triage_out = triage(
             f"Run id: {run_id}\n"
             f"Review these {len(guids)} queued events for duplicates and "
@@ -309,9 +334,10 @@ def run_qc(dry_run=False, limit=None, run_id=None, own_rebuild=True):
         if survivors:
             print(f'run {run_id}: polishing {len(survivors)} of {len(guids)} '
                   f'({len(removed)} removed by triage)')
-            polish = _build_agent(TRIAGE_MODEL, POLISH_PROMPT,
-                                  _select(tools, _POLISH_TOOLS, dry_run),
-                                  dry_run, with_browser=True, with_search=True)
+            polish = _build_agent(
+                TRIAGE_MODEL, POLISH_PROMPT, _select(tools, _POLISH_TOOLS, dry_run),
+                dry_run, with_browser=True, with_search=True,
+                max_tool_calls=max(QC_MIN_TOOL_CALLS, QC_TOOL_CALLS_PER_EVENT * len(survivors)))
             polish_out = polish(
                 f"Run id: {run_id}\n"
                 f"Check these {len(survivors)} events against their own event "

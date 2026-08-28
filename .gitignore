@@ -1,11 +1,15 @@
 # CDK / Python build artifacts
 cdk_next/build/
 cdk_next/cdk.out/
+cdk_next/cdk.out.agent/
 cdk_next/.venv/
 packages/calgen/dist/
 *.egg-info/
 __pycache__/
 *.pyc
+
+# Playwright MCP output (screenshots, traces)
+.playwright-mcp/
 
 # calgen site build artifacts (never committed; site data lives in DynamoDB)
 site/_cache/
