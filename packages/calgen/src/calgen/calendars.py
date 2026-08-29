@@ -39,6 +39,35 @@ def title_says_cancelled(title):
     return any(pattern.search(text) for pattern in _CANCELLED_IN_TITLE)
 
 
+# Meetup emits a more specific schema.org subtype instead of plain "Event"
+# depending on how the organizer categorized it (e.g. "The Art of the Chart",
+# a workshop, came back as ScreeningEvent — next_dctech_events online-flag
+# miss). These are schema.org's documented subtypes of Event.
+_SCHEMA_ORG_EVENT_TYPES = frozenset({
+    'Event',
+    'BusinessEvent',
+    'ChildrensEvent',
+    'ComedyEvent',
+    'CourseInstance',
+    'DanceEvent',
+    'DeliveryEvent',
+    'EducationEvent',
+    'ExhibitionEvent',
+    'Festival',
+    'FoodEvent',
+    'Hackathon',
+    'LiteraryEvent',
+    'MusicEvent',
+    'PublicationEvent',
+    'SaleEvent',
+    'ScreeningEvent',
+    'SocialEvent',
+    'SportsEvent',
+    'TheaterEvent',
+    'VisualArtsEvent',
+})
+
+
 def ical_says_cancelled(component):
     """Whether the VEVENT's own STATUS property says CANCELLED.
 
@@ -110,7 +139,7 @@ def fetch_json_ld_data(url):
                     ld_data = json.loads(script.string)
                     items = ld_data if isinstance(ld_data, list) else [ld_data]
                     for item in items:
-                        if item.get('@type') == 'Event':
+                        if item.get('@type') in _SCHEMA_ORG_EVENT_TYPES:
                             if 'name' in item:
                                 result['title'] = item['name']
                             if 'EventCancelled' in item.get('eventStatus', ''):
