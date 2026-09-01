@@ -304,7 +304,13 @@ nav [aria-current="page"] {
     text-decoration: none;
 }
 
-.dt-start {
+/* Listing cards show the time via the shared .time-heading grouping the
+   event sits under, so each event's own .dt-start (kept for the h-event
+   microformat) is a redundant duplicate there — hide it only in that
+   context. event_page.html's "When" field uses the same .dt-start class as
+   its *only* visible time, not a duplicate, so it must stay visible; a
+   global `.dt-start { display: none }` here previously blanked it. */
+.events-list .dt-start {
     display: none;
 }
 
