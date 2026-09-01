@@ -217,28 +217,6 @@ def _register_routes(app):
                                error_message=None if days else
                                "Nothing has been recorded as newly added yet.")
 
-    def _newsletter_context():
-        """Shared setup for newsletter_html/newsletter_text — same event
-        window, same stats, only the rendered template and content-type
-        differ. Split apart once already (the homepage/newsletter 21-day
-        window bug) by one of the two copies getting fixed and the other
-        forgotten; a shared helper closes that drift off for good.
-        """
-        events = get_events()
-        window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
-        upcoming_events = filter_events_to_upcoming_days(events, window_end)
-        days = prepare_events_by_day(upcoming_events, window_end=window_end)
-        prepare_newsletter_titles(days)
-        stats = get_stats().copy()
-        stats['upcoming_events'] = len(upcoming_events)
-        return {
-            'days': days,
-            'stats': stats,
-            'base_url': get_config().get('base_url', ''),
-            'upcoming_months': get_upcoming_months(),
-            'categories_with_counts': get_categories_with_event_counts(),
-        }
-
     @app.route("/newsletter.html")
     def newsletter_html():
         return render_template('newsletter.html', **_newsletter_context())
@@ -348,4 +326,33 @@ def prepare_newsletter_titles(days):
                 base_title = event.get('display_title', event.get('title', 'Untitled Event'))
                 event['newsletter_title'] = f"Virtual: {base_title}" if is_virtual_event(event) else base_title
     return days
+
+
+def _newsletter_context():
+    """Shared setup for newsletter_html/newsletter_text — same event
+    window, same stats, only the rendered template and content-type
+    differ. Split apart once already (the homepage/newsletter 21-day
+    window bug) by one of the two copies getting fixed and the other
+    forgotten; a shared helper closes that drift off for good.
+
+    Promoted from a closure nested inside _register_routes to a real
+    module-level function — it never referenced `app`, so nothing about
+    its behavior changes; this is what lets it move to its own route
+    module alongside newsletter_html/newsletter_text later, since a
+    closure can't span modules the way a plain function can.
+    """
+    events = get_events()
+    window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
+    upcoming_events = filter_events_to_upcoming_days(events, window_end)
+    days = prepare_events_by_day(upcoming_events, window_end=window_end)
+    prepare_newsletter_titles(days)
+    stats = get_stats().copy()
+    stats['upcoming_events'] = len(upcoming_events)
+    return {
+        'days': days,
+        'stats': stats,
+        'base_url': get_config().get('base_url', ''),
+        'upcoming_months': get_upcoming_months(),
+        'categories_with_counts': get_categories_with_event_counts(),
+    }
 
