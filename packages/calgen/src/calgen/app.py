@@ -133,7 +133,7 @@ def _register_routes(app):
                                days=days,
                                stats=stats,
                                base_url=base_url,
-                               recently_added=get_recently_added(),
+                               recently_added_count=get_recently_added_count(),
                                upcoming_months=get_upcoming_months(),
                                categories_with_counts=get_categories_with_event_counts(),
                                sidebar=get_sidebar_data())
@@ -863,6 +863,21 @@ def get_recently_added(limit=RECENTLY_ADDED_PREVIEW):
             if len(events) >= limit:
                 return events
     return events
+
+
+RECENTLY_ADDED_WINDOW_DAYS = 7
+
+
+def get_recently_added_count(window_days=RECENTLY_ADDED_WINDOW_DAYS):
+    """How many events were added in the last N days — the homepage's one-
+    line freshness signal."""
+    cutoff = (datetime.now(local_tz).date() - timedelta(days=window_days - 1)).isoformat()
+    count = 0
+    for day in group_by_added_date(get_events()):
+        if day['date'] < cutoff:
+            break
+        count += day['count']
+    return count
 
 
 def _format_event_date(event):
