@@ -34,4 +34,15 @@
     <!-- Feed links -->
     <link rel="alternate" type="application/rss+xml" title="{{ category_name }} Events RSS Feed" href="feed.xml">
     <link rel="alternate" type="text/calendar" title="{{ category_name }} Events iCal Feed" href="feed.ics">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {"@type": "ListItem", "position": 1, "name": "Home", "item": {{ base_url | tojson }}},
+    {"@type": "ListItem", "position": 2, "name": "Categories", "item": {{ (base_url ~ '/categories/') | tojson }}},
+    {"@type": "ListItem", "position": 3, "name": {{ category_name | tojson }}, "item": {{ (base_url ~ request.path) | tojson }}}
+  ]
+}
+</script>
 {% endblock %}
