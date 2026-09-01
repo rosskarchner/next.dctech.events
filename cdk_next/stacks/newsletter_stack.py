@@ -152,16 +152,29 @@ class NextNewsletterStack(cdk.Stack):
         for fn in (self.signup_function, self.sender_function, bounce_function):
             fn.add_to_role_policy(
                 iam.PolicyStatement(
+                    # dctech.events is verified at the domain level (SES
+                    # DKIM), not per-address, so that's the identity ARN that
+                    # actually gates sending regardless of which address
+                    # under it FROM_EMAIL uses.
+                    actions=["ses:SendEmail", "ses:SendTemplatedEmail"],
+                    resources=[
+                        f"arn:aws:ses:{config.REGION}:{config.ACCOUNT}:identity/dctech.events"
+                    ],
+                )
+            )
+            fn.add_to_role_policy(
+                iam.PolicyStatement(
                     actions=[
-                        "ses:SendEmail",
-                        "ses:SendTemplatedEmail",
                         "ses:CreateContact",
                         "ses:GetContact",
                         "ses:UpdateContact",
                         "ses:DeleteContact",
                         "ses:ListContacts",
                     ],
-                    resources=["*"],
+                    resources=[
+                        f"arn:aws:ses:{config.REGION}:{config.ACCOUNT}:"
+                        f"contact-list/{config.NEWSLETTER_CONTACT_LIST}"
+                    ],
                 )
             )
 

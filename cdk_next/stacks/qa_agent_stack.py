@@ -73,7 +73,20 @@ class NextQaAgentStack(cdk.Stack):
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-                resources=["*"],  # inference profiles fan out across regions
+                # Scoped to Anthropic models only (this agent only ever
+                # requests Claude models — see QC_TRIAGE_MODEL in
+                # calendar_qc/main.py), not every model in the account.
+                # Wildcarded on region: cross-region inference profiles (the
+                # "us." prefix on the model id) route the actual invocation
+                # to whichever region has capacity, and IAM authorizes that
+                # invocation against the underlying foundation-model ARN in
+                # the region it lands in, not just the profile ARN's own
+                # region — narrowing this further would risk breaking runs
+                # that get routed somewhere this list didn't anticipate.
+                resources=[
+                    f"arn:aws:bedrock:*:{self.account}:inference-profile/*.anthropic.*",
+                    "arn:aws:bedrock:*::foundation-model/anthropic.*",
+                ],
             )
         )
         # The agent reads and writes events only through the MCP API, which is
@@ -102,8 +115,14 @@ class NextQaAgentStack(cdk.Stack):
         )
         role.add_to_policy(
             iam.PolicyStatement(
+                # dctech.events is verified at the domain level (SES DKIM),
+                # not per-address, so that's the identity ARN that actually
+                # gates sending regardless of which address the digest email
+                # goes out from.
                 actions=["ses:SendEmail"],
-                resources=["*"],
+                resources=[
+                    f"arn:aws:ses:{self.region}:{self.account}:identity/dctech.events"
+                ],
             )
         )
 

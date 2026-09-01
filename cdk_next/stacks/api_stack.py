@@ -136,16 +136,30 @@ class NextApiStack(cdk.Stack):
             )
             fn.add_to_role_policy(
                 iam.PolicyStatement(
+                    # dctech.events is verified at the domain level (SES
+                    # DKIM), not per-address, so that's the identity ARN that
+                    # actually gates ses:SendEmail regardless of which
+                    # address under it FROM_EMAIL uses.
+                    actions=["ses:SendEmail"],
+                    resources=[
+                        f"arn:aws:ses:{config.REGION}:{config.ACCOUNT}:identity/dctech.events"
+                    ],
+                )
+            )
+            fn.add_to_role_policy(
+                iam.PolicyStatement(
+                    # Magic-link emails, plus the newsletter opt-in on the
+                    # submission form (create/get/update contact).
                     actions=[
                         "ses:ListContacts",
-                        # Magic-link emails, plus the newsletter opt-in on the
-                        # submission form (create/get/update contact).
-                        "ses:SendEmail",
                         "ses:CreateContact",
                         "ses:GetContact",
                         "ses:UpdateContact",
                     ],
-                    resources=["*"],
+                    resources=[
+                        f"arn:aws:ses:{config.REGION}:{config.ACCOUNT}:"
+                        f"contact-list/{config.NEWSLETTER_CONTACT_LIST}"
+                    ],
                 )
             )
             self.submit_key.grant(fn, "kms:GenerateMac", "kms:VerifyMac")
