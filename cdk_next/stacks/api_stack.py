@@ -260,12 +260,20 @@ class NextApiStack(cdk.Stack):
         )
 
         # Cognito authorizer rejections bypass Lambda entirely, so they have no
-        # CORS headers; make 401/403 readable by the browser.
+        # CORS headers by default; without one, the legitimate admin frontend
+        # can't even read a 401 to show "please log in" (the request just
+        # errors out as an opaque CORS failure). A literal '*' "fixed" that
+        # but let any site's JS read these bodies too (they're just a fixed
+        # "Unauthorized"/"Forbidden" string, but a wildcard is still the
+        # wrong default) — reflect the caller's own Origin header instead of
+        # a real allowlist: gateway response headers are static/VTL-mapped,
+        # with no conditional logic available to check membership the way
+        # handler.py's get_cors_origin() does for actual Lambda responses.
         api.add_gateway_response(
             "UnauthorizedGatewayResponse",
             type=apigateway.ResponseType.UNAUTHORIZED,
             response_headers={
-                "Access-Control-Allow-Origin": "'*'",
+                "Access-Control-Allow-Origin": "method.request.header.origin",
                 "Access-Control-Allow-Headers": "'Content-Type,Authorization,HX-Request,HX-Trigger,HX-Trigger-Name,HX-Target,HX-Current-URL'",
             },
         )
@@ -273,7 +281,7 @@ class NextApiStack(cdk.Stack):
             "AccessDeniedGatewayResponse",
             type=apigateway.ResponseType.ACCESS_DENIED,
             response_headers={
-                "Access-Control-Allow-Origin": "'*'",
+                "Access-Control-Allow-Origin": "method.request.header.origin",
                 "Access-Control-Allow-Headers": "'Content-Type,Authorization,HX-Request,HX-Trigger,HX-Trigger-Name,HX-Target,HX-Current-URL'",
             },
         )
