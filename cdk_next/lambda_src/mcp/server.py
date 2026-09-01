@@ -55,6 +55,17 @@ _EVENT_FIELDS = [
 ]
 
 
+def _get_or_404(fetch_fn, id_, label):
+    """fetch_fn(id_), raising a consistent ValueError if it comes back falsy.
+
+    Returns the fetched value so callers that need it don't fetch twice.
+    """
+    result = fetch_fn(id_)
+    if not result:
+        raise ValueError(f'No such {label}: {id_}')
+    return result
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Groups
 # ─────────────────────────────────────────────────────────────────────────────
@@ -120,9 +131,7 @@ def add_group(name: str, website: str, ical: str, categories: list, active: bool
 @mcp.tool()
 def set_group_active(slug: str, active: bool, reason: str | None = None) -> dict:
     """Enable/disable a group (e.g. disable a group with a permanently broken feed)."""
-    group = db.get_group(slug)
-    if not group:
-        raise ValueError(f'No such group: {slug}')
+    group = _get_or_404(db.get_group, slug, 'group')
     data = {k: v for k, v in group.items() if k != 'id'}
     data['active'] = active
     if reason:
@@ -204,9 +213,7 @@ def update_single_event(guid: str, fields: dict) -> dict:
             fields[key] = db.validate_event_date(fields[key], key)
     if 'time' in fields:
         fields['time'] = db.validate_event_time(fields['time'])
-    event = db.get_event_from_config(guid)
-    if not event:
-        raise ValueError(f'No such event: {guid}')
+    event = _get_or_404(db.get_event_from_config, guid, 'event')
     if event.get('source') == 'ical':
         raise ValueError(
             f'{guid} is an iCal event — its record is rewritten from the feed '
@@ -223,8 +230,7 @@ def update_single_event(guid: str, fields: dict) -> dict:
 @mcp.tool()
 def delete_single_event(guid: str) -> dict:
     """Delete a single event (e.g. a past event whose URL now 404s)."""
-    if not db.get_event_from_config(guid):
-        raise ValueError(f'No such event: {guid}')
+    _get_or_404(db.get_event_from_config, guid, 'event')
     db.delete_event(guid)
     return {'deleted': guid}
 
@@ -306,8 +312,7 @@ def update_recurring_event(file_id: str, fields: dict) -> dict:
 @mcp.tool()
 def delete_recurring_event(file_id: str) -> dict:
     """Delete a recurring event (e.g. a series that has ended)."""
-    if not db.get_recurring_event(file_id):
-        raise ValueError(f'No such recurring event: {file_id}')
+    _get_or_404(db.get_recurring_event, file_id, 'recurring event')
     db.delete_recurring_event(file_id)
     return {'deleted': file_id}
 
@@ -385,10 +390,7 @@ def get_event(guid: str) -> dict:
     Use this to pull detail on the handful of events you are actually making a
     decision about; use get_events for the bulk corpus.
     """
-    event = db.get_event_from_config(guid)
-    if not event:
-        raise ValueError(f'No such event: {guid}')
-    return event
+    return _get_or_404(db.get_event_from_config, guid, 'event')
 
 
 @mcp.tool()
@@ -417,8 +419,7 @@ def resolve_qa_review(guid: str, status: str) -> dict:
     """
     if status not in ('approved', 'flagged'):
         raise ValueError(f"status must be 'approved' or 'flagged', got: {status!r}")
-    if not db.get_event_from_config(guid):
-        raise ValueError(f'No such event: {guid}')
+    _get_or_404(db.get_event_from_config, guid, 'event')
     db.set_event_review_status(guid, status)
     return {'guid': guid, 'review_status': status}
 
@@ -583,9 +584,7 @@ def get_submission(draft_id: str) -> dict:
     `submitter_history` is every other submission from the same address, which
     is the evidence you want before deciding whether to trust someone.
     """
-    draft = db.get_draft(draft_id)
-    if not draft:
-        raise ValueError(f'No submission with id {draft_id!r}')
+    draft = _get_or_404(db.get_draft, draft_id, 'submission')
 
     email = draft.get('submitter_email', '')
     draft['submitter_trusted'] = db.is_trusted_submitter(email)
@@ -610,9 +609,7 @@ def approve_submission(draft_id: str, categories: list | None = None,
     trust_submitter: also mark the submitter trusted, so their future *events*
       publish automatically. Group submissions always keep getting reviewed.
     """
-    draft = db.get_draft(draft_id)
-    if not draft:
-        raise ValueError(f'No submission with id {draft_id!r}')
+    draft = _get_or_404(db.get_draft, draft_id, 'submission')
     if draft.get('status') != 'pending':
         raise ValueError(
             f"Submission {draft_id} is already {draft.get('status')!r}; "
@@ -645,9 +642,7 @@ def approve_submission(draft_id: str, categories: list | None = None,
 @mcp.tool()
 def reject_submission(draft_id: str, reason: str | None = None) -> dict:
     """Reject a pending submission. It is not published and stays on record."""
-    draft = db.get_draft(draft_id)
-    if not draft:
-        raise ValueError(f'No submission with id {draft_id!r}')
+    draft = _get_or_404(db.get_draft, draft_id, 'submission')
     if draft.get('status') != 'pending':
         raise ValueError(
             f"Submission {draft_id} is already {draft.get('status')!r}; "
@@ -704,10 +699,7 @@ def list_pending_corrections() -> list:
 def get_correction(correction_id: str) -> dict:
     """Full detail for one correction, including the target event's guid,
     source, and the fields it proposes to change."""
-    correction = db.get_correction(correction_id)
-    if not correction:
-        raise ValueError(f'No correction with id {correction_id!r}')
-    return correction
+    return _get_or_404(db.get_correction, correction_id, 'correction')
 
 
 @mcp.tool()

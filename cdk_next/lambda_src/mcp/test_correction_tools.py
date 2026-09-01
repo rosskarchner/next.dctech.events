@@ -59,7 +59,7 @@ def test_get_correction_returns_the_record(fake):
 
 
 def test_get_correction_raises_for_an_unknown_id(fake):
-    with pytest.raises(ValueError, match="No correction"):
+    with pytest.raises(ValueError, match="No such correction"):
         get_correction("ghost")
 
 

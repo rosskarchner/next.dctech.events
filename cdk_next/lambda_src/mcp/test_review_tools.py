@@ -167,7 +167,7 @@ def test_approve_rejects_unknown_category_slugs(fake):
 
 
 def test_approve_unknown_draft_raises(fake):
-    with pytest.raises(ValueError, match="No submission"):
+    with pytest.raises(ValueError, match="No such submission"):
         approve("nope")
 
 
@@ -192,7 +192,7 @@ def test_reject_marks_rejected_without_publishing(fake):
 
 
 def test_reject_unknown_draft_raises(fake):
-    with pytest.raises(ValueError, match="No submission"):
+    with pytest.raises(ValueError, match="No such submission"):
         reject("nope")
 
 
