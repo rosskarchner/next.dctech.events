@@ -19,7 +19,6 @@
 
     <!-- SEO Meta Tags -->
     <meta name="description" content="{% block description %}{{ tagline }}{% endblock %}">
-    <meta name="keywords" content="tech events, meetups, conferences, Washington DC, DMV, technology, networking">
     <meta name="author" content="DC Tech Events">
     {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
 
@@ -29,6 +28,7 @@
     <meta property="og:description" content="{% block og_description %}{{ tagline }}{% endblock %}">
     <meta property="og:url" content="{{ base_url }}{{ request.path }}">
     <meta property="og:site_name" content="{{ site_name }}">
+    <meta property="og:locale" content="en_US">
     {# Regenerate these with scripts/generate_site_images.py after a rename or
        palette change. Absolute URLs: scrapers do not resolve relative ones. #}
     <meta property="og:image" content="{{ base_url }}{% block og_image %}/static/images/og-image.png{% endblock %}">

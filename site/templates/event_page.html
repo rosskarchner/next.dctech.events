@@ -45,7 +45,7 @@
                     {{ formatted_date }}{% if formatted_time %}, {{ formatted_time }}{% endif %}
                 </time>
                 {% if event.is_recurring %}
-                    <span class="recurring-badge" title="This is a recurring event. Please confirm with the organizer before attending.">🔄 Recurring</span>
+                    <span class="recurring-badge">🔄 Recurring</span><span class="recurring-note">Confirm date/time with the organizer</span>
                 {% endif %}
             </dd>
 
@@ -128,19 +128,30 @@
   structured data sends searchers to the organizer too.
 
   endDate is emitted only when a feed supplied one; see _event_end_iso.
+
+  event.cost is free text an organizer or feed wrote ("$10", "Free",
+  "Suggested $5 donation", ...), not a structured amount — there's nothing
+  reliable to parse a price/priceCurrency out of. isAccessibleForFree is
+  only asserted when the field is empty or plainly says free; any other
+  value just omits the claim rather than guessing, so a paid event no
+  longer wrongly advertises itself as free in search results.
 #}
+{% set cost_text = (event.cost or '') | trim %}
+{% set is_free = cost_text == '' or cost_text | lower in ('free', 'no cost', 'no charge', '$0', 'n/a', 'none') %}
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "Event",
   "name": {{ event.title | tojson }},
   "url": {{ (base_url ~ '/events/' ~ slug ~ '/') | tojson }},
-  "startDate": "{{ event.date }}{% if event.time %}T{{ event.time }}{% endif %}",
-  {% if end_datetime %}"endDate": {{ end_datetime | tojson }},{% endif %}
-  "eventStatus": "https://schema.org/EventScheduled",
-  "eventAttendanceMode": "https://schema.org/{% if event.virtual %}Online{% else %}Offline{% endif %}EventAttendanceMode",
+  "image": [{{ (base_url ~ self.og_image()) | tojson }}],
+  "startDate": "{{ event.date }}{% if event.time %}T{{ event.time }}{% endif %}"
+  {% if end_datetime %},"endDate": {{ end_datetime | tojson }}{% endif %}
+  ,"eventStatus": "https://schema.org/EventScheduled"
+  ,"eventAttendanceMode": "https://schema.org/{% if event.virtual %}Online{% else %}Offline{% endif %}EventAttendanceMode"
+  {% if is_free %},"isAccessibleForFree": true{% endif %}
   {% if event.location %}
-  "location": {
+  ,"location": {
     {% if event.virtual %}
     "@type": "VirtualLocation",
     "url": {{ (event.url or base_url) | tojson }}
@@ -155,23 +166,22 @@
       ,"addressCountry": "US"
     }
     {% endif %}
-  },
+  }
   {% endif %}
   {% if event.group %}
-  "organizer": {
+  ,"organizer": {
     "@type": "Organization",
     "name": {{ event.group | tojson }}
     {% if event.group_website %},"url": {{ event.group_website | tojson }}{% endif %}
-  },
+  }
   {% endif %}
   {% if event.url %}
-  "offers": {
+  ,"offers": {
     "@type": "Offer",
     "url": {{ event.url | tojson }},
     "availability": "https://schema.org/InStock"
-  },
+  }
   {% endif %}
-  "isAccessibleForFree": true
 }
 </script>
 {% endblock %}
