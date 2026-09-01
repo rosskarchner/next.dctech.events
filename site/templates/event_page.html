@@ -108,6 +108,10 @@
             <a href="/events/{{ slug }}/event.ics">Add to your calendar (.ics)</a>
             &middot;
             <a href="/">See all upcoming DC tech events</a>
+            {% if not event.is_recurring %}
+            &middot;
+            <a href="/edit/correct-event.html?guid={{ event.guid }}">Report an issue with this event</a>
+            {% endif %}
         </p>
     </article>
 </div>

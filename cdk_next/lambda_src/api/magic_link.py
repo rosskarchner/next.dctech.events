@@ -104,10 +104,16 @@ def verify_token(email, timestamp, signature):
 
 
 def build_link(email, timestamp, signature, path='/edit/submit-event.html'):
-    """The URL emailed to a submitter."""
+    """The URL emailed to a submitter.
+
+    `path` may already carry its own query string (e.g. a correction link's
+    `?guid=...`), so the token params are appended with `&` in that case
+    rather than always starting a fresh `?`.
+    """
+    separator = '&' if '?' in path else '?'
     return (
         f"{BASE_URL}{path}"
-        f"?e={_b64(normalize_email(email).encode())}"
+        f"{separator}e={_b64(normalize_email(email).encode())}"
         f"&t={timestamp}"
         f"&s={signature}"
     )

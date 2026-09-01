@@ -1136,6 +1136,221 @@ def revert_qa_run(run_id, *, actor=None):
     return {'run_id': run_id, 'reverted': len(reverted), 'events': reverted}
 
 
+# ─── Public corrections ────────────────────────────────────────────
+#
+# A CORRECTION# item is a pending proposal to change one existing event's
+# overlay — never written into `overrides` itself until a moderator approves
+# it, so nothing a stranger submits is ever live-mergeable via
+# effective_event/apply_overlay before a human looks at it. Approval is a
+# thin wrapper around set_event_overlay: once approved, a correction is
+# indistinguishable from an admin hand-edit in /edit/events.html.
+#
+# iCal events have date/end_date already permanently un-overlayable for every
+# source via OVERLAY_PROTECTED_FIELDS, so nothing new is needed there. The one
+# field that needs new, source-conditional locking is time/end_time, which
+# OVERLAY_EDITABLE_FIELDS otherwise allows for every source including iCal —
+# a public correction against an iCal event must be narrower than what an
+# admin can already do by hand.
+ICAL_CORRECTION_FIELDS = ('description', 'location', 'url')
+OTHER_CORRECTION_FIELDS = ICAL_CORRECTION_FIELDS + ('time', 'end_time')
+
+CORRECTION_EDITABLE_FIELDS_BY_SOURCE = {
+    'ical': ICAL_CORRECTION_FIELDS,
+    'manual': OTHER_CORRECTION_FIELDS,
+    'submitted': OTHER_CORRECTION_FIELDS,
+}
+
+
+def correction_allowed_fields(source):
+    """Fields a public correction may propose for an event of this `source`.
+
+    An unknown/future source falls back to the narrower iCal set — fail
+    closed, not open, since a new source type should be reviewed before the
+    public form gets to touch its time fields.
+    """
+    return CORRECTION_EDITABLE_FIELDS_BY_SOURCE.get(source, ICAL_CORRECTION_FIELDS)
+
+
+def check_correction_fields(source, fields):
+    """Reject anything a public correction must not propose. Raises ValueError.
+
+    Reuses _check_overlay_types so a correction cannot smuggle in a malformed
+    value (e.g. a bool where a string belongs) any more than an admin edit can.
+    """
+    allowed = correction_allowed_fields(source)
+    unknown = sorted(set(fields) - set(allowed))
+    if unknown:
+        raise ValueError(
+            f'Not correctable for a {source} event: {unknown}. '
+            f'Correctable: {sorted(allowed)}'
+        )
+    _check_overlay_types(fields)
+
+
+def create_correction(target_guid, fields, reason, submitter_email, submitter_id=None):
+    """Create a pending CORRECTION# entity proposing `fields` for `target_guid`.
+
+    Caller has already validated `fields` via check_correction_fields — this
+    just persists the proposal plus a snapshot of the event's current title
+    and source, mirroring create_draft's shape and GSI wiring so the same
+    STATUS#/USER# query patterns work for both. Raises ValueError if the
+    target event does not exist.
+    """
+    event = get_event_from_config(target_guid)
+    if not event:
+        raise ValueError(f'No such event: {target_guid}')
+
+    table = _get_table()
+    correction_id = str(uuid.uuid4())[:8]
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    user_id = submitter_id or submitter_email
+
+    item = {
+        'PK': f'CORRECTION#{correction_id}',
+        'SK': 'META',
+        'GSI1PK': 'STATUS#pending',
+        'GSI1SK': now,
+        'GSI3PK': f'USER#{user_id}',
+        'GSI3SK': now,
+        'target_guid': target_guid,
+        'target_source': event.get('source') or 'manual',
+        'target_title': event.get('title', ''),
+        'fields': _from_plain(dict(fields)),
+        'reason': reason,
+        'submitter_email': submitter_email,
+        'submitter_id': submitter_id,
+        'created_at': now,
+        'status': 'pending',
+    }
+    table.put_item(Item=item)
+    return correction_id
+
+
+def _correction_item_to_dict(item):
+    """Convert a DynamoDB CORRECTION item to a dict."""
+    correction_id = item['PK'].split('#', 1)[1]
+    result = {'id': correction_id}
+    for field in ['target_guid', 'target_source', 'target_title', 'fields',
+                  'reason', 'submitter_email', 'submitter_id', 'created_at',
+                  'status', 'reviewer_email', 'reviewed_at', 'rejection_reason']:
+        if field in item:
+            result[field] = _to_plain(item[field])
+    return result
+
+
+def get_correction(correction_id):
+    """Get a single correction by ID."""
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'CORRECTION#{correction_id}', 'SK': 'META'})
+    item = response.get('Item')
+    return _correction_item_to_dict(item) if item else None
+
+
+def get_corrections_by_status(status='pending'):
+    """Get all corrections with a given status.
+
+    DRAFT# items share this exact GSI1PK convention (STATUS#{status}), so the
+    query returns both interleaved — filtered out here the same way
+    get_candidates filters CANDIDATE# rows out of a GSI5 query shared with
+    EVENT# items.
+    """
+    table = _get_table()
+    items = _query_all(
+        table, IndexName='GSI1',
+        KeyConditionExpression=Key('GSI1PK').eq(f'STATUS#{status}'),
+        ScanIndexForward=False)
+    return [_correction_item_to_dict(item) for item in items
+            if item['PK'].startswith('CORRECTION#')]
+
+
+def get_corrections_by_submitter(user_id):
+    """Get all corrections submitted by a specific user (by sub, magiclink id, or email)."""
+    if not user_id:
+        return []
+    table = _get_table()
+    items = _query_all(
+        table, IndexName='GSI3',
+        KeyConditionExpression=Key('GSI3PK').eq(f'USER#{user_id}'),
+        ScanIndexForward=False)
+    return [_correction_item_to_dict(item) for item in items
+            if item['PK'].startswith('CORRECTION#')]
+
+
+def _update_correction_status(correction_id, new_status, reviewer_email=None,
+                              rejection_reason=None):
+    table = _get_table()
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    update_expr = 'SET #status = :status, GSI1PK = :gsi1pk, reviewed_at = :now'
+    expr_values = {
+        ':status': new_status,
+        ':gsi1pk': f'STATUS#{new_status}',
+        ':now': now,
+    }
+    expr_names = {'#status': 'status'}
+    if reviewer_email:
+        update_expr += ', reviewer_email = :reviewer'
+        expr_values[':reviewer'] = reviewer_email
+    if rejection_reason:
+        update_expr += ', rejection_reason = :reason'
+        expr_values[':reason'] = rejection_reason
+    table.update_item(
+        Key={'PK': f'CORRECTION#{correction_id}', 'SK': 'META'},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues=expr_values,
+        ExpressionAttributeNames=expr_names,
+    )
+
+
+def approve_correction(correction_id, reviewer_email):
+    """Approve a pending correction: merge its fields into the target event's
+    overlay, then mark the correction approved.
+
+    Re-validates against the target event's *current* source, not the
+    `target_source` snapshot taken at submission — an admin could have
+    re-sourced or removed the event in the interim. Raises ValueError if the
+    correction does not exist, is not pending, the target event no longer
+    exists, or the correction's fields are no longer all allowed for the
+    event's current source. None of these mark the correction rejected —
+    it stays pending so a human decides, the same way a bad guid in a bulk
+    overlay write is reported rather than silently discarded.
+    """
+    correction = get_correction(correction_id)
+    if not correction:
+        raise ValueError(f'No such correction: {correction_id}')
+    if correction['status'] != 'pending':
+        raise ValueError(
+            f'Correction {correction_id} is already {correction["status"]}')
+
+    target_guid = correction['target_guid']
+    event = get_event_from_config(target_guid)
+    if not event:
+        raise ValueError(f'Target event {target_guid} no longer exists')
+
+    fields = correction['fields']
+    check_correction_fields(event.get('source') or 'manual', fields)
+
+    submitter = correction.get('submitter_email', 'unknown submitter')
+    reason = correction.get('reason', '')
+    comment = f'Public correction from {submitter}: {reason}'
+    result = set_event_overlay(target_guid, fields, comment, actor=reviewer_email)
+
+    _update_correction_status(correction_id, 'approved', reviewer_email)
+    return {'correction_id': correction_id, 'guid': target_guid,
+            'overlay': result['overlay']}
+
+
+def reject_correction(correction_id, reviewer_email, reason=None):
+    """Mark a pending correction rejected. No overlay write."""
+    correction = get_correction(correction_id)
+    if not correction:
+        raise ValueError(f'No such correction: {correction_id}')
+    if correction['status'] != 'pending':
+        raise ValueError(
+            f'Correction {correction_id} is already {correction["status"]}')
+    _update_correction_status(correction_id, 'rejected', reviewer_email, reason)
+    return {'correction_id': correction_id, 'status': 'rejected'}
+
+
 # ─── Bulk moderation ──────────────────────────────────────────────
 #
 # All of these go through set_event_overlay, and that is the whole point.

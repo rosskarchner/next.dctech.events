@@ -677,6 +677,50 @@ def untrust_submitter(email: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Public corrections
+#
+# A correction proposes a change to one existing, already-published event —
+# distinct from submit_event, which proposes a whole new one. Approval merges
+# the proposed fields into the event's overlay via set_event_overlay, so an
+# approved correction is indistinguishable from a hand edit made in /edit.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def list_pending_corrections() -> list:
+    """Public corrections awaiting moderation, newest first."""
+    return db.get_corrections_by_status('pending')
+
+
+@mcp.tool()
+def get_correction(correction_id: str) -> dict:
+    """Full detail for one correction, including the target event's guid,
+    source, and the fields it proposes to change."""
+    correction = db.get_correction(correction_id)
+    if not correction:
+        raise ValueError(f'No correction with id {correction_id!r}')
+    return correction
+
+
+@mcp.tool()
+def approve_correction(correction_id: str) -> dict:
+    """Approve a pending correction, merging its fields into the target
+    event's overlay.
+
+    Re-validates the fields against the target event's *current* source, not
+    the source it had at submission time — raises if the event was re-sourced
+    or removed in between and the fields are no longer all allowed.
+    """
+    return db.approve_correction(correction_id, MCP_REVIEWER)
+
+
+@mcp.tool()
+def reject_correction(correction_id: str, reason: str | None = None) -> dict:
+    """Reject a pending correction. No overlay write; the event is unchanged."""
+    return db.reject_correction(correction_id, MCP_REVIEWER, reason)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Discovery proposals
 #
 # The discovery agent proposes; it never publishes. These write DRAFT# items

@@ -9,6 +9,8 @@ still work, so admins and already-signed-in users are unaffected — see
 
 import json
 import os
+import re
+from urllib.parse import parse_qs, urlparse
 
 import magic_link
 from auth import get_user_from_event
@@ -272,8 +274,32 @@ def _maybe_subscribe(data, email):
         return False
 
 
+# Paths a magic link is allowed to point at — an explicit allowlist so this
+# endpoint can never become an open redirect via a client-supplied path, and
+# so a malformed or unrecognized value costs nothing worse than falling back
+# to the default rather than erroring out the whole request.
+_LINK_REDIRECT_PATHS = ('/edit/submit-event.html', '/edit/correct-event.html')
+_GUID_RE = re.compile(r'^[0-9a-f]{1,64}$')
+
+
+def _sanitize_redirect_path(raw):
+    """Only ever returns one of _LINK_REDIRECT_PATHS, optionally with a
+    validated `guid` query param carried through for the correction form.
+    """
+    parsed = urlparse(str(raw or ''))
+    if parsed.scheme or parsed.netloc or parsed.path not in _LINK_REDIRECT_PATHS:
+        return _LINK_REDIRECT_PATHS[0]
+    if parsed.path == '/edit/correct-event.html':
+        guid = (parse_qs(parsed.query).get('guid') or [''])[0]
+        if guid and _GUID_RE.match(guid):
+            return f'/edit/correct-event.html?guid={guid}'
+        return '/edit/correct-event.html'
+    return parsed.path
+
+
 def request_link_json(event, jinja_env):
-    """POST /api/submit-link — email a magic link to submit an event."""
+    """POST /api/submit-link — email a magic link to submit an event or,
+    with a `redirect_path`, to correct one (see _sanitize_redirect_path)."""
     import boto3
 
     data = _parse_body(event)
@@ -291,10 +317,24 @@ def request_link_json(event, jinja_env):
             f'or try again in {minutes} minute{"s" if minutes != 1 else ""}.'
         ), event)
 
+    redirect_path = _sanitize_redirect_path(data.get('redirect_path'))
+    is_correction = redirect_path.startswith('/edit/correct-event.html')
+
     try:
         timestamp, signature = magic_link.generate_token(email)
-        link = magic_link.build_link(email, timestamp, signature)
+        link = magic_link.build_link(email, timestamp, signature, path=redirect_path)
         hours = magic_link.TOKEN_TTL_SECONDS // 3600
+
+        if is_correction:
+            subject = 'Your DC Tech Events correction link'
+            action_verb = 'suggest a correction to an event'
+            action_label = 'Suggest a correction'
+            not_requested = 'nothing was changed'
+        else:
+            subject = 'Your DC Tech Events submission link'
+            action_verb = 'submit your event to'
+            action_label = 'Submit an event'
+            not_requested = 'nothing was submitted'
 
         ses = boto3.client('sesv2')
         ses.send_email(
@@ -302,22 +342,22 @@ def request_link_json(event, jinja_env):
             ReplyToAddresses=[REPLY_TO_EMAIL],
             Destination={'ToAddresses': [email]},
             Content={'Simple': {
-                'Subject': {'Data': 'Your DC Tech Events submission link'},
+                'Subject': {'Data': subject},
                 'Body': {
                     'Html': {'Data': (
-                        '<p>Use this link to submit your event to '
+                        f'<p>Use this link to {action_verb} '
                         'DC Tech Events:</p>'
-                        f'<p><a href="{link}">Submit an event</a></p>'
+                        f'<p><a href="{link}">{action_label}</a></p>'
                         f'<p>The link works for the next {hours} hours. '
                         'If you did not request it, you can ignore this '
-                        'email — nothing was submitted.</p>'
+                        f'email — {not_requested}.</p>'
                     )},
                     'Text': {'Data': (
-                        'Use this link to submit your event to '
+                        f'Use this link to {action_verb} '
                         f'DC Tech Events:\n\n{link}\n\n'
                         f'The link works for the next {hours} hours. If you '
                         'did not request it, you can ignore this email — '
-                        'nothing was submitted.\n'
+                        f'{not_requested}.\n'
                     )},
                 },
             }},

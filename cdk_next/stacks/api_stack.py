@@ -207,6 +207,16 @@ class NextApiStack(cdk.Stack):
         api_res.add_resource("submit-link").add_method("POST", integration)
         api_res.add_resource("submissions").add_method("POST", integration)
 
+        # Same reasoning: correction submitters authenticate with the same
+        # emailed magic link, and the public event read is a deliberately
+        # narrow, unauthenticated endpoint (routes/corrections.py) so the
+        # correction form has something to render without needing the
+        # admins-only event detail route.
+        api_res.add_resource("corrections").add_method("POST", integration)
+        public_res = api_res.add_resource("public")
+        public_res.add_resource("events").add_resource("{guid}").add_method(
+            "GET", integration)
+
         # Authenticated JSON API
         api_res.add_resource("my-submissions").add_method("GET", integration, **authed)
         api_res.add_resource("admin").add_proxy(

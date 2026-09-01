@@ -12,7 +12,7 @@ import traceback
 
 from jinja2 import Environment, FileSystemLoader
 
-from routes import public, submit, admin, events
+from routes import public, submit, admin, events, corrections
 
 # Set up Jinja2 template environment
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -119,6 +119,36 @@ def lambda_handler(event, context):
 
         if path == '/api/my-submissions' and http_method == 'GET':
             return add_cors(submit.my_submissions_json(event, jinja_env))
+
+        # Corrections: public POST is unauthenticated at the gateway for the
+        # same reason /api/submissions is — the Lambda verifies the magic
+        # link itself. The public read is a separate, narrower endpoint from
+        # the admin event detail route, on purpose (see get_public_event_json).
+        if path == '/api/corrections' and http_method == 'POST':
+            return add_cors(corrections.submit_correction_json(event, jinja_env))
+
+        if path.startswith('/api/public/events/') and http_method == 'GET':
+            guid = path[len('/api/public/events/'):].split('/')[0]
+            if guid:
+                return add_cors(
+                    corrections.get_public_event_json(event, jinja_env, guid))
+
+        if path == '/api/admin/corrections' and http_method == 'GET':
+            return add_cors(corrections.list_corrections_json(event, jinja_env))
+
+        if path.startswith('/api/admin/corrections/'):
+            rest = path[len('/api/admin/corrections/'):].split('/')
+            correction_id, tail = rest[0], (rest[1] if len(rest) > 1 else '')
+            if correction_id:
+                if tail == 'approve' and http_method == 'POST':
+                    return add_cors(corrections.approve_correction_json(
+                        event, jinja_env, correction_id))
+                if tail == 'reject' and http_method == 'POST':
+                    return add_cors(corrections.reject_correction_json(
+                        event, jinja_env, correction_id))
+                if not tail and http_method == 'GET':
+                    return add_cors(corrections.get_correction_json(
+                        event, jinja_env, correction_id))
 
         if path == '/api/admin/queue' and http_method == 'GET':
             return add_cors(admin.get_queue_json(event, jinja_env))

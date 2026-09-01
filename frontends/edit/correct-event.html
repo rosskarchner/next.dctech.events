@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">Report an Issue - DC Tech Events</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+  <link rel="stylesheet" href="/edit/css/front-suggest.css">
+  <style>
+    header { display: none; }
+    .container { max-width: 700px; }
+    .nav-links.hidden { display: none !important; }
+    [data-auth].hidden { display: none !important; }
+    .field-current { color: #666; font-size: 0.9em; margin: 0.15rem 0 0.4rem; }
+    .field-locked { padding: 0.5rem 0; color: #444; }
+    .field-locked .hint { color: #666; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px; padding: 0.5rem 1rem;">
+      <div style="display:flex; align-items: center; gap: 2rem;">
+        <a href="index.html" class="nav-brand" id="nav-brand" style="font-weight: bold; text-decoration: none; color: inherit;">DC Tech Events Edit</a>
+        <ul class="nav-links" data-auth="admin" style="display:flex; list-style: none; gap: 1rem; margin: 0; padding: 0;">
+          <li><a href="queue.html">Queue</a></li>
+        </ul>
+      </div>
+      <div class="nav-right">
+        <span data-auth="logged-in" class="hidden">
+          <span data-user="name"></span>
+          <button class="btn-sign-out" onclick="DctechAuth.logout()" style="margin-left: 1rem; cursor: pointer;">Sign Out</button>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h2>Report an issue with this event</h2>
+    <p id="page-subtitle">
+      Spot something wrong — a moved venue, a dead link, a stale description?
+      Tell us and a moderator will review it. No account needed.
+    </p>
+
+    <div id="no-guid" class="hidden">
+      <div class="message message-error"><p>
+        No event was specified. Go back to the event's page and use the
+        "Report an issue" link there.
+      </p></div>
+    </div>
+
+    <div id="not-correctable" class="hidden">
+      <div class="message message-error"><p>
+        We couldn't find that event here. Recurring events can't be
+        corrected through this form yet — please
+        <a href="mailto:ross@karchner.com">contact us</a> directly instead.
+      </p></div>
+    </div>
+
+    <div id="link-request" class="hidden">
+      <form id="link-form" class="card" style="padding: 1.25rem;">
+        <div class="form-group">
+          <label for="link-email">Your email <span class="required">*</span></label>
+          <input type="email" id="link-email" name="email" required
+                 autocomplete="email" placeholder="you@example.com">
+          <p class="hint" style="font-size: 0.9em; color: #666; margin-top: 0.35rem;">
+            We use it to send your correction link, and so we can follow up
+            if we have questions. It is not published.
+          </p>
+        </div>
+        <button type="submit" id="link-btn" class="btn btn-primary">Email me a correction link</button>
+      </form>
+      <p style="margin-top: 1rem; font-size: 0.9em; color: #666;">
+        Already have an account? <a href="#" onclick="DctechAuth.login(); return false;">Sign in instead</a>.
+      </p>
+    </div>
+
+    <div id="form-response" class="response-area"></div>
+
+    <div id="submitting-as" class="hidden" style="margin-bottom: 1rem; font-size: 0.95em; color: #666;"></div>
+
+    <form id="correction-form" class="hidden">
+      <div class="event-section">
+        <h3 id="event-title-heading"></h3>
+
+        <div id="field-description" class="form-group hidden">
+          <label for="field-description-input">Description</label>
+          <p class="field-current" id="field-description-current"></p>
+          <textarea id="field-description-input" name="description"
+                    placeholder="Corrected description"></textarea>
+        </div>
+
+        <div id="field-location" class="form-group hidden">
+          <label for="field-location-input">Venue / location</label>
+          <p class="field-current" id="field-location-current"></p>
+          <input type="text" id="field-location-input" name="location"
+                 placeholder="Corrected venue or address">
+        </div>
+
+        <div id="field-url" class="form-group hidden">
+          <label for="field-url-input">Event URL</label>
+          <p class="field-current" id="field-url-current"></p>
+          <input type="url" id="field-url-input" name="url"
+                 placeholder="Corrected event URL">
+        </div>
+
+        <div id="field-time" class="form-group hidden">
+          <label for="field-time-input">Time</label>
+          <p class="field-current" id="field-time-current"></p>
+          <input type="time" id="field-time-input" name="time">
+        </div>
+
+        <div id="field-end_time" class="form-group hidden">
+          <label for="field-end_time-input">End time</label>
+          <p class="field-current" id="field-end_time-current"></p>
+          <input type="time" id="field-end_time-input" name="end_time">
+        </div>
+
+        <div id="field-time-locked" class="field-locked hidden">
+          <strong>Date &amp; time:</strong> <span id="field-time-locked-value"></span>
+          <p class="hint">This event's date and time come from its
+             organizer's calendar and can't be corrected here.</p>
+        </div>
+
+        <div class="form-group">
+          <label for="reason">What's wrong, and how do you know? <span class="required">*</span></label>
+          <textarea id="reason" name="reason" required
+                    placeholder="e.g. The venue closed in August; the event has moved to ..."></textarea>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" id="submit-btn" class="btn btn-primary">
+          <span class="htmx-indicator" id="submit-indicator"><span class="spinner"></span></span>
+          Submit correction
+        </button>
+      </div>
+    </form>
+  </main>
+
+  <script src="/edit/js/config.js"></script>
+  <script src="/edit/js/auth.js"></script>
+  <script src="/edit/js/correction.js"></script>
+  <script>
+    DctechCorrectionPage.init();
+  </script>
+</body>
+</html>
