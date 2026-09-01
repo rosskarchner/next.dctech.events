@@ -249,13 +249,24 @@ def _build_agent(model_id, system_prompt, tools, dry_run, with_browser=False,
         tools = list(tools) + [tavily_extract, tavily_search]
 
     class _ToolCallBudget:
-        """Cancels tool calls once a run has made too many of them."""
+        """Cancels tool calls once a run has made too many of them.
+
+        Implements the HookProvider protocol (register_hooks) rather than
+        relying on Strands' type-hint-inference registration path — that path
+        calls get_type_hints() on the raw hook object, and an instance has no
+        __annotations__ of its own (those live on its __call__ method), so
+        passing an instance directly raises 'parameter=<event> has no type
+        hint' at Agent construction time.
+        """
 
         def __init__(self, max_calls):
             self.max_calls = max_calls
             self.count = 0
 
-        def __call__(self, event: BeforeToolCallEvent):
+        def register_hooks(self, registry):
+            registry.add_callback(BeforeToolCallEvent, self._on_before_tool_call)
+
+        def _on_before_tool_call(self, event: BeforeToolCallEvent):
             self.count += 1
             if self.count > self.max_calls:
                 event.cancel_tool = (
