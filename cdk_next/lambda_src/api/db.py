@@ -288,13 +288,19 @@ def create_draft(draft_type, data, submitter_email, submitter_id=None):
 
 
 def get_drafts_by_status(status='pending'):
-    """Get all drafts with a given status."""
+    """Get all drafts with a given status.
+
+    CORRECTION# items share this exact GSI1PK convention (STATUS#{status}),
+    so the query returns both interleaved unless filtered — same fix as
+    get_corrections_by_status's own filter against this collision.
+    """
     table = _get_table()
     normalized_status = _normalize_draft_status(status)
 
     items = _query_all(table, IndexName='GSI1', KeyConditionExpression=Key('GSI1PK').eq(f'STATUS#{normalized_status}'), ScanIndexForward=False)
 
-    return [_draft_item_to_dict(item) for item in items]
+    return [_draft_item_to_dict(item) for item in items
+            if item['PK'].startswith('DRAFT#')]
 
 
 def get_drafts_by_submitter(user_id):
@@ -306,7 +312,8 @@ def get_drafts_by_submitter(user_id):
     # Use GSI3 to efficiently query by user identifier
     items = _query_all(table, IndexName='GSI3', KeyConditionExpression=Key('GSI3PK').eq(f'USER#{user_id}'), ScanIndexForward=False)
 
-    return [_draft_item_to_dict(item) for item in items]
+    return [_draft_item_to_dict(item) for item in items
+            if item['PK'].startswith('DRAFT#')]
 
 
 def get_draft(draft_id):

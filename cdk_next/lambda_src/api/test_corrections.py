@@ -193,6 +193,41 @@ def test_get_correction_on_an_unknown_id_returns_none(table):
     assert db.get_correction("ghost123") is None
 
 
+# ── The collision runs both directions ─────────────────────────────
+# Found live: a correction created during testing showed up in the DRAFT#
+# queue as an "Untitled" row with no details, and rejecting it 404'd ("Draft
+# not found") because get_draft looks it up at PK=DRAFT#{id}, which doesn't
+# exist for a correction stored at PK=CORRECTION#{id}. get_corrections_by_*
+# already filtered out DRAFT# items; get_drafts_by_* needed the same filter
+# against CORRECTION# items and didn't have it.
+
+
+def test_get_drafts_by_status_does_not_pick_up_a_comingled_correction(table, events):
+    db.create_correction("manual1", {"time": "20:00"}, "wrong time", "a@b.c")
+    table.put_item(Item={
+        "PK": "DRAFT#abc12345", "SK": "META",
+        "GSI1PK": "STATUS#pending", "GSI1SK": "2026-01-01T00:00:00Z",
+        "draft_type": "event", "status": "pending", "title": "Real Draft",
+    })
+
+    pending = db.get_drafts_by_status("pending")
+
+    assert [d["id"] for d in pending] == ["abc12345"]
+
+
+def test_get_drafts_by_submitter_does_not_pick_up_a_comingled_correction(table, events):
+    db.create_correction("manual1", {"time": "20:00"}, "wrong time", "a@b.c")
+    table.put_item(Item={
+        "PK": "DRAFT#abc12345", "SK": "META",
+        "GSI3PK": "USER#a@b.c", "GSI3SK": "2026-01-01T00:00:00Z",
+        "draft_type": "event", "status": "pending", "title": "Real Draft",
+    })
+
+    mine = db.get_drafts_by_submitter("a@b.c")
+
+    assert [d["id"] for d in mine] == ["abc12345"]
+
+
 # ── approve_correction ─────────────────────────────────────────────
 
 
