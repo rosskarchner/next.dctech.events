@@ -12,12 +12,11 @@ from aws_cdk import (
     aws_events as events,
     aws_events_targets as targets,
     aws_iam as iam,
-    aws_lambda as lambda_,
-    aws_logs as logs,
 )
 from constructs import Construct
 
 import config
+from constructs_lib.python_lambda import python_lambda
 
 BUILD_DIR = os.path.join(os.path.dirname(__file__), "..", "build")
 
@@ -33,20 +32,15 @@ class NextOpsStack(cdk.Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        log_defaults = dict(
-            retention=logs.RetentionDays.ONE_WEEK,
-            removal_policy=cdk.RemovalPolicy.DESTROY,
-        )
-
         # ── Weekly: prune unconfirmed Cognito signups ────────────────
-        self.cleanup_function = lambda_.Function(
+        self.cleanup_function = python_lambda(
             self,
             "NextCleanupUnconfirmedUsers",
             function_name=f"{config.PREFIX}-cleanup-unconfirmed-users",
-            runtime=lambda_.Runtime.PYTHON_3_12,
-            architecture=lambda_.Architecture.X86_64,
             handler="cleanup_unconfirmed_users.lambda_handler",
-            code=lambda_.Code.from_asset(os.path.join(BUILD_DIR, "ops")),
+            code_dir="ops",
+            build_dir=BUILD_DIR,
+            log_group_id="NextCleanupLogGroup",
             timeout=cdk.Duration.minutes(5),
             environment={
                 "COGNITO_USER_POOL_ID": config.USER_POOL_ID,
@@ -57,7 +51,6 @@ class NextOpsStack(cdk.Stack):
                 # real safeguard for confirmed accounts.
                 "MAX_DELETIONS": "1000",
             },
-            log_group=logs.LogGroup(self, "NextCleanupLogGroup", **log_defaults),
         )
         self.cleanup_function.add_to_role_policy(
             iam.PolicyStatement(
@@ -76,14 +69,14 @@ class NextOpsStack(cdk.Stack):
         )
 
         # ── Daily: moderation queue summary ─────────────────────────
-        self.queue_notification_function = lambda_.Function(
+        self.queue_notification_function = python_lambda(
             self,
             "NextQueueNotification",
             function_name=f"{config.PREFIX}-queue-notification",
-            runtime=lambda_.Runtime.PYTHON_3_12,
-            architecture=lambda_.Architecture.X86_64,
             handler="queue_notification.lambda_handler",
-            code=lambda_.Code.from_asset(os.path.join(BUILD_DIR, "ops")),
+            code_dir="ops",
+            build_dir=BUILD_DIR,
+            log_group_id="NextQueueNotificationLogGroup",
             timeout=cdk.Duration.minutes(2),
             environment={
                 "DYNAMODB_TABLE_NAME": table.table_name,
@@ -91,11 +84,18 @@ class NextOpsStack(cdk.Stack):
                 "SENDER_EMAIL": f"noreply@{config.ZONE_NAME}",
                 "QUEUE_URL": f"{config.BASE_URL}/edit/queue.html",
             },
-            log_group=logs.LogGroup(self, "NextQueueNotificationLogGroup", **log_defaults),
         )
         table.grant_read_data(self.queue_notification_function)
         self.queue_notification_function.add_to_role_policy(
-            iam.PolicyStatement(actions=["ses:SendEmail"], resources=["*"])
+            iam.PolicyStatement(
+                # dctech.events is verified at the domain level (SES DKIM),
+                # not per-address — matches the scoping already applied to
+                # every other ses:SendEmail grant in this app this session.
+                actions=["ses:SendEmail"],
+                resources=[
+                    f"arn:aws:ses:{self.region}:{self.account}:identity/dctech.events"
+                ],
+            )
         )
         events.Rule(
             self,
