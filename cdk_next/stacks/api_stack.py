@@ -308,3 +308,11 @@ class NextApiStack(cdk.Stack):
 
         cdk.CfnOutput(self, "NextApiEndpoint", value=api.url)
         cdk.CfnOutput(self, "NextMcpUrl", value=self.mcp_url)
+        # The sole authentication factor for anonymous submission/correction
+        # (magic_link.py's SUBMIT_KEY_ID) — surfaced here so the active key
+        # is always one `aws cloudformation describe-stacks` away instead of
+        # something only discoverable by grepping the deployed Lambda's
+        # environment or trusting a possibly-stale note somewhere else (this
+        # session found exactly that: a remembered key id that had drifted
+        # from what was actually deployed).
+        cdk.CfnOutput(self, "NextSubmitLinkKeyId", value=self.submit_key.key_id)
