@@ -36,11 +36,14 @@ BUILD_DIR = os.path.join(os.path.dirname(__file__), "..", "build")
 # hyphens, so config.PREFIX ("dctech-events-next") cannot be used here.
 RUNTIME_NAME = "dctechEventsCalendarQc"
 
-# Cross-region inference profile. Everything this agent does removes an event
-# from the site, so it all runs on the stronger model. A cheaper second pass
-# for venues/titles/categories was tried and dropped — see the agent's module
-# docstring.
-TRIAGE_MODEL = "us.anthropic.claude-sonnet-5"
+# Cross-region inference profiles. Polish (venues/titles/categories) stays on
+# the strong model — a cheaper pass for it was tried and dropped once already,
+# see the agent's module docstring. Triage (duplicates/out-of-area, which
+# removes an event) is on trial with Nova 2 Lite as of 2026-09-01
+# (next_dctech_events-3zz) — watch it; revert here if it starts missing or
+# wrongly hiding real events.
+TRIAGE_MODEL = "us.amazon.nova-2-lite-v1:0"
+POLISH_MODEL = "us.anthropic.claude-sonnet-5"
 
 
 class NextQaAgentStack(cdk.Stack):
@@ -73,19 +76,23 @@ class NextQaAgentStack(cdk.Stack):
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-                # Scoped to Anthropic models only (this agent only ever
-                # requests Claude models — see QC_TRIAGE_MODEL in
+                # Scoped to the specific model families this agent actually
+                # requests (Anthropic for polish, Amazon Nova for triage's
+                # current trial — see QC_TRIAGE_MODEL/QC_POLISH_MODEL in
                 # calendar_qc/main.py), not every model in the account.
                 # Wildcarded on region: cross-region inference profiles (the
-                # "us." prefix on the model id) route the actual invocation
-                # to whichever region has capacity, and IAM authorizes that
-                # invocation against the underlying foundation-model ARN in
-                # the region it lands in, not just the profile ARN's own
-                # region — narrowing this further would risk breaking runs
-                # that get routed somewhere this list didn't anticipate.
+                # "us."/"global." prefix on the model id) route the actual
+                # invocation to whichever region has capacity, and IAM
+                # authorizes that invocation against the underlying
+                # foundation-model ARN in the region it lands in, not just
+                # the profile ARN's own region — narrowing this further would
+                # risk breaking runs that get routed somewhere this list
+                # didn't anticipate.
                 resources=[
                     f"arn:aws:bedrock:*:{self.account}:inference-profile/*.anthropic.*",
                     "arn:aws:bedrock:*::foundation-model/anthropic.*",
+                    f"arn:aws:bedrock:*:{self.account}:inference-profile/*.amazon.nova-2-*",
+                    "arn:aws:bedrock:*::foundation-model/amazon.nova-2-*",
                 ],
             )
         )
@@ -189,6 +196,7 @@ class NextQaAgentStack(cdk.Stack):
             environment_variables={
                 "DCTECH_MCP_URL": mcp_url,
                 "QC_TRIAGE_MODEL": TRIAGE_MODEL,
+                "QC_POLISH_MODEL": POLISH_MODEL,
                 "SEARCH_SECRET_ARN": search_secret.secret_arn,
                 "ADMIN_EMAIL": config.NEWSLETTER_ADMIN_EMAIL,
                 "FROM_EMAIL": config.NEWSLETTER_FROM_EMAIL,

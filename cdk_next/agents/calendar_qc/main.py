@@ -18,10 +18,17 @@ not the same instinct, and one prompt cannot hold both without blunting one.
 The polish pass is a revival. It was built once on a *cheaper* model with only
 the browser to read pages, and dropped after producing zero overlays across
 three dry runs and one live run — the judgement it needed sat on the wrong side
-of the cost/quality line. It now runs on the same model as triage and reads
-pages with `tavily_extract`, so it compares against the canonical description
-instead of inferring from a title. If it still produces nothing, cut it again;
-`--dry-run` is how to tell.
+of the cost/quality line. It was brought back running on the same strong model
+as triage and reading pages with `tavily_extract`, so it compares against the
+canonical description instead of inferring from a title.
+
+Triage is on trial with Nova 2 Lite as of 2026-09-01 (next_dctech_events-3zz) —
+a deliberate reversal of this file's own prior reasoning that hiding an event
+is the one outcome here a reader would notice, so it should stay on the strong
+model. Watch dry runs against a real week's queue the way polish's revival was
+validated before trusting it unattended; if triage starts missing real
+duplicates/out-of-area listings, or hiding good ones, that is the signal to
+revert QC_TRIAGE_MODEL, not tune the prompt further.
 
 Every write is stamped with a run id, so a whole run can be undone in one call
 (`revert_qa_run`) if it gets something wrong. The digest email carries that id.
@@ -37,10 +44,11 @@ import digest
 from mcp_sigv4 import mcp_transport
 from prompt import POLISH_PROMPT, TRIAGE_PROMPT
 
-# Hiding an event is the one thing this agent does that a reader would notice
-# if it got it wrong, so it runs on the stronger model. Overridable so the tier
-# can be changed from the stack without a code deploy.
-TRIAGE_MODEL = os.environ.get('QC_TRIAGE_MODEL', 'us.anthropic.claude-sonnet-5')
+# Overridable per-pass so the tier can be changed from the stack without a
+# code deploy. POLISH_MODEL stays on the strong model per this file's own
+# history (see module docstring); TRIAGE_MODEL is the one on trial.
+TRIAGE_MODEL = os.environ.get('QC_TRIAGE_MODEL', 'us.amazon.nova-2-lite-v1:0')
+POLISH_MODEL = os.environ.get('QC_POLISH_MODEL', 'us.anthropic.claude-sonnet-5')
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
 # Bedrock's per-response default is small enough that a pass over ~20 events
@@ -346,7 +354,7 @@ def run_qc(dry_run=False, limit=None, run_id=None, own_rebuild=True):
             print(f'run {run_id}: polishing {len(survivors)} of {len(guids)} '
                   f'({len(removed)} removed by triage)')
             polish = _build_agent(
-                TRIAGE_MODEL, POLISH_PROMPT, _select(tools, _POLISH_TOOLS, dry_run),
+                POLISH_MODEL, POLISH_PROMPT, _select(tools, _POLISH_TOOLS, dry_run),
                 dry_run, with_browser=True, with_search=True,
                 max_tool_calls=max(QC_MIN_TOOL_CALLS, QC_TOOL_CALLS_PER_EVENT * len(survivors)))
             polish_out = polish(
