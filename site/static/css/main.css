@@ -107,6 +107,16 @@ h2.day-heading a:hover {
     text-decoration: underline;
 }
 
+/* Homepage subheading — kept as <h1> for SEO/a11y, styled down from the
+   default h1 weight/spacing so it reads as a label above the events, not a
+   full title pushing them below the fold. */
+.page-subheading {
+    margin: 0 0 var(--spacing-sm) 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
 h3.time-heading {
     margin: 0;
     padding: var(--spacing-xs) 0;
@@ -469,18 +479,15 @@ footer {
     font-variant-numeric: tabular-nums;
 }
 
-/* Just Added Preview */
-#just-added-preview {
-    background-color: var(--color-background-alt);
-    padding: var(--spacing-md);
-    border-radius: var(--border-radius);
-    margin-bottom: var(--spacing-xl);
-    border-left: 4px solid var(--color-primary);
-    font-size: 0.95rem;
-    line-height: 1.6;
+/* Recently Added Line — a single-line freshness signal replacing the old
+   boxed just-added preview, so it no longer eats above-the-fold space. */
+.recently-added-line {
+    margin: 0 0 var(--spacing-md) 0;
+    font-size: 0.9rem;
+    color: var(--color-text-light);
 }
 
-#just-added-preview a {
+.recently-added-line a {
     font-weight: 500;
 }
 

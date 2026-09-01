@@ -12,7 +12,17 @@
 <div class="home-container">
 
     <section class="events-section">
-        <h1>Upcoming Tech Events in DC, Maryland &amp; Virginia</h1>
+        <h1 class="page-subheading">Upcoming Tech Events in DC, Maryland &amp; Virginia</h1>
+
+        {% if recently_added_count %}
+        <p class="recently-added-line">
+            <a href="/just-added/">{{ recently_added_count }} new event{{ 's' if recently_added_count != 1 else '' }} added this week</a>
+        </p>
+        {% endif %}
+
+        {% with days=days[:2] %}
+            {% include "partials/events_by_day.html" %}
+        {% endwith %}
 
         <div id="subscribe">
             <div>
@@ -21,17 +31,11 @@
             <div>You can also follow on <a href="https://bsky.app/profile/dctechevents.bsky.social">Bluesky</a> or <a href="https://dmv.community/@techevents">Mastodon</a></div>
         </div>
 
-        {% if recently_added %}
-        <div id="just-added-preview">
-            <strong>Just added:</strong>
-            {% for event in recently_added %}
-                <a href="{{ event.url }}">{{ event.title }}</a>{% if event.date %} ({{ event.date[5:7]|int }}/{{ event.date[8:10]|int }}){% endif %}{% if not loop.last %}, {% endif %}
-            {% endfor %}
-            — <a href="/just-added/">see all recently added events</a>
-        </div>
+        {% if days|length > 2 %}
+            {% with days=days[2:] %}
+                {% include "partials/events_by_day.html" %}
+            {% endwith %}
         {% endif %}
-
-    {% include "partials/events_by_day.html" %}
 
     </section>
 
