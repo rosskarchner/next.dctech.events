@@ -31,12 +31,17 @@ ALLOWED_ORIGINS = [
 
 
 def get_cors_origin(event):
-    """Get the appropriate CORS origin header based on request origin."""
+    """Get the CORS origin header value for this request, or None to omit it.
+
+    Non-allowlisted origins get no Access-Control-Allow-Origin header at all
+    (default-deny), not a wildcard — a wildcard here would let any site's JS
+    read every response, including /api/admin/* JSON, from a browser holding
+    a leaked bearer token.
+    """
     request_origin = event.get('headers', {}).get('Origin', '') or event.get('headers', {}).get('origin', '')
     if request_origin in ALLOWED_ORIGINS:
         return request_origin
-    # Fallback to wildcard for public endpoints (will be restricted below)
-    return '*'
+    return None
 
 
 def html_response(status_code, body, headers=None, allow_all_origins=False):
@@ -81,21 +86,24 @@ def lambda_handler(event, context):
 
     # Handle CORS preflight
     if http_method == 'OPTIONS':
+        preflight_headers = {
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization,HX-Request,HX-Trigger,HX-Trigger-Name,HX-Target,HX-Current-URL',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+        }
+        if cors_origin:
+            preflight_headers['Access-Control-Allow-Origin'] = cors_origin
         return {
             'statusCode': 200,
-            'headers': {
-                'Access-Control-Allow-Origin': cors_origin,
-                'Access-Control-Allow-Headers': 'Content-Type,Authorization,HX-Request,HX-Trigger,HX-Trigger-Name,HX-Target,HX-Current-URL',
-                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-            },
+            'headers': preflight_headers,
             'body': json.dumps({'message': 'ok'}),
         }
 
-    # Add CORS origin to all responses
+    # Add CORS origin to all responses, if this origin is allowlisted
     def add_cors(response):
-        if 'headers' not in response:
-            response['headers'] = {}
-        response['headers']['Access-Control-Allow-Origin'] = cors_origin
+        if cors_origin:
+            if 'headers' not in response:
+                response['headers'] = {}
+            response['headers']['Access-Control-Allow-Origin'] = cors_origin
         return response
 
     try:
