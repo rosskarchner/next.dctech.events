@@ -19,7 +19,6 @@ from stacks.site_generator_stack import NextSiteGeneratorStack
 from stacks.ical_aggregator_stack import NextIcalAggregatorStack
 from stacks.newsletter_stack import NextNewsletterStack
 from stacks.qa_agent_stack import NextQaAgentStack
-from stacks.discovery_agent_stack import NextDiscoveryAgentStack
 from stacks.ops_stack import NextOpsStack
 from stacks.social_stack import NextSocialStack
 from stacks.updates_stack import NextUpdatesStack
@@ -65,9 +64,6 @@ ical_aggregator = NextIcalAggregatorStack(
 )
 
 qa_agent = NextQaAgentStack(app, "NextQaAgentStack", mcp_url=api.mcp_url, env=env)
-discovery_agent = NextDiscoveryAgentStack(
-    app, "NextDiscoveryAgentStack", mcp_url=api.mcp_url, env=env
-)
 
 ops = NextOpsStack(app, "NextOpsStack", table=db.table, env=env)
 social = NextSocialStack(app, "NextSocialStack", env=env)

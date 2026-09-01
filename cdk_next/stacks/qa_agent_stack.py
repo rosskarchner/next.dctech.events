@@ -108,12 +108,19 @@ class NextQaAgentStack(cdk.Stack):
         )
 
         # Tavily, for reading the event pages the polish pass compares entries
-        # against and for resolving venues those pages only name. The same
-        # secret the discovery agent created, referenced by name rather than
-        # duplicated: it is one Tavily account, and a second key would be a
-        # second thing to rotate. The `discovery/` in the path is historical.
-        search_secret = secretsmanager.Secret.from_secret_name_v2(
-            self, "SearchApiKeyRef", f"{config.PREFIX}/discovery/tavily"
+        # against and for resolving venues those pages only name. Used to
+        # reference-by-name the discovery agent's own secret (one Tavily
+        # account, one key) — now owned here directly, since the discovery
+        # agent was deleted (next_dctech_events, 2026-09-01). CDK force-deleted
+        # the old secret with the stack, so this is a fresh, empty placeholder;
+        # the real key value has to be set out-of-band (see deploy notes) —
+        # never pass it as a CDK/CloudFormation literal, which would leave it
+        # in plaintext in the template and deploy history.
+        search_secret = secretsmanager.Secret(
+            self,
+            "SearchApiKey",
+            secret_name=f"{config.PREFIX}/qa/tavily",
+            description="Tavily API key for the QC agent's web search",
         )
         search_secret.grant_read(role)
         # The agent releases the Step Functions task token the Monday state

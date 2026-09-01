@@ -3,9 +3,13 @@
 Python CDK stack serving **https://dctech.events** (and `www`). Built as a
 parallel stack at `next.dctech.events`, it took over the main domain at
 cutover; the repo keeps its original name. DynamoDB is the hub: the
-submission UI, four
-agents (iCal aggregator, QA, discovery, newsletter sender), and the static
-site generator all read/write the `dctech-events-next` table. See
+submission UI, three
+agents (iCal aggregator, QA, newsletter sender), and the static
+site generator all read/write the `dctech-events-next` table. The discovery
+agent was deleted 2026-09-01 (its infrastructure and source, not the
+`propose_group`/`propose_event`/`CANDIDATE#` intake it fed — that stayed,
+since nothing else calls it but nothing else depends on removing it either).
+See
 `next-architecture-plan.md` for the full design and the scope decisions
 behind it.
 
@@ -30,7 +34,7 @@ being installed from a separate repo, so a single checkout builds everything.
   minus the git-commit hop), MCP server (calgen's tool surface against
   DynamoDB), iCal aggregator (imports `calgen.calendars` unmodified via a
   /tmp adapter), newsletter (port of the live `dctech-newsletter` Chalice
-  app), site-generator export/trigger, QA + discovery stubs
+  app), site-generator export/trigger, QA agent trigger
 - `cdk_next/scripts/` — `migrate_to_next_table.py` (one-time seed, dry-run by
   default) and `setup_ses_next.py` (idempotent SES provisioning)
 - `site/` — calgen site source (config/templates/static/regions.py); the
@@ -186,9 +190,11 @@ time. The feed value stays underneath, so nothing is destructive, and every
 write is stamped with the run id that `revert_qa_run` undoes in one call.
 
 **Tavily** (`tavily_extract`, `tavily_search`) sits in front of the browser as
-the cheaper first try, sharing the discovery agent's key — one Tavily account,
-referenced by name rather than duplicated. Extract reads the event page;
-search resolves a venue the page only names. The browser stays as the fallback,
+the cheaper first try, using its own secret owned by `NextQaAgentStack`
+(`{prefix}/qa/tavily` — until 2026-09-01 this referenced the discovery
+agent's key by name; deleting that stack force-deleted the secret along with
+it, so the QC agent now owns a fresh one directly). Extract reads the event
+page; search resolves a venue the page only names. The browser stays as the fallback,
 because Meetup and Eventbrite are what it was added for.
 
 The polish pass is a **revival**, and worth watching. It was built once on a
