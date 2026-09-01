@@ -36,6 +36,7 @@ from calgen.routes.common import (
 from calgen.regions import load_region_plugin  # noqa: E402
 from calgen.routes import groups as _groups_routes
 from calgen.routes import events as _events_routes
+from calgen.routes import locations as _locations_routes
 
 
 def create_app(site_dir=None):
@@ -63,6 +64,7 @@ def create_app(site_dir=None):
     _register_routes(app)
     _groups_routes.register_routes(app)
     _events_routes.register_routes(app)
+    _locations_routes.register_routes(app)
     return app
 
 
@@ -219,24 +221,6 @@ def _register_routes(app):
                                error_message=None if days else
                                "Nothing has been recorded as newly added yet.")
 
-    @app.route("/locations/")
-    def locations_index():
-        plugin = app.region_plugin
-        if not plugin:
-            return "Not found", 404
-        events = get_events()
-        counts = {}
-        for event in events:
-            slug = event.get('region')
-            if slug:
-                counts[slug] = counts.get(slug, 0) + 1
-        locations = [
-            {'state': r['slug'], 'name': r['name'], 'count': counts.get(r['slug'], 0)}
-            for r in plugin.list_regions()
-            if counts.get(r['slug'], 0) > 0
-        ]
-        return render_template('locations_index.html', locations=locations)
-
     def _newsletter_context():
         """Shared setup for newsletter_html/newsletter_text — same event
         window, same stats, only the rendered template and content-type
@@ -267,25 +251,6 @@ def _register_routes(app):
     def newsletter_text():
         response = render_template('newsletter.txt', **_newsletter_context())
         return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
-    @app.route("/locations/<slug>/")
-    def region_page(slug):
-        plugin = app.region_plugin
-        if not plugin:
-            return "Region not found", 404
-        regions = plugin.list_regions()
-        region = next((r for r in regions if r['slug'] == slug), None)
-        if not region:
-            return "Region not found", 404
-        events = get_events()
-        filtered_events = [e for e in events if e.get('region') == slug]
-        days = prepare_events_by_day(filtered_events)
-        stats = {'upcoming_events': len(filtered_events)}
-        return render_template('location_page.html',
-                               days=days,
-                               stats=stats,
-                               location_name=region['name'],
-                               location_type='region')
 
     @app.route("/categories/")
     def categories_index():
@@ -494,25 +459,6 @@ def _register_routes(app):
             f"{category['name']} events"
         )
 
-    @app.route("/locations/<slug>/feed.ics")
-    def location_ical_feed(slug):
-        plugin = app.region_plugin
-        if not plugin:
-            return "Region not found", 404
-        regions = plugin.list_regions()
-        region = next((r for r in regions if r['slug'] == slug), None)
-        if not region:
-            return "Region not found", 404
-        events = get_events()
-        filtered_events = [e for e in events if e.get('region') == slug]
-        cfg = get_config()
-        site_name = cfg.get('site_name', 'Tech Events')
-        return _generate_ical_feed(
-            filtered_events,
-            f"{region['name']} Events - {site_name}",
-            f"Technology events in {region['name']}"
-        )
-
     @app.route("/events-feed.xml")
     def events_rss_feed():
         events = get_events()
@@ -537,27 +483,6 @@ def _register_routes(app):
             f"{category['name']} Events - {site_name}",
             f"Upcoming {category['name']} events",
             f"{base_url}/categories/{slug}/"
-        )
-
-    @app.route("/locations/<slug>/feed.xml")
-    def location_rss_feed(slug):
-        plugin = app.region_plugin
-        if not plugin:
-            return "Region not found", 404
-        regions = plugin.list_regions()
-        region = next((r for r in regions if r['slug'] == slug), None)
-        if not region:
-            return "Region not found", 404
-        events = get_events()
-        filtered_events = [e for e in events if e.get('region') == slug]
-        cfg = get_config()
-        site_name = cfg.get('site_name', 'Tech Events')
-        base_url = cfg.get('base_url', '')
-        return _generate_rss_feed(
-            filtered_events,
-            f"{region['name']} Events - {site_name}",
-            f"Upcoming technology events in {region['name']}",
-            f"{base_url}/locations/{slug}/"
         )
 
     # ── /updates — the weekly blog (replaces updates.dctech.events) ────

@@ -31,7 +31,13 @@ def client(monkeypatch):
     app = create_app(site_dir=str(SITE_DIR))
     app.testing = True
     app.region_plugin = _FakeRegionPlugin()
+    # category_page still resolves get_events/get_categories from calgen.app
+    # (not yet split out); region_page moved to calgen.routes.locations, so
+    # its own get_events lookup needs patching there too — Python resolves a
+    # bare name via the *defining* module's globals, not through wherever
+    # else re-exports it.
     monkeypatch.setattr('calgen.app.get_events', lambda *a, **k: [_FAKE_EVENT])
+    monkeypatch.setattr('calgen.routes.locations.get_events', lambda *a, **k: [_FAKE_EVENT])
     monkeypatch.setattr('calgen.app.get_categories', lambda: {
         'ai': {'slug': 'ai', 'name': 'AI', 'description': ''},
     })
