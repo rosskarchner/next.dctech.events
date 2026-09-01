@@ -57,6 +57,11 @@ JUST_ADDED_DAYS = 30
 # How many of the newest additions the homepage teases.
 RECENTLY_ADDED_PREVIEW = 5
 
+# How far out the homepage and newsletter look. A multi-day event starting
+# inside this window still gets clipped to it in prepare_events_by_day, so
+# raising this doesn't let a long-running listing bleed further past the edge.
+UPCOMING_WINDOW_DAYS = 21
+
 
 def create_app(site_dir=None):
     """
@@ -114,13 +119,14 @@ def _register_routes(app):
     def homepage():
         all_events = get_events()
         events = filter_in_person_events(all_events)
-        two_week_events = filter_events_to_next_two_weeks(events)
-        days = prepare_events_by_day(two_week_events, add_week_links=True)
+        window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
+        upcoming_events = filter_events_to_upcoming_days(events, window_end)
+        days = prepare_events_by_day(upcoming_events, add_week_links=True, window_end=window_end)
 
         cfg = get_config()
         base_url = cfg.get('base_url', '')
         stats = get_stats().copy()
-        stats['upcoming_events'] = len(two_week_events)
+        stats['upcoming_events'] = len(upcoming_events)
         stats['total_upcoming_events'] = len(events)
 
         return render_template('homepage.html',
@@ -292,11 +298,12 @@ def _register_routes(app):
     @app.route("/newsletter.html")
     def newsletter_html():
         events = get_events()
-        two_week_events = filter_events_to_next_two_weeks(events)
-        days = prepare_events_by_day(two_week_events)
+        window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
+        upcoming_events = filter_events_to_upcoming_days(events, window_end)
+        days = prepare_events_by_day(upcoming_events, window_end=window_end)
         prepare_newsletter_titles(days)
         stats = get_stats().copy()
-        stats['upcoming_events'] = len(two_week_events)
+        stats['upcoming_events'] = len(upcoming_events)
         return render_template('newsletter.html',
                                days=days,
                                stats=stats,
@@ -307,11 +314,12 @@ def _register_routes(app):
     @app.route("/newsletter.txt")
     def newsletter_text():
         events = get_events()
-        two_week_events = filter_events_to_next_two_weeks(events)
-        days = prepare_events_by_day(two_week_events)
+        window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
+        upcoming_events = filter_events_to_upcoming_days(events, window_end)
+        days = prepare_events_by_day(upcoming_events, window_end=window_end)
         prepare_newsletter_titles(days)
         stats = get_stats().copy()
-        stats['upcoming_events'] = len(two_week_events)
+        stats['upcoming_events'] = len(upcoming_events)
         response = render_template('newsletter.txt',
                                    days=days,
                                    stats=stats,
@@ -1004,12 +1012,18 @@ def get_stats():
 # Event filtering helpers
 # ---------------------------------------------------------------------------
 
-def filter_events_to_next_two_weeks(events):
+def filter_events_to_upcoming_days(events, window_end):
+    """Keep events starting between today and `window_end`, inclusive.
+
+    Only the start date is checked here — a multi-day event that starts
+    within the window but ends after it is still included. prepare_events_by_day
+    clips its day-by-day expansion to the same `window_end` so it doesn't
+    render past the edge this filter implies.
+    """
     today = datetime.now(local_tz).date()
-    two_weeks_from_now = today + timedelta(days=14)
     return [
         e for e in events
-        if e.get('date') and today <= datetime.strptime(e['date'], '%Y-%m-%d').date() <= two_weeks_from_now
+        if e.get('date') and today <= datetime.strptime(e['date'], '%Y-%m-%d').date() <= window_end
     ]
 
 
@@ -1135,7 +1149,16 @@ def get_upcoming_weeks(num_weeks=12):
 # Event display helpers
 # ---------------------------------------------------------------------------
 
-def prepare_events_by_day(events, add_week_links=False):
+def prepare_events_by_day(events, add_week_links=False, window_end=None):
+    """Group events by the day(s) they occur on.
+
+    A multi-day event is expanded into one entry per day it spans. When
+    `window_end` is given, that expansion is clipped to it — otherwise a
+    long-running event whose start date passed an upstream "next N days"
+    filter would keep appearing on days well past that window
+    (next_dctech_events bug: TIX ON POSH bleeding past the homepage's
+    two-week cutoff).
+    """
     events_by_day = {}
     for event in events:
         day_key = event.get('date')
@@ -1148,6 +1171,8 @@ def prepare_events_by_day(events, add_week_links=False):
                 end_date = datetime.strptime(event['end_date'], '%Y-%m-%d').date()
             except ValueError:
                 pass
+        if window_end is not None and end_date is not None and end_date > window_end:
+            end_date = window_end
         event_dates = []
         if end_date and end_date > start_date:
             current_date = start_date
