@@ -45,13 +45,17 @@ _DAYS = [
 def client(monkeypatch):
     app = create_app(site_dir=str(SITE_DIR))
     app.testing = True
-    monkeypatch.setattr('calgen.app.get_events', lambda *a, **k: [])
+    # homepage() lives in calgen.routes.listings (moved out of calgen.app —
+    # see that module's own docstring), so that's where its calls to these
+    # names actually resolve from: Python looks up a bare name via the
+    # function's *own* module globals, not through calgen.app's re-export.
+    monkeypatch.setattr('calgen.routes.listings.get_events', lambda *a, **k: [])
     monkeypatch.setattr(
-        'calgen.app.filter_in_person_events', lambda events: events)
+        'calgen.routes.listings.filter_in_person_events', lambda events: events)
     monkeypatch.setattr(
-        'calgen.app.filter_events_to_upcoming_days', lambda events, window_end: events)
+        'calgen.routes.listings.filter_events_to_upcoming_days', lambda events, window_end: events)
     monkeypatch.setattr(
-        'calgen.app.prepare_events_by_day', lambda *a, **k: list(_DAYS))
+        'calgen.routes.listings.prepare_events_by_day', lambda *a, **k: list(_DAYS))
     return app
 
 
@@ -66,7 +70,7 @@ def test_h1_is_styled_as_a_subheading_not_removed(client):
 
 
 def test_freshness_line_shown_and_links_to_just_added(client, monkeypatch):
-    monkeypatch.setattr('calgen.app.get_recently_added_count', lambda: 3)
+    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 3)
     html = _get(client).get_data(as_text=True)
     assert 'recently-added-line' in html
     assert '3 new events added this week' in html
@@ -74,26 +78,26 @@ def test_freshness_line_shown_and_links_to_just_added(client, monkeypatch):
 
 
 def test_freshness_line_uses_singular_for_one_event(client, monkeypatch):
-    monkeypatch.setattr('calgen.app.get_recently_added_count', lambda: 1)
+    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 1)
     html = _get(client).get_data(as_text=True)
     assert '1 new event added this week' in html
     assert '1 new events' not in html
 
 
 def test_freshness_line_hidden_when_count_is_zero(client, monkeypatch):
-    monkeypatch.setattr('calgen.app.get_recently_added_count', lambda: 0)
+    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 0)
     html = _get(client).get_data(as_text=True)
     assert 'recently-added-line' not in html
 
 
 def test_old_boxed_just_added_preview_is_gone(client, monkeypatch):
-    monkeypatch.setattr('calgen.app.get_recently_added_count', lambda: 3)
+    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 3)
     html = _get(client).get_data(as_text=True)
     assert 'just-added-preview' not in html
 
 
 def test_subscribe_box_sits_after_the_first_two_day_groups(client, monkeypatch):
-    monkeypatch.setattr('calgen.app.get_recently_added_count', lambda: 0)
+    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 0)
     html = _get(client).get_data(as_text=True)
     # The JSON-LD ItemList in <head> deliberately lists every day
     # (unaffected by the {% with days=... %} body slicing — see the design
@@ -113,9 +117,9 @@ def test_subscribe_box_sits_after_the_first_two_day_groups(client, monkeypatch):
 
 
 def test_with_two_or_fewer_days_the_second_slice_include_is_skipped(client, monkeypatch):
-    monkeypatch.setattr('calgen.app.get_recently_added_count', lambda: 0)
+    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 0)
     monkeypatch.setattr(
-        'calgen.app.prepare_events_by_day', lambda *a, **k: list(_DAYS[:2]))
+        'calgen.routes.listings.prepare_events_by_day', lambda *a, **k: list(_DAYS[:2]))
     html = _get(client).get_data(as_text=True)
 
     # The partial's own "no events" fallback must not fire for the second,
