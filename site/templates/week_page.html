@@ -2,6 +2,8 @@
 
 {% block title %}Events for Week of {{ week_start_formatted }} - {{ site_name }}{% endblock %}
 
+{% block robots %}<meta name="robots" content="{% if stats.upcoming_events == 0 %}noindex, follow{% else %}index, follow{% endif %}">{% endblock %}
+
 {% block description %}Tech events in the DC area for the week of {{ week_start_formatted }}. {{ stats.upcoming_events }} events this week.{% endblock %}
 
 {% block og_title %}Events for Week of {{ week_start_formatted }}{% endblock %}
