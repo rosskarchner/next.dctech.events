@@ -7,13 +7,12 @@ feedback through a configuration-set event destination for isolation from
 production's identity-level notifications.
 """
 import json
-import os
 
 import boto3
 
-ses = boto3.client('sesv2')
+from constants import CONTACT_LIST_NAME
 
-CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
+ses = boto3.client('sesv2')
 
 
 def _delete_contact(email):

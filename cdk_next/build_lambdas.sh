@@ -50,7 +50,7 @@ fi
 if [ -d lambda_src/newsletter ] && [ -e lambda_src/newsletter/app.py ]; then
   mkdir -p build/newsletter
   cp -r lambda_src/newsletter/. build/newsletter/
-  cp lambda_src/api/db.py build/newsletter/
+  cp lambda_src/api/db.py lambda_src/api/constants.py build/newsletter/
   # render.py rebuilds the calgen site in /tmp from DynamoDB
   cp lambda_src/site_generator/export_dynamo_to_calgen.py build/newsletter/
   cp -r ../site build/newsletter/site

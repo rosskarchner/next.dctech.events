@@ -17,6 +17,8 @@ from urllib.parse import parse_qs
 import boto3
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from constants import FROM_EMAIL, REPLY_TO_EMAIL, CONTACT_LIST_NAME
+
 env = Environment(
     loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), 'templates')),
     autoescape=select_autoescape(['html', 'xml']),
@@ -26,9 +28,6 @@ ses = boto3.client('sesv2')
 kms = boto3.client('kms')
 secrets = boto3.client('secretsmanager')
 
-FROM_EMAIL = os.environ.get('FROM_EMAIL', 'outbound@dctech.events')
-REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'ross@karchner.com')
-CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
 TOPIC_NAME = os.environ.get('TOPIC_NAME', 'dctech')
 CONFIRMATION_KEY_ID = os.environ.get('CONFIRMATION_KEY_ID')
 CSRF_SECRET_NAME = os.environ.get('CSRF_SECRET_NAME', 'dctech-events-next/newsletter-csrf')

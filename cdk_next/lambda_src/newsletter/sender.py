@@ -10,13 +10,11 @@ import os
 
 import boto3
 
+from constants import FROM_EMAIL, REPLY_TO_EMAIL, CONTACT_LIST_NAME
 from render import render_newsletter
 
 ses = boto3.client('sesv2')
 
-FROM_EMAIL = os.environ.get('FROM_EMAIL', 'outbound@dctech.events')
-REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'ross@karchner.com')
-CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
 TOPIC_NAME = os.environ.get('TOPIC_NAME', 'dctech')
 TEMPLATE_NAME = os.environ.get('TEMPLATE_NAME', 'dctech-events-next-newsletter')
 CONFIGURATION_SET = os.environ.get('CONFIGURATION_SET', 'dctech-events-next')

@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import magic_link
 from auth import get_user_from_event
+from constants import CONTACT_LIST_NAME, NEWSLETTER_TOPIC, REPLY_TO_EMAIL, FROM_EMAIL
 from db import (
     build_event_draft_data as _build_event_draft_data,
     create_draft, get_all_categories, get_drafts_by_submitter,
@@ -22,11 +23,6 @@ from db import (
     is_trusted_submitter, promote_draft_to_event, update_draft_status,
 )
 from routes.responses import html as _html, json as _json_response
-
-CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
-NEWSLETTER_TOPIC = os.environ.get('NEWSLETTER_TOPIC', 'dctech')
-REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'ross@karchner.com')
-FROM_EMAIL = os.environ.get('FROM_EMAIL', 'outbound@dctech.events')
 
 
 def _parse_body(event):

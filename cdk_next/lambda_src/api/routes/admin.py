@@ -15,6 +15,7 @@ import time
 import boto3
 
 from auth import get_user_from_event, require_admin
+from constants import CONTACT_LIST_NAME, NEWSLETTER_TOPIC
 from routes.responses import html as _html_response, json as _json_response
 from db import (
     get_drafts_by_status, get_draft as db_get_draft, update_draft_status,
@@ -25,8 +26,6 @@ from db import (
     is_trusted_submitter, promote_draft,
 )
 
-CONTACT_LIST_NAME = os.environ.get('CONTACT_LIST_NAME', 'newsletters')
-NEWSLETTER_TOPIC = os.environ.get('NEWSLETTER_TOPIC', 'dctech')
 CODEBUILD_PROJECT_NAME = os.environ.get('CODEBUILD_PROJECT_NAME', '')
 
 
