@@ -88,6 +88,24 @@ def test_a_misspelled_field_is_refused_rather_than_silently_stored(store):
         db.set_event_overlay("g1", {"titel": "typo"}, "nope")
 
 
+# ── URL safety ──────────────────────────────────────────────────────
+# put_event/update_event/put_recurring_event/set_recurring_instance_override
+# all sanitize an unsafe url to '' before storage; the overlay writer — the
+# path a public correction's approval goes through for an 'event' target —
+# had inherited the convention only by accident, not through the shared
+# validator, until _validate_overlay_values started calling is_safe_url too.
+
+
+def test_an_unsafe_url_is_sanitized_rather_than_stored(store):
+    db.set_event_overlay("g1", {"url": "javascript:alert(1)"}, "why")
+    assert overlay_of(store, "g1")["url"] == ""
+
+
+def test_a_safe_url_passes_through_unchanged(store):
+    db.set_event_overlay("g1", {"url": "https://example.com/event"}, "why")
+    assert overlay_of(store, "g1")["url"] == "https://example.com/event"
+
+
 def test_a_private_key_cannot_be_forged(store):
     # Otherwise a caller could plant a run stamp and hijack a revert.
     with pytest.raises(ValueError, match="reserved"):

@@ -878,6 +878,15 @@ def _validate_overlay_values(guid, fields):
     """Value-level checks the field allowlist cannot express."""
     _check_overlay_types(fields)
 
+    # Every other url-accepting write path (put_event, update_event,
+    # put_recurring_event, set_recurring_instance_override) sanitizes to ''
+    # rather than raising, so an overlay/correction url matches that
+    # convention instead of being the one path where an unsafe scheme
+    # reaches storage. Mutates `fields` in place — set_event_overlay passes
+    # this same dict on to _build_overlay right after this call returns.
+    if 'url' in fields and not is_safe_url(fields.get('url')):
+        fields['url'] = ''
+
     if 'categories' in fields:
         validate_category_slugs(fields['categories'])
 
