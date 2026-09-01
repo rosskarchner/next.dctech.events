@@ -216,6 +216,10 @@ class NextApiStack(cdk.Stack):
         public_res = api_res.add_resource("public")
         public_res.add_resource("events").add_resource("{guid}").add_method(
             "GET", integration)
+        # Same public-read reasoning, for a recurring series (and optionally
+        # one of its occurrences via ?date=) instead of an EVENT# record.
+        public_res.add_resource("recurring").add_resource("{slug}").add_method(
+            "GET", integration)
 
         # Authenticated JSON API
         api_res.add_resource("my-submissions").add_method("GET", integration, **authed)

@@ -25,11 +25,38 @@
     `).join('');
   }
 
+  function targetLabel(c) {
+    const type = c.target_type || 'event';
+    const title = c.target_title || c.target_id || c.target_guid || 'Untitled';
+    if (type === 'recurring_series') return `Recurring series: ${title}`;
+    if (type === 'recurring_instance') return `Recurring series: ${title} — ${c.target_date}`;
+    return title;
+  }
+
+  function targetSourceLabel(c) {
+    const type = c.target_type || 'event';
+    if (type === 'recurring_series') return 'recurring series definition';
+    if (type === 'recurring_instance') return 'one occurrence only';
+    return c.target_source || 'unknown';
+  }
+
+  function conflictKey(c) {
+    // Only proposals that would actually clobber the same stored value on
+    // approval count as conflicting: two recurring_instance corrections for
+    // different dates of the same series write different OVERRIDE# rows and
+    // don't clobber each other, so date is part of the key.
+    const type = c.target_type || 'event';
+    const id = c.target_id || c.target_guid;
+    if (type === 'recurring_instance') return `instance|${id}|${c.target_date}`;
+    if (type === 'recurring_series') return `series|${id}`;
+    return `event|${id}`;
+  }
+
   function renderCorrectionRow(correction, siblingCount) {
     const conflictNote = siblingCount > 1
       ? `<p class="hint" style="color:#a15c00;">
            ⚠ ${siblingCount - 1} other pending correction${siblingCount > 2 ? 's' : ''}
-           also target this event — approving more than one applies each in
+           also target this — approving more than one applies each in
            turn, last one wins per field.
          </p>`
       : '';
@@ -39,10 +66,10 @@
         <td colspan="2">
           <div class="approve-form">
             <div class="approve-form-header">
-              <strong>${escapeHtml(correction.target_title || 'Untitled event')}</strong>
+              <strong>${escapeHtml(targetLabel(correction))}</strong>
               <span class="approve-form-submitter">
                 proposed by ${escapeHtml(correction.submitter_email || 'unknown')}
-                &middot; source: ${escapeHtml(correction.target_source || 'unknown')}
+                &middot; ${escapeHtml(targetSourceLabel(correction))}
               </span>
             </div>
             ${conflictNote}
@@ -74,11 +101,12 @@
 
     const byTarget = {};
     currentCorrections.forEach((c) => {
-      byTarget[c.target_guid] = (byTarget[c.target_guid] || 0) + 1;
+      const key = conflictKey(c);
+      byTarget[key] = (byTarget[key] || 0) + 1;
     });
 
     const rows = currentCorrections
-      .map((c) => renderCorrectionRow(c, byTarget[c.target_guid]))
+      .map((c) => renderCorrectionRow(c, byTarget[conflictKey(c)]))
       .join('');
 
     container.innerHTML = `

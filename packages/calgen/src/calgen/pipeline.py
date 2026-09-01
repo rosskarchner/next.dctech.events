@@ -33,6 +33,7 @@ CATEGORIES_DIR = '_categories'
 SINGLE_EVENTS_DIR = '_single_events'
 OVERLAY_DIR = '_overlay'
 RECURRING_EVENTS_DIR = '_recurring_events'
+RECURRING_OVERLAY_DIR = '_recurring_overlay'
 
 RECURRING_MAX_FUTURE_DAYS = 90
 
@@ -201,6 +202,28 @@ def load_overlays():
     return overlays
 
 
+def load_recurring_overlays():
+    """{slug: {date: {field: value}}} — every recurring series with at least
+    one approved per-occurrence correction, from _recurring_overlay/{slug}.yaml.
+    """
+    overlays = {}
+    if not os.path.exists(RECURRING_OVERLAY_DIR):
+        return overlays
+    for filename in os.listdir(RECURRING_OVERLAY_DIR):
+        if not filename.endswith('.yaml'):
+            continue
+        slug = os.path.splitext(filename)[0]
+        filepath = os.path.join(RECURRING_OVERLAY_DIR, filename)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+            if data:
+                overlays[slug] = data
+        except Exception as e:
+            print(f"Error loading recurring overlay {filepath}: {e}")
+    return overlays
+
+
 def load_recurring_events():
     events = []
     if not os.path.exists(RECURRING_EVENTS_DIR):
@@ -215,6 +238,11 @@ def load_recurring_events():
             if not event:
                 continue
             event['id'] = os.path.splitext(filename)[0]
+            # Self-documenting alias for event['id'] — that field name is
+            # overloaded (it also happens to be the only thing distinguishing
+            # a recurring occurrence's series once expanded), so templates and
+            # correction routing should read this one instead.
+            event['recurring_slug'] = event['id']
             event['source'] = 'recurring'
             event['is_recurring'] = True
             if 'date' in event:
@@ -234,9 +262,30 @@ def load_recurring_events():
     return events
 
 
-def expand_recurring_events(recurring_events, today=None, max_days=RECURRING_MAX_FUTURE_DAYS):
+def expand_recurring_events(recurring_events, today=None, max_days=RECURRING_MAX_FUTURE_DAYS,
+                            instance_overrides=None):
+    """Expand each recurring definition's rrule into concrete occurrences.
+
+    instance_overrides: {slug: {date: {field: value, ...}}} — approved
+    per-occurrence corrections, applied to each expanded instance for its
+    own date only, after the base definition's fields are copied but before
+    the occurrence is returned. A series-level correction needs no separate
+    handling here: it is merged directly onto the RECURRING# record before
+    this function ever runs (see db.merge_recurring_event_fields), so `event`
+    (the base definition dict) already carries it — every occurrence picks
+    it up for free via `instance = dict(event)`. An instance override
+    applied afterward therefore naturally wins over a series-level value for
+    that one date, the same "more specific wins" precedent as CSS/overlay
+    layering.
+
+    The occurrence's guid is computed *before* the instance override is
+    applied — identity stays derived from the base definition, consistent
+    with why a correction must never target the guid itself (see
+    db.create_correction's docstring): it would be unstable across builds.
+    """
     if today is None:
         today = datetime.now(local_tz).date()
+    instance_overrides = instance_overrides or {}
     expanded = []
     max_date = today + timedelta(days=max_days)
     for event in recurring_events:
@@ -249,6 +298,7 @@ def expand_recurring_events(recurring_events, today=None, max_days=RECURRING_MAX
             continue
         if start_date > max_date:
             continue
+        series_overrides = instance_overrides.get(event.get('id')) or {}
         try:
             start_dt = local_tz.localize(datetime.combine(start_date, datetime.min.time()))
             rule = rrule.rrulestr(rrule_str, dtstart=start_dt)
@@ -266,6 +316,7 @@ def expand_recurring_events(recurring_events, today=None, max_days=RECURRING_MAX
                     instance['title'],
                     instance.get('url'),
                 )
+                apply_overlay(instance, series_overrides.get(instance['date']))
                 expanded.append(instance)
         except Exception as e:
             print(f"Error expanding recurring event {event.get('id', 'unknown')}: {e}")
@@ -273,11 +324,14 @@ def expand_recurring_events(recurring_events, today=None, max_days=RECURRING_MAX
 
 
 def process_events(groups, categories, single_events, ical_events, recurring_events,
-                   today=None, event_overrides=None, region_plugin=None):
+                   today=None, event_overrides=None, recurring_overrides=None,
+                   region_plugin=None):
     if today is None:
         today = datetime.now(local_tz).date()
     if event_overrides is None:
         event_overrides = {}
+    if recurring_overrides is None:
+        recurring_overrides = {}
 
     regular_events = []
     submitted_events = []
@@ -344,13 +398,17 @@ def process_events(groups, categories, single_events, ical_events, recurring_eve
             continue
         submitted_events.append(processed)
 
-    # Occurrences have no EVENT# row of their own, so nothing can write an
-    # overlay keyed to one today. Applied anyway so that "an overlay applies
-    # whatever the source" is literally true if occurrences are ever
-    # materialised, rather than being a fourth special case to discover later.
+    # Series-level corrections need no handling here: they are merged
+    # directly onto the RECURRING# record before load_recurring_events even
+    # runs, so `recurring_events` already reflects them. Per-occurrence
+    # corrections are applied inside expand_recurring_events, keyed by
+    # (slug, date) rather than the occurrence's guid — a guid-keyed lookup
+    # here would be permanently unreachable, since occurrence guids are
+    # recomputed fresh every build and never written as an EVENT# row for
+    # anything to key an overlay to.
     recurring_expanded = []
-    for occurrence in expand_recurring_events(recurring_events, today=today):
-        apply_overlay(occurrence, event_overrides.get(occurrence.get('guid')))
+    for occurrence in expand_recurring_events(
+            recurring_events, today=today, instance_overrides=recurring_overrides):
         if _apply_region(occurrence, region_plugin):
             recurring_expanded.append(occurrence)
 
@@ -382,6 +440,7 @@ def main():
     single_events = load_single_events()
     recurring_events = load_recurring_events()
     event_overrides = load_overlays()
+    recurring_overrides = load_recurring_overlays()
 
     site_dir = os.environ.get('CALGEN_SITE_DIR', os.getcwd())
     region_plugin = load_region_plugin(site_dir)
@@ -399,7 +458,8 @@ def main():
 
     unique_events = process_events(
         groups, categories, single_events, ical_events,
-        recurring_events, event_overrides=event_overrides, region_plugin=region_plugin,
+        recurring_events, event_overrides=event_overrides,
+        recurring_overrides=recurring_overrides, region_plugin=region_plugin,
     )
 
     with open(os.path.join(DATA_DIR, 'all_events.json'), 'w') as f:

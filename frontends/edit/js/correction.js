@@ -1,21 +1,48 @@
 (function() {
   // Fields the public correction form knows how to render, in display order.
-  // Which of these actually show for a given event comes from the server's
-  // `correctable_fields` (routes/corrections.py:get_public_event_json) — this
-  // list is just "every field this form has UI for."
+  // Which of these actually show for a given target comes from the server's
+  // `correctable_fields` (routes/corrections.py get_public_event_json /
+  // get_public_recurring_json) — this list is just "every field this form
+  // has UI for." Recurring targets never include end_time (no such field on
+  // a recurring definition), so that group simply never shows for them —
+  // no extra branching needed here.
   const KNOWN_FIELDS = ['description', 'location', 'url', 'time', 'end_time'];
 
-  let currentEvent = null;
-  let guid = null;
+  let currentTarget = null;
+  let target = null;
 
   function setResponse(container, message, isError) {
     if (!container) return;
     container.innerHTML = `<div class="message ${isError ? 'message-error' : 'message-success'}"><p>${message}</p></div>`;
   }
 
-  function readGuid() {
+  // ---- Which of the three targets is this page for? ----
+  // ?guid=...                    -> a single event
+  // ?recurring=slug              -> the recurring series' own definition
+  // ?recurring=slug&date=...     -> one occurrence of that series
+
+  function readTarget() {
     const params = new URLSearchParams(window.location.search);
-    return params.get('guid') || '';
+    const guid = params.get('guid');
+    if (guid) return { targetType: 'event', targetId: guid, targetDate: null };
+    const recurring = params.get('recurring');
+    if (recurring) {
+      const date = params.get('date');
+      return {
+        targetType: date ? 'recurring_instance' : 'recurring_series',
+        targetId: recurring,
+        targetDate: date || null,
+      };
+    }
+    return null;
+  }
+
+  function redirectPathFor(t) {
+    if (t.targetType === 'event') {
+      return `/edit/correct-event.html?guid=${encodeURIComponent(t.targetId)}`;
+    }
+    const dateParam = t.targetDate ? `&date=${encodeURIComponent(t.targetDate)}` : '';
+    return `/edit/correct-event.html?recurring=${encodeURIComponent(t.targetId)}${dateParam}`;
   }
 
   // ---- Magic link ---- (identical mechanics to submission.js — a
@@ -61,7 +88,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
-          redirect_path: `/edit/correct-event.html?guid=${encodeURIComponent(guid)}`,
+          redirect_path: redirectPathFor(target),
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -78,14 +105,29 @@
     }
   }
 
-  // ---- The event and its correctable fields ----
+  // ---- The target and its correctable fields ----
 
-  async function fetchEvent() {
-    const response = await fetch(
-      DctechEditConfig.apiUrl(`/api/public/events/${encodeURIComponent(guid)}`));
+  async function fetchTarget(t) {
+    if (t.targetType === 'event') {
+      const response = await fetch(
+        DctechEditConfig.apiUrl(`/api/public/events/${encodeURIComponent(t.targetId)}`));
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error('Could not load that event. Please try again.');
+      return response.json();
+    }
+
+    const qs = t.targetDate ? `?date=${encodeURIComponent(t.targetDate)}` : '';
+    const response = await fetch(DctechEditConfig.apiUrl(
+      `/api/public/recurring/${encodeURIComponent(t.targetId)}${qs}`));
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error('Could not load that event. Please try again.');
-    return response.json();
+    if (!response.ok) {
+      throw new Error('Could not load that recurring event. Please try again.');
+    }
+    const payload = await response.json();
+    const values = (t.targetType === 'recurring_instance' && payload.instance)
+      ? payload.instance
+      : payload.series;
+    return { correctable_fields: payload.correctable_fields, ...values };
   }
 
   function renderField(field, current) {
@@ -100,14 +142,14 @@
     }
   }
 
-  function renderForm(eventData) {
-    currentEvent = eventData;
-    document.getElementById('event-title-heading').textContent = eventData.title || 'This event';
+  function renderForm(values) {
+    currentTarget = values;
+    document.getElementById('event-title-heading').textContent = values.title || 'This event';
 
-    const correctable = new Set(eventData.correctable_fields || []);
+    const correctable = new Set(values.correctable_fields || []);
     KNOWN_FIELDS.forEach((field) => {
       if (correctable.has(field)) {
-        renderField(field, eventData[field]);
+        renderField(field, values[field]);
       }
     });
 
@@ -115,10 +157,15 @@
       const locked = document.getElementById('field-time-locked');
       const value = document.getElementById('field-time-locked-value');
       if (locked && value) {
-        const when = [eventData.date, eventData.time].filter(Boolean).join(' ');
+        const when = [values.date, values.time].filter(Boolean).join(' ');
         value.textContent = when || '(see the event page)';
         locked.classList.remove('hidden');
       }
+    }
+
+    const seriesToggle = document.getElementById('series-toggle');
+    if (seriesToggle) {
+      seriesToggle.classList.toggle('hidden', target.targetType !== 'recurring_instance');
     }
 
     document.getElementById('correction-form').classList.remove('hidden');
@@ -126,13 +173,13 @@
 
   function collectChangedFields() {
     const fields = {};
-    const correctable = new Set((currentEvent && currentEvent.correctable_fields) || []);
+    const correctable = new Set((currentTarget && currentTarget.correctable_fields) || []);
     KNOWN_FIELDS.forEach((field) => {
       if (!correctable.has(field)) return;
       const input = document.getElementById(`field-${field}-input`);
       if (!input) return;
       const value = input.value.trim();
-      const original = (currentEvent[field] || '').toString().trim();
+      const original = (currentTarget[field] || '').toString().trim();
       if (value && value !== original) {
         fields[field] = value;
       }
@@ -160,7 +207,16 @@
     submitButton.disabled = true;
 
     try {
-      const body = { guid, fields, reason };
+      const seriesToggle = document.getElementById('apply-to-series');
+      const effectiveType =
+        (target.targetType === 'recurring_instance' && seriesToggle && seriesToggle.checked)
+          ? 'recurring_series'
+          : target.targetType;
+
+      const body = { target_type: effectiveType, target_id: target.targetId, fields, reason };
+      if (effectiveType === 'recurring_instance') {
+        body.target_date = target.targetDate;
+      }
       if (magicToken) {
         body.mlt_e = magicToken.e;
         body.mlt_t = magicToken.t;
@@ -207,8 +263,8 @@
   }
 
   async function initCorrectionPage() {
-    guid = readGuid();
-    if (!guid) {
+    target = readTarget();
+    if (!target) {
       document.getElementById('no-guid').classList.remove('hidden');
       return;
     }
@@ -227,20 +283,20 @@
       return;
     }
 
-    let eventData;
+    let values;
     try {
-      eventData = await fetchEvent();
+      values = await fetchTarget(target);
     } catch (err) {
       setResponse(document.getElementById('form-response'), err.message, true);
       return;
     }
 
-    if (!eventData) {
+    if (!values) {
       document.getElementById('not-correctable').classList.remove('hidden');
       return;
     }
 
-    renderForm(eventData);
+    renderForm(values);
     document.getElementById('correction-form')
       .addEventListener('submit', handleSubmit);
   }

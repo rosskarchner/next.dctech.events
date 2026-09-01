@@ -27,10 +27,12 @@ GROUP = {'id': 'testgroup', 'name': 'Test Group', 'active': True,
          'website': 'https://example.com', 'categories': ['ai']}
 
 
-def _run(ical=None, single=None, recurring=None, overrides=None):
+def _run(ical=None, single=None, recurring=None, overrides=None,
+        recurring_overrides=None):
     return process_events(
         [GROUP], {}, list(single or []), {'testgroup': list(ical or [])},
         list(recurring or []), today=TODAY, event_overrides=overrides or {},
+        recurring_overrides=recurring_overrides or {},
     )
 
 
@@ -128,24 +130,71 @@ def test_an_overlay_on_a_single_event_can_set_a_location():
 
 def _recurring():
     return [{
-        'slug': 'weekly-thing', 'title': 'Weekly Thing',
+        'id': 'weekly-thing', 'title': 'Weekly Thing',
         'rrule': 'FREQ=WEEKLY;BYDAY=MO', 'time': '18:00',
         'url': 'https://example.com/weekly', 'date': '2026-07-20',
         'group': 'Test Group', 'categories': [],
     }]
 
 
-def test_an_overlay_applies_to_one_occurrence_only():
+def test_a_recurring_instance_override_applies_to_one_occurrence_only():
+    # Occurrence identity for an override is (series id, date) — never the
+    # occurrence's guid, which is recomputed fresh every build and so is not
+    # a safe key (see db.create_correction's docstring for why).
     occurrences = _run(recurring=_recurring())
     assert len(occurrences) > 1
     target = occurrences[0]
-    result = _run(recurring=_recurring(),
-                  overrides={target['guid']: {'title': 'Just This One'}})
-    titles = {e['guid']: e['title'] for e in result}
-    assert titles[target['guid']] == 'Just This One'
-    for guid, title in titles.items():
-        if guid != target['guid']:
+    result = _run(recurring=_recurring(), recurring_overrides={
+        'weekly-thing': {target['date']: {'title': 'Just This One'}}})
+    titles = {e['date']: e['title'] for e in result}
+    assert titles[target['date']] == 'Just This One'
+    for occ_date, title in titles.items():
+        if occ_date != target['date']:
             assert title == 'Weekly Thing'
+
+
+def test_a_recurring_series_level_edit_applies_to_every_occurrence():
+    # Series-level corrections need no override plumbing at all: they're
+    # merged directly onto the recurring definition before process_events
+    # ever runs (db.merge_recurring_event_fields), so every occurrence
+    # picks the new value up via its own dict(event) copy.
+    edited = [dict(_recurring()[0], title='Corrected For Everyone')]
+    result = _run(recurring=edited)
+    assert len(result) > 1
+    assert all(e['title'] == 'Corrected For Everyone' for e in result)
+
+
+def test_an_instance_override_wins_over_the_series_value_for_its_date():
+    occurrences = _run(recurring=_recurring())
+    target = occurrences[0]
+    edited = [dict(_recurring()[0], title='Series Says This')]
+    result = _run(recurring=edited, recurring_overrides={
+        'weekly-thing': {target['date']: {'title': 'This Date Says Otherwise'}}})
+    titles = {e['date']: e['title'] for e in result}
+    assert titles[target['date']] == 'This Date Says Otherwise'
+    for occ_date, title in titles.items():
+        if occ_date != target['date']:
+            assert title == 'Series Says This'
+
+
+def test_an_instance_override_for_a_date_outside_the_window_is_harmless():
+    # A correction can be approved against a date that's aged out of the
+    # expansion window; it just has nothing to apply to until (if ever) that
+    # date is back in window on a future build.
+    result = _run(recurring=_recurring(), recurring_overrides={
+        'weekly-thing': {'2020-01-01': {'title': 'Long Gone'}}})
+    assert all(e['title'] != 'Long Gone' for e in result)
+
+
+@pytest.mark.parametrize('field', sorted(OVERLAY_PROTECTED_FIELDS))
+def test_a_protected_field_is_never_merged_into_a_recurring_instance(field):
+    occurrences = _run(recurring=_recurring())
+    target = occurrences[0]
+    original = target.get(field)
+    result = _run(recurring=_recurring(), recurring_overrides={
+        'weekly-thing': {target['date']: {field: 'hijacked'}}})
+    matched = next(e for e in result if e['date'] == target['date'])
+    assert matched.get(field) == original
 
 
 # ── Identity is source-derived, presentation is overlay-derived ────

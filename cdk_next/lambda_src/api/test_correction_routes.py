@@ -72,10 +72,21 @@ class FakeTable:
     def put_item(self, Item):
         self.items[self._k(Item)] = dict(Item)
 
+    @staticmethod
+    def _matches(item, cond):
+        name = cond._values[0].name
+        if type(cond).__name__ == "BeginsWith":
+            return str(item.get(name, "")).startswith(cond._values[1])
+        return item.get(name) == cond._values[1]
+
     def query(self, KeyConditionExpression, **kwargs):
-        attr_name = KeyConditionExpression._values[0].name
-        target = KeyConditionExpression._values[1]
-        rows = [i for i in self.items.values() if i.get(attr_name) == target]
+        cond = KeyConditionExpression
+        if type(cond).__name__ == "And":
+            left, right = cond._values
+            rows = [i for i in self.items.values()
+                   if self._matches(i, left) and self._matches(i, right)]
+        else:
+            rows = [i for i in self.items.values() if self._matches(i, cond)]
         return {"Items": rows}
 
     def update_item(self, Key, UpdateExpression, ExpressionAttributeValues,
@@ -111,6 +122,29 @@ def store(monkeypatch):
     fake = FakeTable()
     monkeypatch.setattr(db, "_get_table", lambda: fake)
     return events
+
+
+@pytest.fixture
+def recurring(monkeypatch):
+    store = {
+        "weekly-thing": {
+            "id": "weekly-thing", "title": "Weekly Thing",
+            "date": "2026-06-01", "rrule": "FREQ=WEEKLY;BYDAY=MO",
+            "time": "18:00", "location": "Old Place",
+            "url": "https://example.com/weekly",
+        },
+    }
+
+    def _put(slug, data):
+        merged = dict(data)
+        merged["id"] = slug
+        store[slug] = merged
+        return slug
+
+    monkeypatch.setattr(db, "get_recurring_event",
+                        lambda slug: dict(store[slug]) if slug in store else None)
+    monkeypatch.setattr(db, "put_recurring_event", _put)
+    return store
 
 
 @pytest.fixture
@@ -180,6 +214,71 @@ def test_empty_fields_are_refused(store, verified_link):
     assert status == 400
 
 
+# ── Public submission — recurring series/instance ────────────────────
+
+
+def test_a_recurring_series_correction_is_accepted(recurring, store, verified_link):
+    status, payload = call(
+        "/api/corrections", "POST",
+        body={"target_type": "recurring_series", "target_id": "weekly-thing",
+              "fields": {"location": "New Place"}, "reason": "venue changed",
+              **magic_link_fields()})
+    assert status == 201
+    assert db.get_correction(payload["correction_id"])["target_type"] == \
+        "recurring_series"
+
+
+def test_a_recurring_instance_correction_requires_a_target_date(recurring, verified_link):
+    status, payload = call(
+        "/api/corrections", "POST",
+        body={"target_type": "recurring_instance", "target_id": "weekly-thing",
+              "fields": {"location": "New Place"}, "reason": "why",
+              **magic_link_fields()})
+    assert status == 400
+    assert "target_date" in payload["error"]
+
+
+def test_a_recurring_instance_correction_is_accepted_with_a_date(recurring, store, verified_link):
+    status, payload = call(
+        "/api/corrections", "POST",
+        body={"target_type": "recurring_instance", "target_id": "weekly-thing",
+              "target_date": "2026-06-08", "fields": {"description": "moved"},
+              "reason": "why", **magic_link_fields()})
+    assert status == 201
+    correction = db.get_correction(payload["correction_id"])
+    assert correction["target_type"] == "recurring_instance"
+    assert correction["target_date"] == "2026-06-08"
+
+
+def test_a_recurring_series_correction_against_an_unknown_series_is_404(
+        recurring, verified_link):
+    status, _ = call(
+        "/api/corrections", "POST",
+        body={"target_type": "recurring_series", "target_id": "ghost-series",
+              "fields": {"location": "x"}, "reason": "why", **magic_link_fields()})
+    assert status == 404
+
+
+def test_rrule_is_not_correctable_on_a_recurring_series(recurring, verified_link):
+    status, payload = call(
+        "/api/corrections", "POST",
+        body={"target_type": "recurring_series", "target_id": "weekly-thing",
+              "fields": {"rrule": "FREQ=DAILY"}, "reason": "why",
+              **magic_link_fields()})
+    assert status == 422
+    assert "Not correctable" in payload["error"]
+
+
+def test_an_unknown_target_type_is_refused(store, verified_link):
+    status, payload = call(
+        "/api/corrections", "POST",
+        body={"target_type": "bogus", "target_id": "man1",
+              "fields": {"description": "x"}, "reason": "why",
+              **magic_link_fields()})
+    assert status == 400
+    assert "target_type" in payload["error"]
+
+
 # ── Public read (for the form) ──────────────────────────────────────
 
 
@@ -207,12 +306,59 @@ def test_the_public_read_404s_for_an_unknown_guid(store):
     assert status == 404
 
 
+# ── Public read — recurring series/instance ──────────────────────────
+
+
+def test_the_public_recurring_read_returns_the_series_values(recurring):
+    status, payload = call("/api/public/recurring/weekly-thing")
+    assert status == 200
+    assert payload["series"]["title"] == "Weekly Thing"
+    assert payload["series"]["location"] == "Old Place"
+    assert set(payload["correctable_fields"]) == \
+        {"description", "location", "url", "time"}
+    assert "instance" not in payload
+
+
+def test_the_public_recurring_read_with_a_date_also_returns_effective_instance_values(
+        recurring, store):
+    db.set_recurring_instance_override("weekly-thing", "2026-06-08",
+                                       {"description": "moved this week"})
+    status, payload = call("/api/public/recurring/weekly-thing",
+                           query={"date": "2026-06-08"})
+    assert status == 200
+    assert payload["instance"]["date"] == "2026-06-08"
+    # Series value carried through where there's no override for this date...
+    assert payload["instance"]["location"] == "Old Place"
+    # ...and the override wins where one exists.
+    assert payload["instance"]["description"] == "moved this week"
+    assert payload["instance"]["has_override"] is True
+
+
+def test_the_public_recurring_read_with_a_date_and_no_override_says_so(recurring, store):
+    payload = call("/api/public/recurring/weekly-thing", query={"date": "2026-06-08"})[1]
+    assert payload["instance"]["has_override"] is False
+
+
+def test_the_public_recurring_read_404s_for_an_unknown_series(store):
+    status, _ = call("/api/public/recurring/ghost-series")
+    assert status == 404
+
+
+def test_the_public_recurring_read_accepts_a_date_outside_the_expansion_window(
+        recurring, store):
+    # A correction against an aged-out date must still be submittable.
+    status, payload = call("/api/public/recurring/weekly-thing",
+                           query={"date": "2020-01-01"})
+    assert status == 200
+    assert payload["instance"]["date"] == "2020-01-01"
+
+
 # ── Admin auth ───────────────────────────────────────────────────────
 
 
 def test_every_correction_route_requires_admin(store):
     correction_id = db.create_correction(
-        "man1", {"time": "20:00"}, "why", "a@b.c")
+        "event", "man1", {"time": "20:00"}, "why", "a@b.c")
     for path, method, body in [
         ("/api/admin/corrections", "GET", None),
         (f"/api/admin/corrections/{correction_id}", "GET", None),
@@ -227,7 +373,7 @@ def test_every_correction_route_requires_admin(store):
 
 
 def test_the_pending_queue_lists_a_new_correction(store):
-    db.create_correction("man1", {"time": "20:00"}, "why", "a@b.c")
+    db.create_correction("event", "man1", {"time": "20:00"}, "why", "a@b.c")
     status, payload = call("/api/admin/corrections", claims=ADMIN,
                            query={"status": "pending"})
     assert status == 200
@@ -236,7 +382,7 @@ def test_the_pending_queue_lists_a_new_correction(store):
 
 def test_the_detail_view_enriches_with_the_live_target_event(store):
     correction_id = db.create_correction(
-        "man1", {"time": "20:00"}, "why", "a@b.c")
+        "event", "man1", {"time": "20:00"}, "why", "a@b.c")
     status, payload = call(f"/api/admin/corrections/{correction_id}", claims=ADMIN)
     assert status == 200
     assert payload["correction"]["target_event"]["title"] == "Manual Event"
@@ -244,7 +390,7 @@ def test_the_detail_view_enriches_with_the_live_target_event(store):
 
 def test_approving_applies_the_overlay_and_returns_200(store):
     correction_id = db.create_correction(
-        "man1", {"time": "20:00"}, "why", "a@b.c")
+        "event", "man1", {"time": "20:00"}, "why", "a@b.c")
     status, payload = call(
         f"/api/admin/corrections/{correction_id}/approve", "POST", claims=ADMIN)
     assert status == 200
@@ -258,7 +404,7 @@ def test_approving_an_unknown_correction_is_a_404(store):
 
 def test_approving_an_already_approved_correction_is_a_409(store):
     correction_id = db.create_correction(
-        "man1", {"time": "20:00"}, "why", "a@b.c")
+        "event", "man1", {"time": "20:00"}, "why", "a@b.c")
     call(f"/api/admin/corrections/{correction_id}/approve", "POST", claims=ADMIN)
     status, _ = call(
         f"/api/admin/corrections/{correction_id}/approve", "POST", claims=ADMIN)
@@ -267,7 +413,7 @@ def test_approving_an_already_approved_correction_is_a_409(store):
 
 def test_rejecting_with_a_reason(store):
     correction_id = db.create_correction(
-        "man1", {"time": "20:00"}, "why", "a@b.c")
+        "event", "man1", {"time": "20:00"}, "why", "a@b.c")
     status, payload = call(
         f"/api/admin/corrections/{correction_id}/reject", "POST", claims=ADMIN,
         body={"reason": "not a real problem"})
@@ -280,7 +426,7 @@ def test_rejecting_with_a_reason(store):
 def test_the_router_does_not_confuse_approve_with_a_correction_id(store):
     # Same trap the drafts routes navigate with /approve and /reject.
     correction_id = db.create_correction(
-        "man1", {"time": "20:00"}, "why", "a@b.c")
+        "event", "man1", {"time": "20:00"}, "why", "a@b.c")
     status, _ = call(f"/api/admin/corrections/{correction_id}", claims=ADMIN)
     assert status == 200
     status, _ = call(

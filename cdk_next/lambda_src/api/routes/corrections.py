@@ -1,11 +1,14 @@
 """
-Public corrections to published events, and their moderation queue.
+Public corrections to published events, recurring series, and single
+occurrences of a recurring series — and their moderation queue.
 
-A correction is a pending proposal against one existing event — never merged
-into the event's live overlay until a moderator approves it. Identity for the
-public half is resolved exactly like a new-event submission (magic link or
-Cognito, via routes.submit._resolve_submitter): no new auth code, same
-rate-limited /api/submit-link flow, just pointed at a different form.
+A correction is a pending proposal against one target — never merged into
+the target's live state until a moderator approves it. `target_type`
+('event' | 'recurring_series' | 'recurring_instance') decides which one.
+Identity for the public half is resolved exactly like a new-event submission
+(magic link or Cognito, via routes.submit._resolve_submitter): no new auth
+code, same rate-limited /api/submit-link flow, just pointed at a different
+form.
 
 All the actual rules (which fields, what counts as valid) live in db.py, next
 to the DRAFT#/overlay machinery this mirrors — nothing here reimplements them.
@@ -28,19 +31,46 @@ def _error(message):
 # ─── Public: submit a correction ──────────────────────────────────
 
 def submit_correction_json(event, jinja_env):
-    """POST /api/corrections — propose a change to an existing event."""
+    """POST /api/corrections — propose a change to an event, a recurring
+    series' definition, or one occurrence of a recurring series.
+
+    Body: {target_type, target_id, fields, reason, [target_date]} plus
+    magic-link fields (mlt_e/mlt_t/mlt_s) if not signed in. target_type
+    defaults to 'event' and target_id falls back to `guid` if absent, so a
+    caller still sending the pre-generalization {guid, fields, reason} shape
+    keeps working.
+    """
     data = _parse_body(event)
     submitter_email, submitter_id, err = _resolve_submitter(event, data)
     if err:
         return err
 
-    guid = str(data.get('guid') or '').strip()
-    if not guid:
-        return _json(400, _error('guid is required'), event)
+    target_type = str(data.get('target_type') or 'event').strip()
+    if target_type not in db.CORRECTION_TARGET_TYPES:
+        return _json(400, _error(f'Unknown target_type: {target_type}'), event)
 
-    record = db.get_event_from_config(guid)
-    if not record:
-        return _json(404, _error(f'No such event: {guid}'), event)
+    target_id = str(data.get('target_id') or data.get('guid') or '').strip()
+    if not target_id:
+        return _json(400, _error('target_id is required'), event)
+
+    target_date = str(data.get('target_date') or '').strip() or None
+    if target_type == 'recurring_instance' and not target_date:
+        return _json(
+            400,
+            _error('target_date is required for a recurring_instance correction'),
+            event,
+        )
+
+    if target_type == 'event':
+        record = db.get_event_from_config(target_id)
+        if not record:
+            return _json(404, _error(f'No such event: {target_id}'), event)
+        source = record.get('source') or 'manual'
+    else:
+        record = db.get_recurring_event(target_id)
+        if not record:
+            return _json(404, _error(f'No such recurring event: {target_id}'), event)
+        source = None
 
     fields = data.get('fields')
     if not isinstance(fields, dict) or not fields:
@@ -61,19 +91,19 @@ def submit_correction_json(event, jinja_env):
             event,
         )
 
-    source = record.get('source') or 'manual'
     try:
-        db.check_correction_fields(source, fields)
+        db.check_correction_fields(target_type, fields, source=source)
     except ValueError as exc:
         return _json(422, _error(str(exc)), event)
 
     correction_id = db.create_correction(
-        guid, fields, reason, submitter_email, submitter_id)
+        target_type, target_id, fields, reason, submitter_email, submitter_id,
+        target_date=target_date)
 
     return _json(201, {'correction_id': correction_id}, event)
 
 
-# ─── Public: read enough of an event to build the form ────────────
+# ─── Public: read enough of a target to build the form ────────────
 
 _PUBLIC_EVENT_FIELDS = (
     'title', 'date', 'time', 'end_time', 'location', 'url', 'description',
@@ -95,10 +125,9 @@ def get_public_event_json(event, jinja_env, guid):
     """
     record = db.get_event_from_config(guid)
     if not record:
-        # Also what a recurring-event occurrence's guid hits, since those
-        # have no EVENT#{guid} row — the correction form's caller turns this
-        # specific 404 into "this event can't currently accept corrections
-        # here" rather than a generic error.
+        # Also what a recurring-event occurrence's guid hits if a stale link
+        # is used, since occurrences have no EVENT#{guid} row of their own —
+        # recurring corrections go through get_public_recurring_json instead.
         return _json(404, _error(f'No such event: {guid}'), event)
 
     effective = db.effective_event(record)
@@ -106,6 +135,52 @@ def get_public_event_json(event, jinja_env, guid):
     payload = {field: effective.get(field) for field in _PUBLIC_EVENT_FIELDS}
     payload['guid'] = guid
     payload['correctable_fields'] = list(db.correction_allowed_fields(source))
+    return _json(200, payload, event)
+
+
+_PUBLIC_RECURRING_FIELDS = ('title', 'location', 'url', 'description', 'time')
+
+
+def get_public_recurring_json(event, jinja_env, slug):
+    """GET /api/public/recurring/{slug}?date=YYYY-MM-DD — the minimum needed
+    to render a recurring correction form in either mode.
+
+    Always returns the series' own base values (for a recurring_series
+    correction). If `date` is supplied, also returns that one occurrence's
+    *effective* values — the series merged with any existing per-date
+    override — i.e. exactly what's rendering on that occurrence's page
+    today, so a submitter corrects against what's actually showing (same
+    reasoning as get_public_event_json).
+
+    `date` is accepted as any well-formed YYYY-MM-DD and is NOT required to
+    be a currently-in-window rrule occurrence — a correction against a date
+    that has since aged out of the site's expansion window must still be
+    submittable; it just won't visibly apply until (if ever) that date
+    re-enters the window on a future build.
+    """
+    record = db.get_recurring_event(slug)
+    if not record:
+        return _json(404, _error(f'No such recurring series: {slug}'), event)
+
+    qs = event.get('queryStringParameters') or {}
+    target_date = (qs.get('date') or '').strip() or None
+
+    payload = {
+        'slug': slug,
+        'correctable_fields': list(db.RECURRING_CORRECTION_FIELDS),
+        'series': {f: record.get(f) for f in _PUBLIC_RECURRING_FIELDS},
+    }
+
+    if target_date:
+        override = db.get_recurring_instance_override(slug, target_date) or {}
+        effective = dict(payload['series'])
+        effective.update({k: v for k, v in override.items() if not k.startswith('_')})
+        payload['instance'] = {
+            'date': target_date,
+            **{f: effective.get(f) for f in _PUBLIC_RECURRING_FIELDS},
+            'has_override': bool(override),
+        }
+
     return _json(200, payload, event)
 
 
@@ -124,8 +199,9 @@ def list_corrections_json(event, jinja_env):
 
 def get_correction_json(event, jinja_env, correction_id):
     """GET /api/admin/corrections/{id} — one correction, enriched with the
-    target event's *current* state (not just the submission-time snapshot),
-    so a moderator sees whether it's since been hidden, merged, or re-sourced.
+    target's *current* state (not just the submission-time snapshot), so a
+    moderator sees whether it's since been hidden, merged, re-sourced, or
+    (for a recurring series) edited out from under the proposal.
     """
     claims, err = _admin_check(event)
     if err:
@@ -135,9 +211,19 @@ def get_correction_json(event, jinja_env, correction_id):
     if not correction:
         return _admin_json(404, {'error': f'No such correction: {correction_id}'})
 
-    target_event = db.get_event_from_config(correction['target_guid'])
-    correction['target_event'] = (
-        db.effective_event(target_event) if target_event else None)
+    target_type = correction.get('target_type', 'event')
+    target_id = correction.get('target_id') or correction.get('target_guid')
+
+    if target_type == 'event':
+        target_event = db.get_event_from_config(target_id)
+        correction['target_event'] = (
+            db.effective_event(target_event) if target_event else None)
+    else:
+        correction['target_recurring'] = db.get_recurring_event(target_id)
+        if target_type == 'recurring_instance':
+            correction['target_instance_override'] = db.get_recurring_instance_override(
+                target_id, correction.get('target_date'))
+
     return _admin_json(200, {'correction': correction})
 
 

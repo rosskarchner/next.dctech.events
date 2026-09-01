@@ -290,15 +290,16 @@ def add_recurring_event(
 
 @mcp.tool()
 def update_recurring_event(file_id: str, fields: dict) -> dict:
-    """Update fields (including `rrule`) on an existing recurring event."""
+    """Update fields (including `rrule`) on an existing recurring event.
+
+    A full merge-and-replace onto the record's top-level fields — the same
+    operation an approved recurring_series correction performs via
+    db.merge_recurring_event_fields. No allowlist here (unlike a public
+    correction's RECURRING_CORRECTION_FIELDS): this tool is trusted.
+    """
     if 'categories' in fields:
         _check_categories(fields['categories'])
-    event = db.get_recurring_event(file_id)
-    if not event:
-        raise ValueError(f'No such recurring event: {file_id}')
-    data = {k: v for k, v in event.items() if k != 'id'}
-    data.update(fields)
-    db.put_recurring_event(file_id, data)
+    db.merge_recurring_event_fields(file_id, fields)
     return {'file_id': file_id}
 
 
@@ -309,6 +310,13 @@ def delete_recurring_event(file_id: str) -> dict:
         raise ValueError(f'No such recurring event: {file_id}')
     db.delete_recurring_event(file_id)
     return {'deleted': file_id}
+
+
+@mcp.tool()
+def get_recurring_instance_overrides(file_id: str) -> dict:
+    """Every approved per-occurrence correction for one recurring series:
+    {date: {field: value, ...}}. Empty if none."""
+    return db.get_recurring_instance_overrides(file_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -704,11 +712,12 @@ def get_correction(correction_id: str) -> dict:
 
 @mcp.tool()
 def approve_correction(correction_id: str) -> dict:
-    """Approve a pending correction, merging its fields into the target
-    event's overlay.
+    """Approve a pending correction — against an event, a recurring series'
+    definition, or one occurrence of a recurring series (see the
+    correction's `target_type`).
 
-    Re-validates the fields against the target event's *current* source, not
-    the source it had at submission time — raises if the event was re-sourced
+    Re-validates the fields against the target's *current* state, not its
+    state at submission time — raises if the target was re-sourced, edited,
     or removed in between and the fields are no longer all allowed.
     """
     return db.approve_correction(correction_id, MCP_REVIEWER)

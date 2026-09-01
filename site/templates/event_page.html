@@ -108,10 +108,14 @@
             <a href="/events/{{ slug }}/event.ics">Add to your calendar (.ics)</a>
             &middot;
             <a href="/">See all upcoming DC tech events</a>
-            {% if not event.is_recurring %}
             &middot;
+            {% if event.is_recurring %}
+            <a href="/edit/correct-event.html?recurring={{ event.recurring_slug }}&amp;date={{ event.date }}">Report an issue with this event</a>
+            {% else %}
             <a href="/edit/correct-event.html?guid={{ event.guid }}">Report an issue with this event</a>
             {% endif %}
+            &middot;
+            <a href="mailto:ross@karchner.com?subject={{ ('Issue with: ' ~ event.title) | urlencode }}">Email us directly</a>
         </p>
     </article>
 </div>

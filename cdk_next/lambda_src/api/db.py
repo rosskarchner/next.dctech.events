@@ -1145,12 +1145,15 @@ def revert_qa_run(run_id, *, actor=None):
 
 # ─── Public corrections ────────────────────────────────────────────
 #
-# A CORRECTION# item is a pending proposal to change one existing event's
-# overlay — never written into `overrides` itself until a moderator approves
-# it, so nothing a stranger submits is ever live-mergeable via
-# effective_event/apply_overlay before a human looks at it. Approval is a
-# thin wrapper around set_event_overlay: once approved, a correction is
-# indistinguishable from an admin hand-edit in /edit/events.html.
+# A CORRECTION# item is a pending proposal to change either an existing
+# event's overlay, a recurring series' definition, or one date of a
+# recurring series — never applied to the target itself until a moderator
+# approves it, so nothing a stranger submits is ever live-mergeable before a
+# human looks at it. `target_type` ('event' | 'recurring_series' |
+# 'recurring_instance') decides which of the three approval paths runs;
+# 'event' is unchanged from the original implementation, so a CORRECTION#
+# row written before target_type existed is read back as 'event' at load
+# time (see _correction_item_to_dict) rather than needing a migration.
 #
 # iCal events have date/end_date already permanently un-overlayable for every
 # source via OVERLAY_PROTECTED_FIELDS, so nothing new is needed there. The one
@@ -1167,9 +1170,17 @@ CORRECTION_EDITABLE_FIELDS_BY_SOURCE = {
     'submitted': OTHER_CORRECTION_FIELDS,
 }
 
+# Recurring definitions have no ical/manual/submitted split — they're all
+# admin/MCP-curated — so there is one allowlist, not a per-source dispatch.
+# No end_time: recurring definitions don't have that field at all. Used for
+# both recurring_series and recurring_instance corrections.
+RECURRING_CORRECTION_FIELDS = ('description', 'location', 'url', 'time')
+
+CORRECTION_TARGET_TYPES = ('event', 'recurring_series', 'recurring_instance')
+
 
 def correction_allowed_fields(source):
-    """Fields a public correction may propose for an event of this `source`.
+    """Fields a public correction may propose for an EVENT# of this `source`.
 
     An unknown/future source falls back to the narrower iCal set — fail
     closed, not open, since a new source type should be reviewed before the
@@ -1178,34 +1189,73 @@ def correction_allowed_fields(source):
     return CORRECTION_EDITABLE_FIELDS_BY_SOURCE.get(source, ICAL_CORRECTION_FIELDS)
 
 
-def check_correction_fields(source, fields):
+def correction_allowed_fields_for_target(target_type, source=None):
+    """Fields a public correction may propose, for any of the three target
+    types. `source` is only consulted (and only meaningful) for 'event'.
+    """
+    if target_type == 'event':
+        return correction_allowed_fields(source)
+    return RECURRING_CORRECTION_FIELDS
+
+
+def check_correction_fields(target_type, fields, source=None):
     """Reject anything a public correction must not propose. Raises ValueError.
 
     Reuses _check_overlay_types so a correction cannot smuggle in a malformed
     value (e.g. a bool where a string belongs) any more than an admin edit can.
     """
-    allowed = correction_allowed_fields(source)
+    allowed = correction_allowed_fields_for_target(target_type, source)
     unknown = sorted(set(fields) - set(allowed))
     if unknown:
         raise ValueError(
-            f'Not correctable for a {source} event: {unknown}. '
+            f'Not correctable for a {target_type}: {unknown}. '
             f'Correctable: {sorted(allowed)}'
         )
     _check_overlay_types(fields)
 
 
-def create_correction(target_guid, fields, reason, submitter_email, submitter_id=None):
-    """Create a pending CORRECTION# entity proposing `fields` for `target_guid`.
+def create_correction(target_type, target_id, fields, reason, submitter_email,
+                      submitter_id=None, target_date=None):
+    """Create a pending CORRECTION# entity proposing `fields` against one of
+    three target shapes:
+
+      target_type='event'              target_id = an EVENT#{guid}'s guid
+      target_type='recurring_series'   target_id = a RECURRING#{slug}'s slug
+      target_type='recurring_instance' target_id = same slug, target_date required
+
+    target_date must never be omitted for 'recurring_instance': occurrence
+    identity is (slug, date), not the occurrence's rendered guid, which is
+    recomputed from the series' title/time/url on every site build and so is
+    not a safe, stable foreign key — a base-definition edit silently changes
+    it.
 
     Caller has already validated `fields` via check_correction_fields — this
-    just persists the proposal plus a snapshot of the event's current title
-    and source, mirroring create_draft's shape and GSI wiring so the same
-    STATUS#/USER# query patterns work for both. Raises ValueError if the
-    target event does not exist.
+    just persists the proposal plus a snapshot of the target's current title
+    (and, for events, source), mirroring create_draft's shape and GSI wiring
+    so the same STATUS#/USER# query patterns work for all three. Raises
+    ValueError if target_type is unrecognized, the target does not exist, or
+    (recurring_instance only) target_date is missing/malformed.
     """
-    event = get_event_from_config(target_guid)
-    if not event:
-        raise ValueError(f'No such event: {target_guid}')
+    if target_type not in CORRECTION_TARGET_TYPES:
+        raise ValueError(f'Unknown correction target type: {target_type}')
+
+    target_source = None
+    if target_type == 'event':
+        target = get_event_from_config(target_id)
+        if not target:
+            raise ValueError(f'No such event: {target_id}')
+        target_source = target.get('source') or 'manual'
+        target_title = target.get('title', '')
+    else:
+        target = get_recurring_event(target_id)
+        if not target:
+            raise ValueError(f'No such recurring event: {target_id}')
+        target_title = target.get('title', '')
+        if target_type == 'recurring_instance':
+            target_date = validate_event_date(target_date, field='target_date')
+            if not target_date:
+                raise ValueError(
+                    'target_date is required for a recurring_instance correction')
 
     table = _get_table()
     correction_id = str(uuid.uuid4())[:8]
@@ -1219,9 +1269,10 @@ def create_correction(target_guid, fields, reason, submitter_email, submitter_id
         'GSI1SK': now,
         'GSI3PK': f'USER#{user_id}',
         'GSI3SK': now,
-        'target_guid': target_guid,
-        'target_source': event.get('source') or 'manual',
-        'target_title': event.get('title', ''),
+        'target_type': target_type,
+        'target_id': target_id,
+        'target_source': target_source,
+        'target_title': target_title,
         'fields': _from_plain(dict(fields)),
         'reason': reason,
         'submitter_email': submitter_email,
@@ -1229,6 +1280,13 @@ def create_correction(target_guid, fields, reason, submitter_email, submitter_id
         'created_at': now,
         'status': 'pending',
     }
+    if target_type == 'event':
+        # Back-compat alias for anything still reading the pre-generalization
+        # field name.
+        item['target_guid'] = target_id
+    if target_type == 'recurring_instance':
+        item['target_date'] = target_date
+
     table.put_item(Item=item)
     return correction_id
 
@@ -1237,11 +1295,18 @@ def _correction_item_to_dict(item):
     """Convert a DynamoDB CORRECTION item to a dict."""
     correction_id = item['PK'].split('#', 1)[1]
     result = {'id': correction_id}
-    for field in ['target_guid', 'target_source', 'target_title', 'fields',
+    for field in ['target_guid', 'target_type', 'target_id', 'target_date',
+                  'target_source', 'target_title', 'fields',
                   'reason', 'submitter_email', 'submitter_id', 'created_at',
                   'status', 'reviewer_email', 'reviewed_at', 'rejection_reason']:
         if field in item:
             result[field] = _to_plain(item[field])
+    # Rows written before target_type existed only have target_guid and are
+    # always against an event — backfill at read time rather than migrating
+    # every row already in the table.
+    if 'target_type' not in result:
+        result['target_type'] = 'event'
+        result.setdefault('target_id', result.get('target_guid'))
     return result
 
 
@@ -1308,18 +1373,48 @@ def _update_correction_status(correction_id, new_status, reviewer_email=None,
     )
 
 
-def approve_correction(correction_id, reviewer_email):
-    """Approve a pending correction: merge its fields into the target event's
-    overlay, then mark the correction approved.
+def merge_recurring_event_fields(slug, fields):
+    """Merge `fields` onto a RECURRING#{slug} record's top-level attributes
+    and persist — the same full merge-and-replace update_recurring_event
+    (MCP) already performs by hand. Deliberately not routed through an
+    overlay/_rev system: the only two writers of a RECURRING# record are
+    this (via approved corrections) and the trusted MCP tool, both
+    low-frequency and one-at-a-time via a human review queue — a materially
+    lower concurrency risk than EVENT# overlays, which arbitrate between the
+    QA agent, admin hand-edits, and corrections, all potentially concurrent.
+    Two humans editing the same series at the exact same moment: last write
+    wins, and that's accepted, not engineered around.
 
-    Re-validates against the target event's *current* source, not the
-    `target_source` snapshot taken at submission — an admin could have
-    re-sourced or removed the event in the interim. Raises ValueError if the
-    correction does not exist, is not pending, the target event no longer
-    exists, or the correction's fields are no longer all allowed for the
-    event's current source. None of these mark the correction rejected —
-    it stays pending so a human decides, the same way a bad guid in a bulk
-    overlay write is reported rather than silently discarded.
+    Raises ValueError if the series does not exist.
+    """
+    event = get_recurring_event(slug)
+    if not event:
+        raise ValueError(f'No such recurring event: {slug}')
+    data = {k: v for k, v in event.items() if k != 'id'}
+    data.update(fields)
+    put_recurring_event(slug, data)
+    return data
+
+
+def approve_correction(correction_id, reviewer_email):
+    """Approve a pending correction.
+
+    'event'              — merges fields into the target event's overlay via
+                            the existing set_event_overlay (unchanged path).
+    'recurring_series'    — merges fields directly onto the RECURRING#{slug}
+                            record's top-level attributes (see
+                            merge_recurring_event_fields).
+    'recurring_instance'  — merges fields onto that one date's OVERRIDE# row
+                            via set_recurring_instance_override.
+
+    Re-validates fields against the target's *current* state (not the
+    submission-time snapshot) for every type — an admin could have re-sourced
+    an event, or edited a series, in the interim. Raises ValueError if the
+    correction does not exist, is not pending, the target no longer exists,
+    or the fields are no longer all allowed. None of these mark the
+    correction rejected — it stays pending so a human decides, the same way
+    a bad guid in a bulk overlay write is reported rather than silently
+    discarded.
     """
     correction = get_correction(correction_id)
     if not correction:
@@ -1328,22 +1423,47 @@ def approve_correction(correction_id, reviewer_email):
         raise ValueError(
             f'Correction {correction_id} is already {correction["status"]}')
 
-    target_guid = correction['target_guid']
-    event = get_event_from_config(target_guid)
-    if not event:
-        raise ValueError(f'Target event {target_guid} no longer exists')
-
+    target_type = correction.get('target_type', 'event')
+    target_id = correction.get('target_id') or correction.get('target_guid')
     fields = correction['fields']
-    check_correction_fields(event.get('source') or 'manual', fields)
-
     submitter = correction.get('submitter_email', 'unknown submitter')
     reason = correction.get('reason', '')
     comment = f'Public correction from {submitter}: {reason}'
-    result = set_event_overlay(target_guid, fields, comment, actor=reviewer_email)
 
-    _update_correction_status(correction_id, 'approved', reviewer_email)
-    return {'correction_id': correction_id, 'guid': target_guid,
-            'overlay': result['overlay']}
+    if target_type == 'event':
+        event = get_event_from_config(target_id)
+        if not event:
+            raise ValueError(f'Target event {target_id} no longer exists')
+        check_correction_fields('event', fields, source=event.get('source') or 'manual')
+        result = set_event_overlay(target_id, fields, comment, actor=reviewer_email)
+        _update_correction_status(correction_id, 'approved', reviewer_email)
+        return {'correction_id': correction_id, 'target_type': 'event',
+                'guid': target_id, 'overlay': result['overlay']}
+
+    series = get_recurring_event(target_id)
+    if not series:
+        raise ValueError(f'Target recurring event {target_id} no longer exists')
+
+    if target_type == 'recurring_series':
+        check_correction_fields('recurring_series', fields)
+        merge_recurring_event_fields(target_id, fields)
+        _update_correction_status(correction_id, 'approved', reviewer_email)
+        return {'correction_id': correction_id, 'target_type': 'recurring_series',
+                'recurring_slug': target_id, 'fields': fields}
+
+    if target_type == 'recurring_instance':
+        target_date = correction.get('target_date')
+        if not target_date:
+            raise ValueError(f'Correction {correction_id} has no target_date')
+        check_correction_fields('recurring_instance', fields)
+        override = set_recurring_instance_override(
+            target_id, target_date, fields, comment, actor=reviewer_email)
+        _update_correction_status(correction_id, 'approved', reviewer_email)
+        return {'correction_id': correction_id, 'target_type': 'recurring_instance',
+                'recurring_slug': target_id, 'date': target_date,
+                'override': override}
+
+    raise ValueError(f'Unknown correction target type: {target_type}')
 
 
 def reject_correction(correction_id, reviewer_email, reason=None):
@@ -1525,6 +1645,84 @@ def _recurring_item_to_dict(item):
             continue
         result[k] = _to_plain(v)
     return result
+
+
+# ─── Recurring per-occurrence overrides ────────────────────────────
+#
+# An approved recurring_instance correction lands here, not on the series
+# record itself: PK=RECURRING#{slug} (the series' own partition — a query on
+# that PK returns the definition and every dated override together),
+# SK=OVERRIDE#{date}. Keyed by (slug, date), never by an occurrence's
+# rendered guid — that guid is recomputed from the series' title/time/url on
+# every site build and is not a safe foreign key.
+#
+# Same low-concurrency reasoning as merge_recurring_event_fields: no _rev,
+# no conditional write, last-write-wins. A second correction for the same
+# date merges onto whatever's already there rather than replacing it.
+
+def set_recurring_instance_override(slug, date, fields, comment=None, *, actor=None):
+    """Create or merge a per-occurrence correction for one date of a
+    recurring series. A URL value is sanitized the same way
+    put_recurring_event already sanitizes one, for parity between the two
+    ways a RECURRING# family entity gets written.
+    """
+    date = validate_event_date(date, field='date')
+    if not date:
+        raise ValueError('date is required')
+
+    existing = get_recurring_instance_override(slug, date) or {}
+    merged = dict(existing)
+    merged.update(dict(fields))
+    if 'url' in merged and not is_safe_url(merged.get('url')):
+        merged['url'] = ''
+
+    merged['_edited_by'] = actor or 'agent:mcp'
+    merged['_edited_at'] = _now_iso()
+    if comment:
+        merged['_comment'] = comment
+
+    table = _get_table()
+    item = {
+        'PK': f'RECURRING#{slug}',
+        'SK': f'OVERRIDE#{date}',
+        **{k: _from_plain(v) for k, v in merged.items()},
+    }
+    table.put_item(Item=item)
+    return _instance_override_item_to_dict(item)
+
+
+def get_recurring_instance_override(slug, date):
+    """One date's override for one series, or None."""
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'RECURRING#{slug}', 'SK': f'OVERRIDE#{date}'})
+    item = response.get('Item')
+    return _instance_override_item_to_dict(item) if item else None
+
+
+def get_recurring_instance_overrides(slug):
+    """Every per-date override for one series: {date: {field: value, ...}}.
+
+    A plain base-table query on PK=RECURRING#{slug} with SK begins_with
+    'OVERRIDE#' — no GSI needed, since PK/SK is the base table's own key.
+    """
+    table = _get_table()
+    items = _query_all(
+        table,
+        KeyConditionExpression=(
+            Key('PK').eq(f'RECURRING#{slug}') & Key('SK').begins_with('OVERRIDE#')),
+    )
+    return {item['SK'].split('#', 1)[1]: _instance_override_item_to_dict(item)
+            for item in items}
+
+
+def delete_recurring_instance_override(slug, date):
+    table = _get_table()
+    table.delete_item(Key={'PK': f'RECURRING#{slug}', 'SK': f'OVERRIDE#{date}'})
+
+
+def _instance_override_item_to_dict(item):
+    return {k: _to_plain(v) for k, v in item.items()
+            if k not in ('PK', 'SK') and not k.startswith('GSI')}
 
 
 # ─── ICAL CACHE operations ────────────────────────────────────────

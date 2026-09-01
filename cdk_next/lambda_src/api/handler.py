@@ -133,6 +133,12 @@ def lambda_handler(event, context):
                 return add_cors(
                     corrections.get_public_event_json(event, jinja_env, guid))
 
+        if path.startswith('/api/public/recurring/') and http_method == 'GET':
+            slug = path[len('/api/public/recurring/'):].split('/')[0]
+            if slug:
+                return add_cors(
+                    corrections.get_public_recurring_json(event, jinja_env, slug))
+
         if path == '/api/admin/corrections' and http_method == 'GET':
             return add_cors(corrections.list_corrections_json(event, jinja_env))
 

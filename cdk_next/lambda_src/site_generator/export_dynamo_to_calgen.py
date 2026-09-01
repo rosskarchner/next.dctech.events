@@ -83,7 +83,12 @@ def main():
     args = parser.parse_args()
 
     table = boto3.resource('dynamodb').Table(args.table)
-    items = _scan_all(table, FilterExpression=Attr('SK').eq('META'))
+    # Everything real lives at SK='META', except a recurring series' own
+    # per-occurrence corrections (RECURRING#{slug} / SK=OVERRIDE#{date}) —
+    # without the second clause those rows are invisible to this scan
+    # entirely, not just miscategorized once collected.
+    items = _scan_all(table, FilterExpression=(
+        Attr('SK').eq('META') | Attr('SK').begins_with('OVERRIDE#')))
 
     by_prefix = {}
     for item in items:
@@ -154,12 +159,39 @@ def main():
     counts['overlays'] = n_overlay
 
     # ── _recurring_events/ ──────────────────────────────────────────
+    # by_prefix['RECURRING'] now also holds each series' OVERRIDE# rows
+    # (see the scan filter above) — skip anything that isn't the series'
+    # own definition.
     _reset_dir('_recurring_events')
+    n_recurring = 0
     for item in by_prefix.get('RECURRING', []):
+        if item.get('SK') != 'META':
+            continue
         slug = item['PK'].split('#', 1)[1]
         _write_yaml(os.path.join('_recurring_events', f'{slug}.yaml'),
                     _clean(item))
-    counts['recurring'] = len(by_prefix.get('RECURRING', []))
+        n_recurring += 1
+    counts['recurring'] = n_recurring
+
+    # ── _recurring_overlay/ ─────────────────────────────────────────
+    # Approved per-occurrence corrections. One file per series (not per
+    # date) — a series can accumulate many dated overrides, and
+    # _overlay/{guid}.yaml's one-file-per-target convention doesn't fit an
+    # entity with no single guid.
+    _reset_dir('_recurring_overlay')
+    overrides_by_slug = {}
+    for item in by_prefix.get('RECURRING', []):
+        sk = item.get('SK', '')
+        if not sk.startswith('OVERRIDE#'):
+            continue
+        slug = item['PK'].split('#', 1)[1]
+        override_date = sk.split('#', 1)[1]
+        fields = {k: v for k, v in _clean(item).items() if not k.startswith('_')}
+        if fields:
+            overrides_by_slug.setdefault(slug, {})[override_date] = fields
+    for slug, by_date in overrides_by_slug.items():
+        _write_yaml(os.path.join('_recurring_overlay', f'{slug}.yaml'), by_date)
+    counts['recurring_overrides'] = sum(len(v) for v in overrides_by_slug.values())
 
     # ── _updates/ ───────────────────────────────────────────────────
     # Published weekly posts. These are frozen snapshots written by the
