@@ -31,7 +31,7 @@ def _isolated_cache(tmp_path, monkeypatch):
 
 def _mock_get(monkeypatch, html):
     monkeypatch.setattr(
-        'calgen.calendars.requests.get',
+        'calgen.calendars.safe_get',
         lambda *a, **k: _FakeResponse(html),
     )
 

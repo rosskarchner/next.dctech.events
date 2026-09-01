@@ -19,6 +19,7 @@ import recurring_ical_events
 from calgen.site_config import get_config
 from calgen.event_utils import _normalize_title
 from calgen.location_utils import normalize_location
+from calgen.ssrf_guard import UnsafeURLError, safe_get
 
 # Cancellation markers organisers put in a title when their platform has no
 # STATUS field to set, or when they want it visible in a listing. Deliberately
@@ -131,7 +132,7 @@ def fetch_json_ld_data(url):
     result = {'title': None, 'is_virtual': False, 'location': None, 'cancelled': False}
     try:
         from bs4 import BeautifulSoup
-        resp = requests.get(url, headers={'User-Agent': USER_AGENT}, timeout=10)
+        resp = safe_get(url, headers={'User-Agent': USER_AGENT}, timeout=10)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             for script in soup.find_all('script', type='application/ld+json'):
@@ -199,7 +200,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
             except Exception as meta_err:
                 print(f"Metadata read error: {meta_err}")
 
-        response = requests.get(url, headers=headers, timeout=30)
+        response = safe_get(url, headers=headers, timeout=30)
 
         if response.status_code == 304:
             print(f"  No changes for {group_id}")
