@@ -24,7 +24,7 @@ from calgen.added_at import get_added_at_index, added_on, group_by_added_date
 from calgen.routes.common import (
     config, local_tz, THIN_FACET_MIN_EVENTS, JUST_ADDED_DAYS,
     UPCOMING_WINDOW_DAYS,
-    get_events, get_approved_groups, get_categories, get_upcoming_months,
+    get_events, get_categories, get_upcoming_months,
     get_categories_with_event_counts, get_all_week_ids, get_all_months,
     get_events_by_slug, get_event_by_slug, get_recently_added,
     get_category_month_counts, get_category_month_combos, get_sidebar_data,
@@ -35,6 +35,7 @@ from calgen.routes.common import (
 
 
 from calgen.regions import load_region_plugin  # noqa: E402
+from calgen.routes import groups as _groups_routes
 
 
 def create_app(site_dir=None):
@@ -60,6 +61,7 @@ def create_app(site_dir=None):
     app.region_plugin = load_region_plugin(site_dir)
 
     _register_routes(app)
+    _groups_routes.register_routes(app)
     return app
 
 
@@ -260,14 +262,6 @@ def _register_routes(app):
             if counts.get(r['slug'], 0) > 0
         ]
         return render_template('locations_index.html', locations=locations)
-
-    @app.route("/groups/")
-    def approved_groups_list():
-        groups = get_approved_groups()
-        return render_template('approved_groups_list.html',
-                               groups=groups,
-                               next_key=None,
-                               has_next=False)
 
     def _newsletter_context():
         """Shared setup for newsletter_html/newsletter_text — same event
