@@ -105,6 +105,41 @@ class NextHostingStack(cdk.Stack):
             http_version=cloudfront.HttpVersion.HTTP2_AND_3,
             enable_ipv6=True,
             minimum_protocol_version=cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
+            # AWS auto-provisions this WebACL (name: CreatedByCloudFront-*)
+            # for accounts enrolled in the CloudFront Security Savings
+            # Bundle, which requires every distribution on it to keep a
+            # WebACL attached. It was never declared here, so any update to
+            # DistributionConfig — including this one — made CloudFormation
+            # try to remove it and get rejected with "You can't remove or
+            # replace the web ACL... Distributions with a pricing plan
+            # subscription must have a web ACL resource." Declaring the
+            # existing ARN keeps CDK's template matching live reality;
+            # this does not create or modify the WebACL itself.
+            web_acl_id=(
+                f"arn:aws:wafv2:us-east-1:{config.ACCOUNT}:global/webacl/"
+                "CreatedByCloudFront-6ae2338d/70beb809-a320-4970-a840-286d8ed4655a"
+            ),
+            # calgen freezes a static /404.html, but a nonexistent object
+            # otherwise falls straight through as raw S3 error XML — 403 from
+            # the origin access control denying a HEAD/GET on a missing key
+            # (private buckets don't distinguish "denied" from "not found"),
+            # 404 for a key that's unambiguously absent. Map both to a real
+            # 404 response serving that page, so crawlers see a clean "gone"
+            # instead of a 403 that can get retried or misindexed.
+            error_responses=[
+                cloudfront.ErrorResponse(
+                    http_status=403,
+                    response_http_status=404,
+                    response_page_path="/404.html",
+                    ttl=cdk.Duration.minutes(5),
+                ),
+                cloudfront.ErrorResponse(
+                    http_status=404,
+                    response_http_status=404,
+                    response_page_path="/404.html",
+                    ttl=cdk.Duration.minutes(5),
+                ),
+            ],
         )
 
         # Apex and www both alias to the distribution, matching how GitHub
