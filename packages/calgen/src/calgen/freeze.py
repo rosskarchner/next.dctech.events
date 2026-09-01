@@ -2,8 +2,9 @@
 from flask_frozen import Freezer
 import os
 
-from calgen.app import (
-    create_app, get_events, get_upcoming_weeks, get_categories, get_upcoming_months,
+from calgen.app import create_app
+from calgen.routes.common import (
+    get_events, get_upcoming_weeks, get_categories, get_upcoming_months,
     get_category_month_combos, get_events_by_slug, get_all_week_ids, get_all_months,
     get_recently_added,
 )
