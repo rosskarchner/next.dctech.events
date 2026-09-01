@@ -41,7 +41,15 @@ class NextIcalAggregatorStack(cdk.Stack):
             handler="handler.lambda_handler",
             code=lambda_.Code.from_asset(os.path.join(BUILD_DIR, "ical_aggregator")),
             timeout=cdk.Duration.minutes(15),
-            memory_size=1024,
+            # CloudWatch Logs REPORT lines (queried via Logs Insights) show
+            # max memory used holding steady at 130-136MB across 46
+            # invocations over the last 8 days, run every 4 hours (the
+            # highest-frequency compute in this stack, 180 runs/month) — 1GB
+            # was ~7.5x more than ever used. 512MB keeps ~3.7x headroom above
+            # the observed peak for feed-size growth over time, without
+            # cutting it close enough to risk an OOM kill on an unattended
+            # cron job nobody's watching in real time.
+            memory_size=512,
             environment={
                 "DYNAMODB_TABLE_NAME": table.table_name,
             },
