@@ -49,7 +49,11 @@ def client(monkeypatch):
 
 def _get_jsonld(monkeypatch, client, event_overrides):
     event = {**BASE_EVENT, **event_overrides}
-    monkeypatch.setattr('calgen.app.get_event_by_slug', lambda slug: event)
+    # Patches where event_page's route handler actually resolves the name
+    # from (calgen.routes.events, since the app.py split) — Python looks up
+    # a bare name via the *defining* module's globals, not through whatever
+    # else re-exports it, so patching calgen.app here would silently no-op.
+    monkeypatch.setattr('calgen.routes.events.get_event_by_slug', lambda slug: event)
 
     resp = client.get('/events/intro-to-rust/')
     assert resp.status_code == 200
