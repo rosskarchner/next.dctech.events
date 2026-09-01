@@ -1946,6 +1946,48 @@ def check_and_record_link_request(email, now=None):
     return True, 0
 
 
+# ─── Public write-path rate limiting ───────────────────────────────
+
+# check_and_record_link_request above only throttles *requesting* a magic
+# link. Once a submitter has a verified token (valid 24h) or a Cognito
+# session, /api/submissions and /api/corrections had no limit of their own —
+# a leaked or replayed token could spam writes against many events in quick
+# succession. One record per (action, submitter_id), self-expiring via the
+# table's `ttl`, mirroring the pattern above.
+WRITE_RATE_LIMIT_WINDOW_SECONDS = 3600
+WRITE_RATE_LIMIT_MAX_PER_WINDOW = 20
+
+
+def check_and_record_write(submitter_id, action, now=None):
+    """Consume one public write (a submission or a correction) for
+    `submitter_id` under `action` ('submission' | 'correction').
+
+    Returns (allowed, retry_after_seconds). Records the write when allowed.
+    """
+    now = int(now if now is not None else time.time())
+    table = _get_table()
+    key = {'PK': f'WRITERATE#{action}#{submitter_id}', 'SK': 'META'}
+
+    item = (table.get_item(Key=key).get('Item') or {})
+    window_start = int(item.get('window_start', 0))
+    count = int(item.get('count', 0))
+
+    if now - window_start >= WRITE_RATE_LIMIT_WINDOW_SECONDS:
+        window_start, count = now, 0
+
+    if count >= WRITE_RATE_LIMIT_MAX_PER_WINDOW:
+        return False, (window_start + WRITE_RATE_LIMIT_WINDOW_SECONDS) - now
+
+    table.put_item(Item={
+        **key,
+        'window_start': window_start,
+        'count': count + 1,
+        # Outlive the window so the counter is not reset early by TTL.
+        'ttl': window_start + WRITE_RATE_LIMIT_WINDOW_SECONDS * 2,
+    })
+    return True, 0
+
+
 # ─── Newsletter opt-in (from the submission form) ─────────────────
 
 def subscribe_to_newsletter(email, contact_list, topic):

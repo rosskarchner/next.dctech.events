@@ -144,6 +144,10 @@ def recurring(monkeypatch):
     monkeypatch.setattr(db, "get_recurring_event",
                         lambda slug: dict(store[slug]) if slug in store else None)
     monkeypatch.setattr(db, "put_recurring_event", _put)
+    # submit_correction_json's rate-limit check touches _get_table() before
+    # any of the above, so every correction submission needs one even in
+    # tests that don't care about persisted CORRECTION# writes.
+    monkeypatch.setattr(db, "_get_table", lambda: FakeTable())
     return store
 
 

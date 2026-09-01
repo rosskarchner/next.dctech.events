@@ -109,3 +109,58 @@ def test_record_carries_a_ttl_beyond_the_window(table):
     item = table.items[("MAGICLINK#a@example.com", "META")]
     # TTL must outlive the counting window, or expiry silently resets the cap.
     assert item["ttl"] > item["window_start"] + 86400
+
+
+# ─── Public write-path rate limiting (submissions/corrections) ────
+
+def test_write_first_request_is_allowed(table):
+    allowed, retry = db.check_and_record_write("magiclink:a@example.com", "submission", now=1000)
+    assert allowed and retry == 0
+
+
+def test_write_cap_stops_token_replay_spam(table):
+    now = 1000
+    for i in range(db.WRITE_RATE_LIMIT_MAX_PER_WINDOW):
+        allowed, _ = db.check_and_record_write("magiclink:a@example.com", "submission", now=now)
+        assert allowed, f"write {i + 1} should be allowed"
+
+    allowed, retry = db.check_and_record_write("magiclink:a@example.com", "submission", now=now)
+    assert not allowed
+    assert retry > 0
+
+
+def test_write_allowance_resets_after_the_window(table):
+    now = 1000
+    for _ in range(db.WRITE_RATE_LIMIT_MAX_PER_WINDOW):
+        db.check_and_record_write("magiclink:a@example.com", "submission", now=now)
+
+    assert not db.check_and_record_write("magiclink:a@example.com", "submission", now=now)[0]
+    allowed, _ = db.check_and_record_write(
+        "magiclink:a@example.com", "submission", now=now + db.WRITE_RATE_LIMIT_WINDOW_SECONDS)
+    assert allowed
+
+
+def test_write_limits_are_per_submitter(table):
+    for _ in range(db.WRITE_RATE_LIMIT_MAX_PER_WINDOW):
+        db.check_and_record_write("magiclink:a@example.com", "submission", now=1000)
+
+    # A throttled submitter must not throttle everyone else.
+    allowed, _ = db.check_and_record_write("magiclink:b@example.com", "submission", now=1000)
+    assert allowed
+
+
+def test_write_limits_are_per_action(table):
+    """A submitter maxed out on submissions can still file a correction —
+    they're different abuse surfaces with their own budgets, not one shared
+    pool that would let one endpoint's spam lock out the other."""
+    for _ in range(db.WRITE_RATE_LIMIT_MAX_PER_WINDOW):
+        db.check_and_record_write("magiclink:a@example.com", "submission", now=1000)
+
+    allowed, _ = db.check_and_record_write("magiclink:a@example.com", "correction", now=1000)
+    assert allowed
+
+
+def test_write_record_carries_a_ttl_beyond_the_window(table):
+    db.check_and_record_write("magiclink:a@example.com", "submission", now=1000)
+    item = table.items[("WRITERATE#submission#magiclink:a@example.com", "META")]
+    assert item["ttl"] > item["window_start"] + db.WRITE_RATE_LIMIT_WINDOW_SECONDS

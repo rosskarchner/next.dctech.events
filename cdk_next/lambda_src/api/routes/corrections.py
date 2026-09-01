@@ -45,6 +45,14 @@ def submit_correction_json(event, jinja_env):
     if err:
         return err
 
+    allowed, retry_after = db.check_and_record_write(submitter_id, 'correction')
+    if not allowed:
+        return _json(
+            429,
+            _error(f'Too many corrections — try again in {retry_after}s'),
+            event,
+        )
+
     target_type = str(data.get('target_type') or 'event').strip()
     if target_type not in db.CORRECTION_TARGET_TYPES:
         return _json(400, _error(f'Unknown target_type: {target_type}'), event)

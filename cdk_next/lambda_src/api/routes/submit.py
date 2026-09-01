@@ -17,7 +17,8 @@ from auth import get_user_from_event
 from db import (
     build_event_draft_data as _build_event_draft_data,
     create_draft, get_all_categories, get_drafts_by_submitter,
-    check_and_record_link_request, subscribe_to_newsletter,
+    check_and_record_link_request, check_and_record_write,
+    subscribe_to_newsletter,
     is_trusted_submitter, promote_draft_to_event, update_draft_status,
 )
 from routes.responses import html as _html, json as _json_response
@@ -177,6 +178,14 @@ def submit_event_json(event, jinja_env):
     submitter, submitter_id, err = _resolve_submitter(event, data)
     if err:
         return err
+
+    allowed, retry_after = check_and_record_write(submitter_id, 'submission')
+    if not allowed:
+        return _json(
+            429,
+            _error_payload(f'Too many submissions — try again in {retry_after}s'),
+            event,
+        )
 
     submission_type = data.get('type', 'event')
 
