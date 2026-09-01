@@ -39,7 +39,15 @@ BUILDSPEC = {
         "install": {
             "runtime-versions": {"python": "3.12"},
             "commands": [
-                "pip install --quiet wheels/*.whl boto3",
+                # [cards] pulls in Pillow for `calgen og-images` below — an
+                # optional extra (see calgen's pyproject.toml) specifically
+                # so the ical aggregator/newsletter Lambdas' installs (which
+                # never touch image generation) don't have to resolve it
+                # too; this is the one place that actually runs it, and a
+                # real `pip install` here on a real matching machine, not a
+                # local cross-platform `uv` install, so it has no trouble
+                # finding a prebuilt wheel.
+                'pip install --quiet "$(ls wheels/*.whl)[cards]" boto3',
             ],
         },
         "build": {

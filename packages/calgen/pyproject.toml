@@ -24,13 +24,24 @@ dependencies = [
     "click>=8.0",
     "beautifulsoup4>=4.11",
     "markdown>=3.5",
-    "Pillow>=10.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+]
+# Only `calgen og-images`/`og-preview` (og_image.py) need this — everything
+# else that installs calgen (the ical aggregator and newsletter Lambdas, via
+# cdk_next/build_lambdas.sh's local cross-platform `uv pip install --target`
+# steps) does not, and making Pillow a mandatory dependency broke exactly
+# that: uv cross-compiling calgen's full dependency set for a foreign
+# platform locally has no matching prebuilt Pillow wheel to fall back on and
+# no C toolchain to build one from source. The site generator's CodeBuild
+# install step (a real `pip install` on a real matching machine, not a local
+# cross-compile) installs this extra explicitly instead.
+cards = [
+    "Pillow>=10.1",
 ]
 
 [project.scripts]
