@@ -15,6 +15,7 @@ import time
 import boto3
 
 from auth import get_user_from_event, require_admin
+from routes.responses import html as _html_response, json as _json_response
 from db import (
     get_drafts_by_status, get_draft as db_get_draft, update_draft_status,
     promote_draft_to_event, put_group,
@@ -47,20 +48,11 @@ def _admin_check(event):
 
 
 def _html(status_code, body, event=None):
-    """Return HTML response."""
-    return {
-        'statusCode': status_code,
-        'headers': {'Content-Type': 'text/html'},
-        'body': body,
-    }
+    return _html_response(status_code, body, event)
 
 
-def _json(status_code, body):
-    return {
-        'statusCode': status_code,
-        'headers': {'Content-Type': 'application/json'},
-        'body': json.dumps(body),
-    }
+def _json(status_code, body, event=None):
+    return _json_response(status_code, body, event)
 
 
 def _parse_body(event):
@@ -102,7 +94,7 @@ def get_draft(event, jinja_env, draft_id):
 
     draft = db_get_draft(draft_id)
     if not draft:
-        return {'statusCode': 404, 'body': 'Draft not found'}
+        return _html(404, 'Draft not found', event)
 
     template = jinja_env.get_template('partials/draft_detail.html')
     html = template.render(draft=draft)
@@ -117,7 +109,7 @@ def get_approve_form(event, jinja_env, draft_id):
 
     draft = db_get_draft(draft_id)
     if not draft:
-        return {'statusCode': 404, 'body': 'Draft not found'}
+        return _html(404, 'Draft not found', event)
 
     categories = get_all_categories()
     template = jinja_env.get_template('partials/draft_approve_form.html')
@@ -156,7 +148,7 @@ def approve_draft(event, jinja_env, draft_id):
 
     draft = db_get_draft(draft_id)
     if not draft:
-        return {'statusCode': 404, 'body': 'Draft not found'}
+        return _html(404, 'Draft not found', event)
 
     draft_type = draft.get('draft_type', 'event')
     merged = {k: v for k, v in draft.items() if v is not None}
