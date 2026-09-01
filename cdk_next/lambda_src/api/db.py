@@ -1633,6 +1633,12 @@ def get_all_recurring_events():
 
 
 def delete_recurring_event(slug):
+    # Clean up per-occurrence overrides first — once the series is gone,
+    # nothing ever looks them up again (load_recurring_events() no longer
+    # includes the series, so expand_recurring_events never reaches them),
+    # but leaving them behind is just DynamoDB clutter with no way back in.
+    for date in get_recurring_instance_overrides(slug):
+        delete_recurring_instance_override(slug, date)
     table = _get_table()
     table.delete_item(Key={'PK': f'RECURRING#{slug}', 'SK': 'META'})
 

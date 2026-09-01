@@ -143,3 +143,18 @@ def test_delete_recurring_instance_override(table):
     db.delete_recurring_instance_override("weekly-thing", "2026-06-08")
 
     assert db.get_recurring_instance_override("weekly-thing", "2026-06-08") is None
+
+
+def test_deleting_a_recurring_event_cleans_up_its_instance_overrides(table):
+    table.items[("RECURRING#weekly-thing", "META")] = {
+        "PK": "RECURRING#weekly-thing", "SK": "META", "title": "Weekly Thing"}
+    db.set_recurring_instance_override("weekly-thing", "2026-06-08", {"location": "A"})
+    db.set_recurring_instance_override("weekly-thing", "2026-06-15", {"location": "B"})
+    db.set_recurring_instance_override("monthly-thing", "2026-06-08", {"location": "C"})
+
+    db.delete_recurring_event("weekly-thing")
+
+    assert db.get_recurring_instance_overrides("weekly-thing") == {}
+    assert ("RECURRING#weekly-thing", "META") not in table.items
+    # a different series' overrides are untouched
+    assert db.get_recurring_instance_overrides("monthly-thing")["2026-06-08"]["location"] == "C"
