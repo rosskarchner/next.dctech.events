@@ -162,7 +162,6 @@ class NextApiStack(cdk.Stack):
                     ],
                 )
             )
-            self.submit_key.grant(fn, "kms:GenerateMac", "kms:VerifyMac")
             # trigger_rebuild / POST /api/admin/rebuild (project name wired in
             # by the site-generator stack once it exists)
             fn.add_to_role_policy(
@@ -173,6 +172,30 @@ class NextApiStack(cdk.Stack):
                     ],
                 )
             )
+
+        # Only the API Lambda ever touches magic-link tokens (issuing them on
+        # /api/submit-link, verifying them on /api/submissions and
+        # /api/corrections) — the MCP Lambda has no code path that calls
+        # magic_link.py at all, so it never needed this. Previously granted
+        # to both inside the loop above by accident, widening this key's
+        # blast radius for no reason.
+        self.submit_key.grant(self.api_function, "kms:GenerateMac", "kms:VerifyMac")
+        # Defense in depth beyond the IAM grant above: an explicit statement
+        # on the key's own resource policy naming exactly this role, so a
+        # future IAM policy elsewhere that happens to grant kms:GenerateMac
+        # broadly (e.g. a wildcard admin policy) still isn't enough on its
+        # own to use this specific key — the key's own policy has to agree
+        # too. The account-root statement CDK generates by default stays, so
+        # normal key administration (rotation, console access) is unaffected.
+        self.submit_key.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="RestrictMacOpsToSubmitLinkIssuerRole",
+                effect=iam.Effect.ALLOW,
+                principals=[iam.ArnPrincipal(self.api_function.role.role_arn)],
+                actions=["kms:GenerateMac", "kms:VerifyMac"],
+                resources=["*"],
+            )
+        )
 
         api = apigateway.RestApi(
             self,
