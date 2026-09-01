@@ -15,10 +15,7 @@
     }
   }
 
-  function setResponse(container, message, isError) {
-    if (!container) return;
-    container.innerHTML = `<div class="message ${isError ? 'message-error' : 'message-success'}"><p>${message}</p></div>`;
-  }
+  const { setResponse, readMagicToken, stripTokenFromUrl, focusFirstField, requestLink: requestMagicLink } = DctechMagicLink;
 
   function collectFormData(form) {
     const data = new URLSearchParams();
@@ -56,61 +53,8 @@
   // A submitter proves control of their email by clicking a signed link, so
   // the page works with no Cognito session at all. The token rides in the
   // query string; we keep it in memory and replay it with each submission.
+  // Shared with correction.js via magic-link.js.
   let magicToken = null;
-
-  function readMagicToken() {
-    const params = new URLSearchParams(window.location.search);
-    const e = params.get('e');
-    const t = params.get('t');
-    const s = params.get('s');
-    if (!e || !t || !s) return null;
-    let email = '';
-    try {
-      email = atob(e.replace(/-/g, '+').replace(/_/g, '/'));
-    } catch {
-      return null;
-    }
-    return { e, t, s, email };
-  }
-
-  function stripTokenFromUrl() {
-    // Keep the signed token out of the address bar, browser history, and any
-    // Referer sent to a third-party link in the form.
-    const url = new URL(window.location.href);
-    ['e', 't', 's'].forEach((k) => url.searchParams.delete(k));
-    window.history.replaceState({}, document.title, url.pathname + url.search);
-  }
-
-  async function requestLink(event) {
-    event.preventDefault();
-    const responseArea = document.getElementById('form-response');
-    const button = document.getElementById('link-btn');
-    const email = document.getElementById('link-email').value.trim();
-    if (!email) return;
-
-    button.disabled = true;
-    const originalText = button.textContent;
-    button.textContent = 'Sending…';
-
-    try {
-      const response = await fetch(DctechEditConfig.apiUrl('/api/submit-link'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || 'Could not send the link. Please try again.');
-      }
-      setResponse(responseArea, payload.message, false);
-      document.getElementById('link-form').reset();
-    } catch (err) {
-      setResponse(responseArea, err.message, true);
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
-  }
 
   async function handleSubmit(form, typeLabel) {
     const responseArea = document.getElementById('form-response');
@@ -156,7 +100,7 @@
     }
   }
 
-  function showEventForm(asEmail) {
+  function showEventForm(asEmail, { moveFocus } = {}) {
     const banner = document.getElementById('submitting-as');
     if (banner && asEmail) {
       banner.textContent = `Submitting as ${asEmail}`;
@@ -165,7 +109,10 @@
     const linkRequest = document.getElementById('link-request');
     if (linkRequest) linkRequest.classList.add('hidden');
     const eventForm = document.getElementById('event-form');
-    if (eventForm) eventForm.classList.remove('hidden');
+    if (eventForm) {
+      eventForm.classList.remove('hidden');
+      if (moveFocus) focusFirstField(eventForm);
+    }
   }
 
   function showLinkRequest() {
@@ -179,12 +126,12 @@
     setSiteField();
 
     const linkForm = document.getElementById('link-form');
-    if (linkForm) linkForm.addEventListener('submit', requestLink);
+    if (linkForm) linkForm.addEventListener('submit', requestMagicLink);
 
     magicToken = readMagicToken();
     if (magicToken) {
       stripTokenFromUrl();
-      showEventForm(magicToken.email);
+      showEventForm(magicToken.email, { moveFocus: true });
     } else if (DctechAuth.isAuthenticated()) {
       const info = DctechAuth.getUserInfo ? DctechAuth.getUserInfo() : null;
       showEventForm(info && info.email ? info.email : null);

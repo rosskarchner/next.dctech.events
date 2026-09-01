@@ -176,6 +176,15 @@ label .required {
   color: var(--color-error);
 }
 
+legend {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.375rem;
+  padding: 0;
+  color: var(--color-text);
+}
+
 .form-hint {
   font-size: 0.8125rem;
   color: var(--color-text-muted);

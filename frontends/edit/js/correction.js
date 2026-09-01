@@ -11,10 +11,7 @@
   let currentTarget = null;
   let target = null;
 
-  function setResponse(container, message, isError) {
-    if (!container) return;
-    container.innerHTML = `<div class="message ${isError ? 'message-error' : 'message-success'}"><p>${message}</p></div>`;
-  }
+  const { setResponse, readMagicToken, stripTokenFromUrl, focusFirstField, requestLink: requestMagicLink } = DctechMagicLink;
 
   // ---- Which of the three targets is this page for? ----
   // ?guid=...                    -> a single event
@@ -47,62 +44,12 @@
 
   // ---- Magic link ---- (identical mechanics to submission.js — a
   // correction submitter proves control of their email the same way a new
-  // event submitter does.)
+  // event submitter does. Shared via magic-link.js; only the extra
+  // redirect_path field is specific to this page.)
   let magicToken = null;
 
-  function readMagicToken() {
-    const params = new URLSearchParams(window.location.search);
-    const e = params.get('e');
-    const t = params.get('t');
-    const s = params.get('s');
-    if (!e || !t || !s) return null;
-    let email = '';
-    try {
-      email = atob(e.replace(/-/g, '+').replace(/_/g, '/'));
-    } catch {
-      return null;
-    }
-    return { e, t, s, email };
-  }
-
-  function stripTokenFromUrl() {
-    const url = new URL(window.location.href);
-    ['e', 't', 's'].forEach((k) => url.searchParams.delete(k));
-    window.history.replaceState({}, document.title, url.pathname + url.search);
-  }
-
-  async function requestLink(event) {
-    event.preventDefault();
-    const responseArea = document.getElementById('form-response');
-    const button = document.getElementById('link-btn');
-    const email = document.getElementById('link-email').value.trim();
-    if (!email) return;
-
-    button.disabled = true;
-    const originalText = button.textContent;
-    button.textContent = 'Sending…';
-
-    try {
-      const response = await fetch(DctechEditConfig.apiUrl('/api/submit-link'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          redirect_path: redirectPathFor(target),
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || 'Could not send the link. Please try again.');
-      }
-      setResponse(responseArea, payload.message, false);
-      document.getElementById('link-form').reset();
-    } catch (err) {
-      setResponse(responseArea, err.message, true);
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
+  function requestLink(event) {
+    return requestMagicLink(event, { extraBody: () => ({ redirect_path: redirectPathFor(target) }) });
   }
 
   // ---- The target and its correctable fields ----
@@ -168,7 +115,11 @@
       seriesToggle.classList.toggle('hidden', target.targetType !== 'recurring_instance');
     }
 
-    document.getElementById('correction-form').classList.remove('hidden');
+    const correctionForm = document.getElementById('correction-form');
+    correctionForm.classList.remove('hidden');
+    // Arriving fresh off an emailed magic link, focus is otherwise nowhere
+    // in particular after this page-state swap reveals the form.
+    if (magicToken) focusFirstField(correctionForm);
   }
 
   function collectChangedFields() {

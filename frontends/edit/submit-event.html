@@ -54,7 +54,7 @@
       </p>
     </div>
 
-    <div id="form-response" class="response-area"></div>
+    <div id="form-response" class="response-area" role="status" aria-live="polite"></div>
 
     <div id="submitting-as" class="hidden" style="margin-bottom: 1rem; font-size: 0.95em; color: #666;"></div>
 
@@ -84,8 +84,8 @@
           </div>
 
           <div class="form-group">
-            <label>Event Timing <span class="required">*</span></label>
-            <div class="timing-options">
+            <fieldset class="timing-options" style="border: 0; margin: 0; padding: 0;">
+              <legend>Event Timing <span class="required">*</span></legend>
               <label class="timing-option">
                 <input type="radio" name="timing" value="specific" checked>
                 <span class="timing-label">Specific Time</span>
@@ -124,7 +124,7 @@
                 <input type="radio" name="timing" value="allday">
                 <span class="timing-label">All-Day Event</span>
               </label>
-            </div>
+            </fieldset>
           </div>
         </div>
 
@@ -153,10 +153,12 @@
         </div>
 
         <div class="form-group">
-          <label>Categories</label>
-          <div id="category-checkboxes" class="checkbox-group">
-            <span class="loading">Loading categories...</span>
-          </div>
+          <fieldset style="border: 0; margin: 0; padding: 0;">
+            <legend>Categories</legend>
+            <div id="category-checkboxes" class="checkbox-group">
+              <span class="loading">Loading categories...</span>
+            </div>
+          </fieldset>
         </div>
 
         <details class="optional-details">
@@ -203,6 +205,7 @@
 
   <script src="/edit/js/config.js"></script>
   <script src="/edit/js/auth.js"></script>
+  <script src="/edit/js/magic-link.js"></script>
   <script src="/edit/js/submission.js"></script>
   <script>
     function updateSiteBranding() {
