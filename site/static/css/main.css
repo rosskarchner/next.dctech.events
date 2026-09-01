@@ -4,7 +4,6 @@
     --color-primary-hover: #1d4ed8;
     --color-text: #1f2937;
     --color-text-light: #6b7280;
-    --color-text-lighter: #9ca3af;
     --color-background: #ffffff;
     --color-background-alt: #f9fafb;
     --color-border: #e5e7eb;
@@ -112,7 +111,7 @@ h3.time-heading {
     margin: 0;
     padding: var(--spacing-xs) 0;
     font-size: 0.875rem;
-    color: var(--color-text-lighter);
+    color: var(--color-text-light);
     font-weight: 400;
     /* Mobile-first: no float, left-aligned */
     text-align: left;
@@ -199,7 +198,14 @@ nav [aria-current="page"] {
     }
 }
 
-/* Time Slots */
+/* Time Slots — ul/li for real list semantics; reset default list styling */
+.time-slots-list,
+.events-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
 .time-slot {
     margin-bottom: var(--spacing-md);
     display: flow-root;
@@ -258,7 +264,7 @@ nav [aria-current="page"] {
     margin-top: var(--spacing-xs);
     font-size: 0.85rem;
     font-style: italic;
-    color: var(--color-text-lighter);
+    color: var(--color-text-light);
 }
 
 /* Category Badges */
@@ -416,8 +422,12 @@ footer {
     margin-bottom: var(--spacing-lg);
 }
 
-/* Match the day-heading treatment so the page has one small-caps style. */
-.sidebar-section h3 {
+/* Match the day-heading treatment so the page has one small-caps style.
+   h2, not h3: the sidebar is a sibling section to main, not nested under
+   it, and a category/location page with zero results has no h2 of its own
+   in main content — an h3 here would then follow h1 directly and skip a
+   level. */
+.sidebar-section h2 {
     font-size: 0.875rem;
     font-weight: 600;
     margin: 0 0 var(--spacing-sm) 0;
@@ -454,7 +464,7 @@ footer {
 }
 
 .sidebar-list .count {
-    color: var(--color-text-lighter);
+    color: var(--color-text-light);
     font-size: 0.75rem;
     font-variant-numeric: tabular-nums;
 }
@@ -485,11 +495,17 @@ footer {
     border-radius: 0.25rem;
     margin-left: 0.5rem;
     border: 1px solid #4caf50;
-    cursor: help;
 }
 
-.recurring-badge:hover {
-    background-color: #c8e6c9;
+/* The organizer-confirmation caveat used to live only in this badge's
+   title="" tooltip, which never fires on touch and is inconsistently
+   exposed to screen readers. Always-visible text instead. */
+.recurring-note {
+    display: block;
+    color: var(--color-text-light);
+    font-size: 0.75rem;
+    font-style: italic;
+    margin-top: 0.15rem;
 }
 
 /* Updates — the weekly blog at /updates */
@@ -524,7 +540,7 @@ footer {
 }
 
 .update-meta {
-    color: var(--color-text-lighter);
+    color: var(--color-text-light);
     font-size: 0.85rem;
     margin-bottom: var(--spacing-sm);
 }

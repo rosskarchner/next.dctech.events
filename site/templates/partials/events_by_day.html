@@ -13,13 +13,15 @@
                         {% endif %}
                     </h2>
 
+                    <ul class="time-slots-list">
                     {% for time_slot in day.time_slots %}
-                        <div class="time-slot">
+                        <li class="time-slot">
                             <h3 class="time-heading">{{ time_slot.events[0].formatted_time }}</h3>
+                            <ul class="events-list">
                             {% for event in time_slot.events %}
-                                <div class="h-event event">
+                                <li class="h-event event">
                                     <a class="u-url p-name" href="{{ event.url }}" target="_blank" rel="noopener noreferrer">{{ event.title }}</a>{% if event.display_title != event.title %} <span class="p-summary">{{ event.display_title | replace(event.title, '') }}</span>{% endif %}{% if event.permalink %}<a class="event-permalink" href="{{ event.permalink }}" aria-label="Permalink to {{ event.title }} on {{ site_name }}" title="Permalink on {{ site_name }}">#</a>{% endif %}
-                                    {% if event.is_recurring %}<span class="recurring-badge" title="This is a recurring event. Please confirm with the organizer before attending.">🔄 Recurring</span>{% endif %}
+                                    {% if event.is_recurring %}<span class="recurring-badge">🔄 Recurring</span><span class="recurring-note">Confirm date/time with the organizer</span>{% endif %}
                                     {% if event.time %}<time class="dt-start" datetime="{{ day.date }}T{{ event.time }}">{{ event.formatted_time }}</time>{% endif %}
                                     <div class="event-details">
                                         {% if event.location %}
@@ -54,10 +56,12 @@
                                             </div>
                                         {% endif %}
                                     </div>
-                                </div>
+                                </li>
                             {% endfor %}
-                        </div>
+                            </ul>
+                        </li>
                     {% endfor %}
+                    </ul>
                 </div>
             {% endif %}
         {% endfor %}
