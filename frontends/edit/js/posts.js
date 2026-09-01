@@ -3,15 +3,6 @@
   let selectedSlug = null;   // null while composing a not-yet-saved post
   let isNew = false;
 
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   function slugify(text) {
     return String(text || '')
       .toLowerCase()
@@ -36,7 +27,7 @@
       return;
     }
     box.innerHTML =
-      `<div class="message message-${kind}"><p>${escapeHtml(text)}</p></div>`;
+      `<div class="message message-${kind}"><p>${DctechUtil.escapeHtml(text)}</p></div>`;
     if (kind === 'success') {
       setTimeout(() => { box.innerHTML = ''; }, 4000);
     }
@@ -56,9 +47,9 @@
       const selected = post.slug === selectedSlug ? ' selected' : '';
       return `
         <li>
-          <button type="button" class="post-row${selected}" data-slug="${escapeHtml(post.slug)}">
-            <span class="post-title">${escapeHtml(post.title || post.slug)}</span>
-            <span class="post-meta">${escapeHtml(post.published_on || '')}${badge}</span>
+          <button type="button" class="post-row${selected}" data-slug="${DctechUtil.escapeHtml(post.slug)}">
+            <span class="post-title">${DctechUtil.escapeHtml(post.title || post.slug)}</span>
+            <span class="post-meta">${DctechUtil.escapeHtml(post.published_on || '')}${badge}</span>
           </button>
         </li>`;
     }).join('');

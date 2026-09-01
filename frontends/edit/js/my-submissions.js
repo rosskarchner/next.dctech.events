@@ -1,13 +1,4 @@
 (function() {
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   function renderSubmissions(submissions) {
     if (!submissions.length) {
       return `
@@ -24,15 +15,15 @@
       const submitted = submission.created_at ? submission.created_at.slice(0, 10) : '';
       const type = submission.draft_type || '';
       const linkedName = status === 'approved' && submission.commit_url
-        ? `<a href="${escapeHtml(submission.commit_url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>`
-        : escapeHtml(name);
+        ? `<a href="${DctechUtil.escapeHtml(submission.commit_url)}" target="_blank" rel="noopener">${DctechUtil.escapeHtml(name)}</a>`
+        : DctechUtil.escapeHtml(name);
 
       return `
         <tr>
-          <td>${escapeHtml(type)}</td>
+          <td>${DctechUtil.escapeHtml(type)}</td>
           <td>${linkedName}</td>
-          <td><span class="status-badge status-${escapeHtml(status)}">${escapeHtml(status)}</span></td>
-          <td>${escapeHtml(submitted)}</td>
+          <td><span class="status-badge status-${DctechUtil.escapeHtml(status)}">${DctechUtil.escapeHtml(status)}</span></td>
+          <td>${DctechUtil.escapeHtml(submitted)}</td>
         </tr>
       `;
     }).join('');
@@ -68,7 +59,7 @@
       }
       list.innerHTML = renderSubmissions(payload.submissions || []);
     } catch (err) {
-      list.innerHTML = `<div class="message message-error"><p>${escapeHtml(err.message)}</p></div>`;
+      list.innerHTML = `<div class="message message-error"><p>${DctechUtil.escapeHtml(err.message)}</p></div>`;
     } finally {
       if (loading) {
         loading.style.display = 'none';

@@ -1,13 +1,4 @@
 (function() {
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   const FIELD_LABELS = {
     description: 'Description', location: 'Venue / location', url: 'URL',
     time: 'Time', end_time: 'End time',
@@ -19,8 +10,8 @@
     const fields = correction.fields || {};
     return Object.entries(fields).map(([field, value]) => `
       <div class="detail-row">
-        <span class="detail-label">${escapeHtml(FIELD_LABELS[field] || field)}:</span>
-        <span class="detail-value">${escapeHtml(value)}</span>
+        <span class="detail-label">${DctechUtil.escapeHtml(FIELD_LABELS[field] || field)}:</span>
+        <span class="detail-value">${DctechUtil.escapeHtml(value)}</span>
       </div>
     `).join('');
   }
@@ -66,10 +57,10 @@
         <td colspan="2">
           <div class="approve-form">
             <div class="approve-form-header">
-              <strong>${escapeHtml(targetLabel(correction))}</strong>
+              <strong>${DctechUtil.escapeHtml(targetLabel(correction))}</strong>
               <span class="approve-form-submitter">
-                proposed by ${escapeHtml(correction.submitter_email || 'unknown')}
-                &middot; ${escapeHtml(targetSourceLabel(correction))}
+                proposed by ${DctechUtil.escapeHtml(correction.submitter_email || 'unknown')}
+                &middot; ${DctechUtil.escapeHtml(targetSourceLabel(correction))}
               </span>
             </div>
             ${conflictNote}
@@ -77,12 +68,12 @@
               ${renderProposedFields(correction)}
               <div class="detail-row">
                 <span class="detail-label">Reason:</span>
-                <span class="detail-value">${escapeHtml(correction.reason || '')}</span>
+                <span class="detail-value">${DctechUtil.escapeHtml(correction.reason || '')}</span>
               </div>
             </div>
             <div class="approve-form-actions">
-              <button type="button" class="btn btn-success btn-sm" data-action="approve" data-correction-id="${escapeHtml(correction.id)}">Approve</button>
-              <button type="button" class="btn btn-danger btn-sm" data-action="reject" data-correction-id="${escapeHtml(correction.id)}">Reject</button>
+              <button type="button" class="btn btn-success btn-sm" data-action="approve" data-correction-id="${DctechUtil.escapeHtml(correction.id)}">Approve</button>
+              <button type="button" class="btn btn-danger btn-sm" data-action="reject" data-correction-id="${DctechUtil.escapeHtml(correction.id)}">Reject</button>
             </div>
           </div>
         </td>
@@ -135,7 +126,7 @@
     } catch (err) {
       const container = document.getElementById('corrections-list');
       if (container) {
-        container.innerHTML = `<div class="message message-error"><p>${escapeHtml(err.message)}</p></div>`;
+        container.innerHTML = `<div class="message message-error"><p>${DctechUtil.escapeHtml(err.message)}</p></div>`;
       }
     } finally {
       if (loading) loading.style.display = 'none';
@@ -192,7 +183,7 @@
         if (container) {
           container.insertAdjacentHTML(
             'afterbegin',
-            `<div class="message message-error"><p>${escapeHtml(err.message)}</p></div>`);
+            `<div class="message message-error"><p>${DctechUtil.escapeHtml(err.message)}</p></div>`);
         }
       }
     });

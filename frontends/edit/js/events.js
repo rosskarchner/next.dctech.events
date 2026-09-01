@@ -9,15 +9,6 @@
 // listener, and a full re-render of the table after every mutation. The corpus
 // is one request, so a re-render is cheap and removes partial-state bugs.
 (function() {
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   let allEvents = [];
   let categoriesBySlug = {};
   let editableFields = [];
@@ -81,7 +72,7 @@
     const options = Object.entries(categoriesBySlug)
       .sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0]))
       .map(([slug, cat]) =>
-        `<option value="${escapeHtml(slug)}">${escapeHtml(cat.name || slug)}</option>`)
+        `<option value="${DctechUtil.escapeHtml(slug)}">${DctechUtil.escapeHtml(cat.name || slug)}</option>`)
       .join('');
 
     const bulk = document.getElementById('bulk-category');
@@ -113,7 +104,7 @@
 
     select.innerHTML = '<option value="">Any month</option>' +
       options.map(m =>
-        `<option value="${escapeHtml(m)}">${escapeHtml(monthLabel(m))}</option>`)
+        `<option value="${DctechUtil.escapeHtml(m)}">${DctechUtil.escapeHtml(monthLabel(m))}</option>`)
         .join('');
     select.value = view.month;
   }
@@ -146,10 +137,10 @@
       return Object.entries(t)
         .sort()
         .map(([day, at]) =>
-          `<div style="font-size:0.75rem; white-space:nowrap;">${escapeHtml(day)}: ${escapeHtml(at)}</div>`)
+          `<div style="font-size:0.75rem; white-space:nowrap;">${DctechUtil.escapeHtml(day)}: ${DctechUtil.escapeHtml(at)}</div>`)
         .join('');
     }
-    return escapeHtml(t || 'All day');
+    return DctechUtil.escapeHtml(t || 'All day');
   }
 
   const DUPLICATE_BADGES = {
@@ -194,8 +185,8 @@
   }
 
   function badge(cls, label, title) {
-    const attr = title ? ` title="${escapeHtml(title)}"` : '';
-    return `<span class="badge ${cls}"${attr}>${escapeHtml(label)}</span>`;
+    const attr = title ? ` title="${DctechUtil.escapeHtml(title)}"` : '';
+    return `<span class="badge ${cls}"${attr}>${DctechUtil.escapeHtml(label)}</span>`;
   }
 
   function renderRow(event) {
@@ -206,33 +197,33 @@
       [event.city, event.state].filter(Boolean).join(', ');
 
     return `
-      <tr id="event-row-${escapeHtml(event.guid)}"${dim}>
+      <tr id="event-row-${DctechUtil.escapeHtml(event.guid)}"${dim}>
         <td class="col-check">
           <input type="checkbox" class="event-checkbox"
-                 data-guid="${escapeHtml(event.guid)}"${checked}>
+                 data-guid="${DctechUtil.escapeHtml(event.guid)}"${checked}>
         </td>
         <td class="col-title">
           <div style="font-weight:600; margin-bottom:0.25rem;">
             ${event.url
-              ? `<a href="${escapeHtml(event.url)}" target="_blank" rel="noopener">${escapeHtml(eff.title || 'Untitled')}</a>`
-              : escapeHtml(eff.title || 'Untitled')}
+              ? `<a href="${DctechUtil.escapeHtml(event.url)}" target="_blank" rel="noopener">${DctechUtil.escapeHtml(eff.title || 'Untitled')}</a>`
+              : DctechUtil.escapeHtml(eff.title || 'Untitled')}
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:4px;">${badges(event)}</div>
         </td>
         <td class="col-date">
-          <div style="font-weight:500;">${escapeHtml(event.date || '')}</div>
+          <div style="font-weight:500;">${DctechUtil.escapeHtml(event.date || '')}</div>
           ${event.end_date && event.end_date !== event.date
-            ? `<div style="font-size:0.75rem;" class="text-muted">to ${escapeHtml(event.end_date)}</div>`
+            ? `<div style="font-size:0.75rem;" class="text-muted">to ${DctechUtil.escapeHtml(event.end_date)}</div>`
             : ''}
         </td>
         <td class="col-time">${timeCell(event)}</td>
-        <td class="col-loc"><div style="font-size:0.8rem;">${escapeHtml(location)}</div></td>
+        <td class="col-loc"><div style="font-size:0.8rem;">${DctechUtil.escapeHtml(location)}</div></td>
         <td class="col-src">
-          <span class="badge badge-tag">${escapeHtml(event.source || 'manual')}</span>
+          <span class="badge badge-tag">${DctechUtil.escapeHtml(event.source || 'manual')}</span>
         </td>
         <td class="col-actions">
           <button type="button" class="btn btn-sm btn-outline"
-                  data-action="edit" data-guid="${escapeHtml(event.guid)}">
+                  data-action="edit" data-guid="${DctechUtil.escapeHtml(event.guid)}">
             ${expandedGuid === event.guid ? 'Close' : 'Edit'}
           </button>
         </td>
@@ -248,17 +239,17 @@
     const touched = [...new Set([
       ...Object.keys(meta.prior || {}), ...(meta.added || []),
     ])];
-    const who = agent ? 'The QC agent' : escapeHtml(meta.edited_by || 'Someone');
+    const who = agent ? 'The QC agent' : DctechUtil.escapeHtml(meta.edited_by || 'Someone');
 
     return `
       <div class="trust-section" style="margin-bottom:1rem;">
         <div class="trust-label">${who} edited this event.</div>
-        ${meta.run_id ? `<div style="font-size:0.85rem;">Run <code>${escapeHtml(meta.run_id)}</code></div>` : ''}
-        ${meta.edited_at ? `<div style="font-size:0.85rem;" class="text-muted">${escapeHtml(meta.edited_at)}</div>` : ''}
-        ${touched.length ? `<div style="font-size:0.85rem;">It set: ${escapeHtml(touched.join(', '))}</div>` : ''}
-        ${meta.comment ? `<div style="font-size:0.85rem; margin-top:0.4rem;"><em>${escapeHtml(meta.comment)}</em></div>` : ''}
+        ${meta.run_id ? `<div style="font-size:0.85rem;">Run <code>${DctechUtil.escapeHtml(meta.run_id)}</code></div>` : ''}
+        ${meta.edited_at ? `<div style="font-size:0.85rem;" class="text-muted">${DctechUtil.escapeHtml(meta.edited_at)}</div>` : ''}
+        ${touched.length ? `<div style="font-size:0.85rem;">It set: ${DctechUtil.escapeHtml(touched.join(', '))}</div>` : ''}
+        ${meta.comment ? `<div style="font-size:0.85rem; margin-top:0.4rem;"><em>${DctechUtil.escapeHtml(meta.comment)}</em></div>` : ''}
         ${meta.run_id ? `<div style="font-size:0.8rem; margin-top:0.4rem;" class="text-muted">
-          Undo the whole run with the MCP tool <code>revert_qa_run("${escapeHtml(meta.run_id)}")</code>.
+          Undo the whole run with the MCP tool <code>revert_qa_run("${DctechUtil.escapeHtml(meta.run_id)}")</code>.
         </div>` : ''}
       </div>`;
   }
@@ -266,8 +257,8 @@
   function readOnlyRow(label, value) {
     if (value === null || value === undefined || value === '') return '';
     return `<div class="detail-row">
-      <span class="detail-label">${escapeHtml(label)}</span>
-      <span class="detail-value">${escapeHtml(value)}</span>
+      <span class="detail-label">${DctechUtil.escapeHtml(label)}</span>
+      <span class="detail-value">${DctechUtil.escapeHtml(value)}</span>
     </div>`;
   }
 
@@ -275,11 +266,11 @@
     const eff = event.effective || {};
     const overlay = event.overlay || {};
     const feedNote = event.source === 'ical'
-      ? `iCal event from <strong>${escapeHtml(event.group || 'a feed')}</strong> — the feed
+      ? `iCal event from <strong>${DctechUtil.escapeHtml(event.group || 'a feed')}</strong> — the feed
          rewrites this record every few hours, so your edit is stored as an
          overlay on top of it. Date, time and group come from the feed and
          cannot be changed here.`
-      : `${escapeHtml(event.source || 'manual')} event — your edit is stored as an
+      : `${DctechUtil.escapeHtml(event.source || 'manual')} event — your edit is stored as an
          overlay, so the original submission stays intact underneath and the
          change is revertible.`;
 
@@ -288,9 +279,9 @@
       .sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0]))
       .map(([slug, cat]) => `
         <label class="category-checkbox">
-          <input type="checkbox" class="edit-category" value="${escapeHtml(slug)}"
+          <input type="checkbox" class="edit-category" value="${DctechUtil.escapeHtml(slug)}"
                  ${cats.includes(slug) ? 'checked' : ''}>
-          ${escapeHtml(cat.name || slug)}
+          ${DctechUtil.escapeHtml(cat.name || slug)}
         </label>`).join('');
 
     return `
@@ -298,7 +289,7 @@
         <td colspan="7">
           <div class="approve-form">
             <div class="approve-form-header">
-              <strong>${escapeHtml(eff.title || 'Untitled')}</strong>
+              <strong>${DctechUtil.escapeHtml(eff.title || 'Untitled')}</strong>
               <div class="approve-form-submitter" style="max-width:52%;">${feedNote}</div>
             </div>
 
@@ -320,14 +311,14 @@
               <label style="display:flex; flex-direction:column; gap:2px; font-size:0.85rem;">
                 Title
                 <input type="text" class="form-control" id="edit-title"
-                       value="${escapeHtml(overlay.title ?? '')}"
-                       placeholder="${escapeHtml(event.title || '')}">
+                       value="${DctechUtil.escapeHtml(overlay.title ?? '')}"
+                       placeholder="${DctechUtil.escapeHtml(event.title || '')}">
               </label>
               <label style="display:flex; flex-direction:column; gap:2px; font-size:0.85rem;">
                 Location
                 <input type="text" class="form-control" id="edit-location"
-                       value="${escapeHtml(overlay.location ?? '')}"
-                       placeholder="${escapeHtml(event.location || '')}">
+                       value="${DctechUtil.escapeHtml(overlay.location ?? '')}"
+                       placeholder="${DctechUtil.escapeHtml(event.location || '')}">
               </label>
             </div>
             <p class="text-muted" style="font-size:0.8rem; margin:0 0 1rem;">
@@ -348,22 +339,22 @@
 
             <div class="approve-form-actions">
               <button type="button" class="btn btn-primary btn-sm"
-                      data-action="save" data-guid="${escapeHtml(event.guid)}">Save</button>
+                      data-action="save" data-guid="${DctechUtil.escapeHtml(event.guid)}">Save</button>
               ${eff.hidden
-                ? `<button type="button" class="btn btn-outline btn-sm" data-action="unhide" data-guid="${escapeHtml(event.guid)}">Show on calendar</button>`
-                : `<button type="button" class="btn btn-danger btn-sm" data-action="hide" data-guid="${escapeHtml(event.guid)}">Hide from calendar</button>`}
+                ? `<button type="button" class="btn btn-outline btn-sm" data-action="unhide" data-guid="${DctechUtil.escapeHtml(event.guid)}">Show on calendar</button>`
+                : `<button type="button" class="btn btn-danger btn-sm" data-action="hide" data-guid="${DctechUtil.escapeHtml(event.guid)}">Hide from calendar</button>`}
               ${eff.duplicate_of
-                ? `<button type="button" class="btn btn-outline btn-sm" data-action="unmerge" data-guid="${escapeHtml(event.guid)}">Not a duplicate</button>`
+                ? `<button type="button" class="btn btn-outline btn-sm" data-action="unmerge" data-guid="${DctechUtil.escapeHtml(event.guid)}">Not a duplicate</button>`
                 : ''}
               ${event.review_status === 'pending_qa'
-                ? `<button type="button" class="btn btn-success btn-sm" data-action="approve" data-guid="${escapeHtml(event.guid)}">Approve</button>
-                   <button type="button" class="btn btn-outline btn-sm" data-action="flag" data-guid="${escapeHtml(event.guid)}">Flag</button>`
+                ? `<button type="button" class="btn btn-success btn-sm" data-action="approve" data-guid="${DctechUtil.escapeHtml(event.guid)}">Approve</button>
+                   <button type="button" class="btn btn-outline btn-sm" data-action="flag" data-guid="${DctechUtil.escapeHtml(event.guid)}">Flag</button>`
                 : ''}
               ${Object.keys(overlay).length
-                ? `<button type="button" class="btn btn-outline btn-sm" data-action="clear-overlay" data-guid="${escapeHtml(event.guid)}">Clear all edits</button>`
+                ? `<button type="button" class="btn btn-outline btn-sm" data-action="clear-overlay" data-guid="${DctechUtil.escapeHtml(event.guid)}">Clear all edits</button>`
                 : ''}
               <button type="button" class="btn btn-outline btn-sm"
-                      data-action="edit" data-guid="${escapeHtml(event.guid)}">Close</button>
+                      data-action="edit" data-guid="${DctechUtil.escapeHtml(event.guid)}">Close</button>
             </div>
           </div>
         </td>
@@ -408,8 +399,8 @@
     if (payload.truncated) bits.push('list truncated');
 
     footer.innerHTML = `
-      <div>${escapeHtml(bits.join(' · '))}</div>
-      ${lastUndo ? `<div style="margin-top:0.4rem;">${escapeHtml(lastUndo.label)}
+      <div>${DctechUtil.escapeHtml(bits.join(' · '))}</div>
+      ${lastUndo ? `<div style="margin-top:0.4rem;">${DctechUtil.escapeHtml(lastUndo.label)}
         <button type="button" class="btn btn-sm btn-outline" data-action="undo">Undo</button></div>` : ''}
       <div style="margin-top:0.4rem;">
         Edits reach the calendar on the next site build, usually within a couple
@@ -453,13 +444,13 @@
           return `
             <label style="display:flex; gap:0.6rem; align-items:flex-start; padding:0.5rem 0; ${blocked ? 'opacity:0.55;' : 'cursor:pointer;'}">
               <input type="radio" name="merge-canonical" class="merge-canonical"
-                     value="${escapeHtml(event.guid)}" ${blocked ? 'disabled' : ''}>
+                     value="${DctechUtil.escapeHtml(event.guid)}" ${blocked ? 'disabled' : ''}>
               <span>
-                <span style="font-weight:600;">${escapeHtml(eff.title || 'Untitled')}</span>
+                <span style="font-weight:600;">${DctechUtil.escapeHtml(eff.title || 'Untitled')}</span>
                 <div style="font-size:0.8rem;" class="text-muted">
-                  ${escapeHtml(event.date || '')} ·
-                  ${escapeHtml(event.group || 'no group')} ·
-                  ${escapeHtml(eff.location || '')}
+                  ${DctechUtil.escapeHtml(event.date || '')} ·
+                  ${DctechUtil.escapeHtml(event.group || 'no group')} ·
+                  ${DctechUtil.escapeHtml(eff.location || '')}
                 </div>
                 <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:2px;">${badges(event)}</div>
                 ${blocked ? '<div style="font-size:0.8rem;" class="text-muted">Cannot be the survivor: it is already hidden or merged.</div>' : ''}
@@ -483,7 +474,7 @@
   function showMessage(text, kind) {
     const box = document.getElementById('events-message');
     if (!box) return;
-    box.innerHTML = `<div class="message message-${kind}"><p>${escapeHtml(text)}</p></div>`;
+    box.innerHTML = `<div class="message message-${kind}"><p>${DctechUtil.escapeHtml(text)}</p></div>`;
     if (kind === 'success') setTimeout(() => { box.innerHTML = ''; }, 6000);
   }
 

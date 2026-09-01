@@ -1,13 +1,4 @@
 (function() {
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   function formatDate(isoString) {
     if (!isoString) return 'Unknown';
     try {
@@ -69,8 +60,8 @@
         for (const sub of subscribers) {
           html += `
             <tr>
-              <td class="email">${escapeHtml(sub.email)}</td>
-              <td class="timestamp">${escapeHtml(formatDate(sub.subscribed_at))}</td>
+              <td class="email">${DctechUtil.escapeHtml(sub.email)}</td>
+              <td class="timestamp">${DctechUtil.escapeHtml(formatDate(sub.subscribed_at))}</td>
             </tr>
           `;
         }
@@ -86,7 +77,7 @@
       console.error('Error loading subscribers:', error);
       listDiv.innerHTML = `
         <div class="message message-error" style="padding: 1rem;">
-          <p><strong>Error loading subscribers:</strong> ${escapeHtml(error.message)}</p>
+          <p><strong>Error loading subscribers:</strong> ${DctechUtil.escapeHtml(error.message)}</p>
         </div>
       `;
     } finally {

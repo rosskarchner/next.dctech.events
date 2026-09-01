@@ -1,13 +1,4 @@
 (function() {
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   let categoriesBySlug = {};
   let currentDrafts = [];
   // Lowercased emails that skip the queue; drives the checkbox state so an
@@ -28,7 +19,7 @@
       .map(slug => categoriesBySlug[slug]?.name || slug)
       .filter(Boolean);
     return cats.length > 0
-      ? cats.map(name => `<span class="category-badge">${escapeHtml(name)}</span>`).join('')
+      ? cats.map(name => `<span class="category-badge">${DctechUtil.escapeHtml(name)}</span>`).join('')
       : '<span class="text-muted">None selected</span>';
   }
 
@@ -39,8 +30,8 @@
         const checked = (draft.categories || []).includes(slug) ? 'checked' : '';
         return `
           <label class="category-checkbox">
-            <input type="checkbox" name="categories" value="${escapeHtml(slug)}" ${checked}>
-            ${escapeHtml(cat.name || slug)}
+            <input type="checkbox" name="categories" value="${DctechUtil.escapeHtml(slug)}" ${checked}>
+            ${DctechUtil.escapeHtml(cat.name || slug)}
           </label>
         `;
       }).join('');
@@ -51,24 +42,24 @@
       draft.date ? { label: 'Date', value: draft.date } : null,
       draft.time ? { label: 'Time', value: draft.time } : null,
       draft.location ? { label: 'Location', value: draft.location } : null,
-      draft.url ? { label: 'URL', value: `<a href="${escapeHtml(draft.url)}" target="_blank" rel="noopener">${escapeHtml(draft.url)}</a>` } : null,
+      draft.url ? { label: 'URL', value: `<a href="${DctechUtil.escapeHtml(draft.url)}" target="_blank" rel="noopener">${DctechUtil.escapeHtml(draft.url)}</a>` } : null,
       draft.description ? { label: 'Description', value: draft.description } : null,
     ].filter(Boolean);
 
     return fields.length > 0
-      ? fields.map(field => `<div class="detail-row"><span class="detail-label">${escapeHtml(field.label)}:</span> <span class="detail-value">${field.value}</span></div>`).join('')
+      ? fields.map(field => `<div class="detail-row"><span class="detail-label">${DctechUtil.escapeHtml(field.label)}:</span> <span class="detail-value">${field.value}</span></div>`).join('')
       : '<div class="text-muted">No details provided</div>';
   }
 
   function renderGroupDetails(draft) {
     const fields = [
-      draft.website ? { label: 'Website', value: `<a href="${escapeHtml(draft.website)}" target="_blank" rel="noopener">${escapeHtml(draft.website)}</a>` } : null,
-      draft.ical_url ? { label: 'iCal URL', value: `<a href="${escapeHtml(draft.ical_url)}" target="_blank" rel="noopener">${escapeHtml(draft.ical_url)}</a>` } : null,
+      draft.website ? { label: 'Website', value: `<a href="${DctechUtil.escapeHtml(draft.website)}" target="_blank" rel="noopener">${DctechUtil.escapeHtml(draft.website)}</a>` } : null,
+      draft.ical_url ? { label: 'iCal URL', value: `<a href="${DctechUtil.escapeHtml(draft.ical_url)}" target="_blank" rel="noopener">${DctechUtil.escapeHtml(draft.ical_url)}</a>` } : null,
       draft.description ? { label: 'Description', value: draft.description } : null,
     ].filter(Boolean);
 
     return fields.length > 0
-      ? fields.map(field => `<div class="detail-row"><span class="detail-label">${escapeHtml(field.label)}:</span> <span class="detail-value">${field.value}</span></div>`).join('')
+      ? fields.map(field => `<div class="detail-row"><span class="detail-label">${DctechUtil.escapeHtml(field.label)}:</span> <span class="detail-value">${field.value}</span></div>`).join('')
       : '<div class="text-muted">No details provided</div>';
   }
 
@@ -85,7 +76,7 @@
          </div>`
       : `<div class="categories-section">
            <span class="section-label">Categories:</span> ${renderCategoryList(draft)}
-           <button type="button" class="btn btn-sm btn-outline" data-action="edit-categories" data-draft-id="${escapeHtml(draft.id)}" style="margin-left: 1rem;">Edit</button>
+           <button type="button" class="btn btn-sm btn-outline" data-action="edit-categories" data-draft-id="${DctechUtil.escapeHtml(draft.id)}" style="margin-left: 1rem;">Edit</button>
          </div>`;
 
     return `
@@ -93,8 +84,8 @@
         <td colspan="5">
           <div class="approve-form">
             <div class="approve-form-header">
-              <strong>${draft.draft_type === 'group' ? 'Group:' : 'Event:'}</strong> ${escapeHtml(draftLabel(draft))}
-              <span class="approve-form-submitter">by ${escapeHtml(draft.submitter_email || 'unknown')}</span>
+              <strong>${draft.draft_type === 'group' ? 'Group:' : 'Event:'}</strong> ${DctechUtil.escapeHtml(draftLabel(draft))}
+              <span class="approve-form-submitter">by ${DctechUtil.escapeHtml(draft.submitter_email || 'unknown')}</span>
             </div>
             <div class="draft-content">
               ${detailContent}
@@ -106,22 +97,22 @@
               <div class="trust-section">
                 <label class="trust-label">
                   <input type="checkbox" class="trust-submitter"
-                         data-draft-id="${escapeHtml(draft.id)}"
+                         data-draft-id="${DctechUtil.escapeHtml(draft.id)}"
                          ${trustedSubmitters.has((draft.submitter_email || '').toLowerCase()) ? 'checked disabled' : ''}>
                   <span>
                     ${trustedSubmitters.has((draft.submitter_email || '').toLowerCase())
-                      ? `<strong>${escapeHtml(draft.submitter_email || '')}</strong> is already trusted — their events publish automatically.`
-                      : `Trust <strong>${escapeHtml(draft.submitter_email || 'this submitter')}</strong> — publish their future events automatically, without review.`}
+                      ? `<strong>${DctechUtil.escapeHtml(draft.submitter_email || '')}</strong> is already trusted — their events publish automatically.`
+                      : `Trust <strong>${DctechUtil.escapeHtml(draft.submitter_email || 'this submitter')}</strong> — publish their future events automatically, without review.`}
                   </span>
                 </label>
               </div>`}
             <div class="approve-form-actions">
               ${isEditMode
-                ? `<button type="button" class="btn btn-success btn-sm" data-action="confirm-approve" data-draft-id="${escapeHtml(draft.id)}">Approve with Categories</button>
-                   <button type="button" class="btn btn-outline btn-sm" data-action="cancel-edit-categories" data-draft-id="${escapeHtml(draft.id)}">Cancel Edit</button>`
-                : `<button type="button" class="btn btn-success btn-sm" data-action="confirm-approve" data-draft-id="${escapeHtml(draft.id)}">Approve</button>
-                   <button type="button" class="btn btn-danger btn-sm" data-action="reject" data-draft-id="${escapeHtml(draft.id)}">Reject</button>
-                   <button type="button" class="btn btn-outline btn-sm" data-action="collapse" data-draft-id="${escapeHtml(draft.id)}">Collapse</button>`
+                ? `<button type="button" class="btn btn-success btn-sm" data-action="confirm-approve" data-draft-id="${DctechUtil.escapeHtml(draft.id)}">Approve with Categories</button>
+                   <button type="button" class="btn btn-outline btn-sm" data-action="cancel-edit-categories" data-draft-id="${DctechUtil.escapeHtml(draft.id)}">Cancel Edit</button>`
+                : `<button type="button" class="btn btn-success btn-sm" data-action="confirm-approve" data-draft-id="${DctechUtil.escapeHtml(draft.id)}">Approve</button>
+                   <button type="button" class="btn btn-danger btn-sm" data-action="reject" data-draft-id="${DctechUtil.escapeHtml(draft.id)}">Reject</button>
+                   <button type="button" class="btn btn-outline btn-sm" data-action="collapse" data-draft-id="${DctechUtil.escapeHtml(draft.id)}">Collapse</button>`
               }
             </div>
           </div>
@@ -158,7 +149,7 @@
     if (!container || !message) return;
     container.insertAdjacentHTML(
       'afterbegin',
-      `<div class="message message-error"><p>${escapeHtml(message)}</p></div>`);
+      `<div class="message message-error"><p>${DctechUtil.escapeHtml(message)}</p></div>`);
   }
 
   function showNotice(message) {
@@ -166,7 +157,7 @@
     if (!container || !message) return;
     container.insertAdjacentHTML(
       'afterbegin',
-      `<div class="message message-success"><p>${escapeHtml(message)}</p></div>`);
+      `<div class="message message-success"><p>${DctechUtil.escapeHtml(message)}</p></div>`);
   }
 
   async function loadTrusted() {
@@ -201,16 +192,16 @@
         <tbody>
           ${trustedDetails.map((t) => `
             <tr>
-              <td style="padding:0.4rem 0;"><strong>${escapeHtml(t.email)}</strong>
-                ${t.note ? `<br><span style="color:#666;font-size:0.85em;">${escapeHtml(t.note)}</span>` : ''}
+              <td style="padding:0.4rem 0;"><strong>${DctechUtil.escapeHtml(t.email)}</strong>
+                ${t.note ? `<br><span style="color:#666;font-size:0.85em;">${DctechUtil.escapeHtml(t.note)}</span>` : ''}
               </td>
               <td style="padding:0.4rem 0; color:#666; font-size:0.85em;">
-                ${escapeHtml((t.trusted_at || '').slice(0, 10))}
-                ${t.trusted_by ? `by ${escapeHtml(t.trusted_by)}` : ''}
+                ${DctechUtil.escapeHtml((t.trusted_at || '').slice(0, 10))}
+                ${t.trusted_by ? `by ${DctechUtil.escapeHtml(t.trusted_by)}` : ''}
               </td>
               <td style="padding:0.4rem 0; text-align:right;">
                 <button type="button" class="btn btn-outline btn-sm"
-                        data-action="untrust" data-email="${escapeHtml(t.email)}">Revoke</button>
+                        data-action="untrust" data-email="${DctechUtil.escapeHtml(t.email)}">Revoke</button>
               </td>
             </tr>`).join('')}
         </tbody>
@@ -270,7 +261,7 @@
     } catch (err) {
       const container = document.getElementById('queue-list');
       if (container) {
-        container.innerHTML = `<div class="message message-error"><p>${escapeHtml(err.message)}</p></div>`;
+        container.innerHTML = `<div class="message message-error"><p>${DctechUtil.escapeHtml(err.message)}</p></div>`;
       }
     } finally {
       if (loading) loading.style.display = 'none';
@@ -372,7 +363,7 @@
       } catch (err) {
         const container = document.getElementById('queue-list');
         if (container) {
-          container.insertAdjacentHTML('afterbegin', `<div class="message message-error"><p>${escapeHtml(err.message)}</p></div>`);
+          container.insertAdjacentHTML('afterbegin', `<div class="message message-error"><p>${DctechUtil.escapeHtml(err.message)}</p></div>`);
         }
       }
     });
