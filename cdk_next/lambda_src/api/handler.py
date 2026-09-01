@@ -73,6 +73,30 @@ def json_response(status_code, body, allow_all_origins=False):
     }
 
 
+def _dispatch_id_tail(path, prefix, routes, event, jinja_env, http_method):
+    """Match {prefix}{id}[/{tail}] against `routes`.
+
+    `routes` maps (tail, method) -> handler(event, jinja_env, id); tail is
+    '' for the bare-id case (no trailing segment). Shared by every admin
+    resource shaped like /api/admin/{thing}/{id}[/action] — corrections,
+    events, and qa-runs all parsed this identically by hand before.
+
+    Returns None (falls through to the 404 at the end of lambda_handler) if
+    the path doesn't match the prefix, has no id, or no route matches this
+    tail/method combination.
+    """
+    if not path.startswith(prefix):
+        return None
+    rest = path[len(prefix):].split('/')
+    id_, tail = rest[0], (rest[1] if len(rest) > 1 else '')
+    if not id_:
+        return None
+    handler = routes.get((tail, http_method))
+    if handler is None:
+        return None
+    return handler(event, jinja_env, id_)
+
+
 def lambda_handler(event, context):
     """Main Lambda entry point."""
     http_method = event.get('httpMethod', 'GET')
@@ -151,18 +175,13 @@ def lambda_handler(event, context):
             return add_cors(corrections.list_corrections_json(event, jinja_env))
 
         if path.startswith('/api/admin/corrections/'):
-            rest = path[len('/api/admin/corrections/'):].split('/')
-            correction_id, tail = rest[0], (rest[1] if len(rest) > 1 else '')
-            if correction_id:
-                if tail == 'approve' and http_method == 'POST':
-                    return add_cors(corrections.approve_correction_json(
-                        event, jinja_env, correction_id))
-                if tail == 'reject' and http_method == 'POST':
-                    return add_cors(corrections.reject_correction_json(
-                        event, jinja_env, correction_id))
-                if not tail and http_method == 'GET':
-                    return add_cors(corrections.get_correction_json(
-                        event, jinja_env, correction_id))
+            result = _dispatch_id_tail(path, '/api/admin/corrections/', {
+                ('approve', 'POST'): corrections.approve_correction_json,
+                ('reject', 'POST'): corrections.reject_correction_json,
+                ('', 'GET'): corrections.get_correction_json,
+            }, event, jinja_env, http_method)
+            if result is not None:
+                return add_cors(result)
 
         if path == '/api/admin/queue' and http_method == 'GET':
             return add_cors(admin.get_queue_json(event, jinja_env))
@@ -184,32 +203,22 @@ def lambda_handler(event, context):
             return add_cors(events.bulk_json(event, jinja_env))
 
         if path.startswith('/api/admin/events/'):
-            rest = path[len('/api/admin/events/'):].split('/')
-            guid, tail = rest[0], (rest[1] if len(rest) > 1 else '')
-            if guid:
-                if tail == 'overlay' and http_method == 'PUT':
-                    return add_cors(
-                        events.put_overlay_json(event, jinja_env, guid))
-                if tail == 'overlay' and http_method == 'DELETE':
-                    return add_cors(
-                        events.delete_overlay_json(event, jinja_env, guid))
-                if tail == 'review-status' and http_method == 'PUT':
-                    return add_cors(
-                        events.put_review_status_json(event, jinja_env, guid))
-                if not tail and http_method == 'GET':
-                    return add_cors(
-                        events.get_event_json(event, jinja_env, guid))
+            result = _dispatch_id_tail(path, '/api/admin/events/', {
+                ('overlay', 'PUT'): events.put_overlay_json,
+                ('overlay', 'DELETE'): events.delete_overlay_json,
+                ('review-status', 'PUT'): events.put_review_status_json,
+                ('', 'GET'): events.get_event_json,
+            }, event, jinja_env, http_method)
+            if result is not None:
+                return add_cors(result)
 
         if path.startswith('/api/admin/qa-runs/'):
-            rest = path[len('/api/admin/qa-runs/'):].split('/')
-            run_id, tail = rest[0], (rest[1] if len(rest) > 1 else '')
-            if run_id:
-                if tail == 'revert' and http_method == 'POST':
-                    return add_cors(
-                        events.revert_qa_run_json(event, jinja_env, run_id))
-                if not tail and http_method == 'GET':
-                    return add_cors(
-                        events.get_qa_run_json(event, jinja_env, run_id))
+            result = _dispatch_id_tail(path, '/api/admin/qa-runs/', {
+                ('revert', 'POST'): events.revert_qa_run_json,
+                ('', 'GET'): events.get_qa_run_json,
+            }, event, jinja_env, http_method)
+            if result is not None:
+                return add_cors(result)
 
         if path.startswith('/api/admin/drafts/') and path.endswith('/approve') and http_method == 'POST':
             draft_id = path.split('/')[4]
