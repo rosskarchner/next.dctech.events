@@ -1,8 +1,12 @@
 """event_page.html's JSON-LD block gained two new pieces this session:
 
 - image: previously absent entirely, forfeiting Google's Event rich-result
-  image eligibility. Falls back to the site-wide og:image since events have
-  no per-event image field.
+  image eligibility. Originally fell back to the site-wide og:image since
+  events had no per-event image; next_dctech_events-409 later gave every
+  event a real generated social card (see og_image.py), and because this
+  field already read from self.og_image() rather than hardcoding the
+  fallback path, it picked up the per-event image for free — no template
+  change needed here, just this test's expectation updating to match.
 - isAccessibleForFree: previously hardcoded true regardless of event.cost.
   event.cost is free text ("$10", "Suggested $5 donation", ...), not a
   structured amount, so there's nothing reliable to parse a real price out
@@ -82,10 +86,9 @@ def test_jsonld_is_valid_with_no_optional_fields_at_all(monkeypatch, client):
     assert data['isAccessibleForFree'] is True
 
 
-def test_image_falls_back_to_the_site_og_image(monkeypatch, client):
+def test_image_is_the_per_event_social_card(monkeypatch, client):
     data = _get_jsonld(monkeypatch, client, {})
-    assert data['image'] == ['https://dctech.events/static/images/og-image.png'] \
-        or data['image'][0].endswith('/static/images/og-image.png')
+    assert data['image'][0].endswith('/static/og/intro-to-rust.png')
 
 
 @pytest.mark.parametrize('cost', ['', 'Free', 'FREE', 'free', 'No cost', '$0', 'n/a', 'None'])

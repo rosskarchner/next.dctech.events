@@ -29,6 +29,8 @@
 
 {% block og_title %}{{ event.title }}{% endblock %}
 {% block og_description %}{{ formatted_date }}{% if formatted_time %} at {{ formatted_time }}{% endif %}{% if event.group %} — {{ event.group }}{% endif %}{% endblock %}
+{% block og_image %}/static/og/{{ slug }}.png{% endblock %}
+{% block og_image_alt %}{{ event.title }}{% endblock %}
 
 {% block twitter_title %}{{ event.title }}{% endblock %}
 {% block twitter_description %}{{ formatted_date }}{% if formatted_time %} at {{ formatted_time }}{% endif %}{% if event.group %} — {{ event.group }}{% endif %}{% endblock %}

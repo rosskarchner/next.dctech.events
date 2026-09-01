@@ -49,6 +49,10 @@ BUILDSPEC = {
                 # Deliberately no `calgen refresh` — the iCal Aggregator owns
                 # fetching; the export already materialized the cache files.
                 "calgen pipeline --site-dir .",
+                # Must run after pipeline (needs _data/all_events.json) and
+                # before build (Frozen-Flask copies static/ into the frozen
+                # output wholesale, so these need to already be there).
+                "calgen og-images --site-dir .",
                 "calgen build --site-dir .",
                 # Two passes, each independently --delete'd, so every object
                 # gets an explicit Cache-Control instead of S3's default (no
