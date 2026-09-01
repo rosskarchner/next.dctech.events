@@ -50,7 +50,23 @@ BUILDSPEC = {
                 # fetching; the export already materialized the cache files.
                 "calgen pipeline --site-dir .",
                 "calgen build --site-dir .",
-                'aws s3 sync build/ "s3://$SITE_BUCKET/" --delete --exclude "edit/*"',
+                # Two passes, each independently --delete'd, so every object
+                # gets an explicit Cache-Control instead of S3's default (no
+                # header at all). calgen doesn't fingerprint static asset
+                # filenames, so a changed CSS/JS file is not force-fetched by
+                # a new URL — max-age is capped at a day (not a
+                # year-long "immutable" TTL a hashed-asset pipeline could
+                # safely use) so a real change still surfaces for a return
+                # visitor within a bounded window; CloudFront's own edge
+                # cache is fully invalidated below regardless. HTML gets
+                # max-age=0 (revalidate every time) since a rebuild can
+                # change any page's content or disappear it entirely.
+                # --exclude/--include scope --delete to just that pass's
+                # file type — AWS CLI's sync explicitly exempts filtered-out
+                # files from deletion, so neither pass can touch the other's
+                # files.
+                'aws s3 sync build/ "s3://$SITE_BUCKET/" --delete --exclude "edit/*" --exclude "*.html" --cache-control "public, max-age=86400"',
+                'aws s3 sync build/ "s3://$SITE_BUCKET/" --delete --exclude "edit/*" --exclude "*" --include "*.html" --cache-control "public, max-age=0, must-revalidate"',
                 'aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*"',
             ],
         },
@@ -89,6 +105,21 @@ class NextSiteGeneratorStack(cdk.Stack):
             environment=codebuild.BuildEnvironment(
                 build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
                 compute_type=codebuild.ComputeType.SMALL,
+            ),
+            # Runs daily plus on every content change plus on-demand, and
+            # produces thousands of files per build — unlike every Lambda in
+            # this stack (which all set explicit retention), this had no
+            # logging= config at all, so its CloudWatch Logs defaulted to
+            # never expire.
+            logging=codebuild.LoggingOptions(
+                cloud_watch=codebuild.CloudWatchLoggingOptions(
+                    log_group=logs.LogGroup(
+                        self,
+                        "NextSiteGeneratorLogGroup",
+                        retention=logs.RetentionDays.ONE_MONTH,
+                        removal_policy=cdk.RemovalPolicy.DESTROY,
+                    ),
+                ),
             ),
             environment_variables={
                 "TABLE_NAME": codebuild.BuildEnvironmentVariable(

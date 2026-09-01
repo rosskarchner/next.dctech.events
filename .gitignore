@@ -2,6 +2,7 @@
 cdk_next/build/
 cdk_next/cdk.out/
 cdk_next/cdk.out.agent/
+cdk_next/cdk.out.mine/
 cdk_next/.venv/
 packages/calgen/dist/
 *.egg-info/
