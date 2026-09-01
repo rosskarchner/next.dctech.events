@@ -1,0 +1,49 @@
+name: Dependency vulnerability audit
+
+# build_lambdas.sh installs most packages with no upper version bound,
+# resolved fresh at build time — reproducible at build time, but nothing
+# catches a newly-disclosed CVE in a dependency (cryptography, jinja2, mcp,
+# pyjwt, ...) between builds, since deploy-next.yml only runs on manual
+# dispatch. This runs independently on a schedule so a new CVE against an
+# already-deployed version gets caught even when nothing else changes.
+
+on:
+  schedule:
+    - cron: '17 13 * * 1'  # Monday ~13:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build Lambda assets
+        run: |
+          cd cdk_next
+          ./build_lambdas.sh
+
+      - name: Audit resolved dependencies
+        run: |
+          # --path scans an already-installed directory's dist-info metadata
+          # directly (not a venv) — the same directories build_lambdas.sh
+          # just populated, so this audits exactly what actually gets
+          # deployed, not a second, potentially-different resolution.
+          # ops/updates_publisher/social_publisher/qa_trigger/
+          # site_generator_trigger have no third-party deps of their own
+          # (stdlib + the Lambda-provided boto3 only) — nothing to audit.
+          uvx pip-audit \
+            --path cdk_next/build/api \
+            --path cdk_next/build/mcp \
+            --path cdk_next/build/ical_aggregator \
+            --path cdk_next/build/newsletter \
+            --path cdk_next/build/calendar_qc

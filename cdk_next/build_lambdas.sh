@@ -104,6 +104,15 @@ if [ -d agents/calendar_qc ]; then
   # node driver — which the browser tool needs even though the browser itself
   # runs remotely. AgentCore direct-code limits are 250M zipped / 750M
   # unpacked, so there is room, but check both if dependencies grow.
+  # strands-agents-tools[agent_core_browser] pulls in pillow transitively;
+  # 12.2.0 (the resolved version as of 2026-09-01) has 20 known CVEs fixed in
+  # 12.3.0 (pip-audit). NOT pinned to 12.3.0 here: that release has no
+  # aarch64/py3.12 wheels published yet (source-only), and --only-binary
+  # :all: above is load-bearing, not just speed — so there is currently no
+  # way to pick up the fix without also allowing a source build, which risks
+  # silently shipping wrong-arch objects to this Graviton runtime. Re-check
+  # once wheels land; the dependency-audit CI workflow will keep flagging
+  # this until then.
   uv pip install --python-platform aarch64-manylinux_2_17 \
     --python-version "$PY_VERSION" --link-mode=copy --only-binary :all: \
     --target build/calendar_qc \
