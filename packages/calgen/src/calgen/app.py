@@ -295,8 +295,13 @@ def _register_routes(app):
                                next_key=None,
                                has_next=False)
 
-    @app.route("/newsletter.html")
-    def newsletter_html():
+    def _newsletter_context():
+        """Shared setup for newsletter_html/newsletter_text — same event
+        window, same stats, only the rendered template and content-type
+        differ. Split apart once already (the homepage/newsletter 21-day
+        window bug) by one of the two copies getting fixed and the other
+        forgotten; a shared helper closes that drift off for good.
+        """
         events = get_events()
         window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
         upcoming_events = filter_events_to_upcoming_days(events, window_end)
@@ -304,28 +309,21 @@ def _register_routes(app):
         prepare_newsletter_titles(days)
         stats = get_stats().copy()
         stats['upcoming_events'] = len(upcoming_events)
-        return render_template('newsletter.html',
-                               days=days,
-                               stats=stats,
-                               base_url=get_config().get('base_url', ''),
-                               upcoming_months=get_upcoming_months(),
-                               categories_with_counts=get_categories_with_event_counts())
+        return {
+            'days': days,
+            'stats': stats,
+            'base_url': get_config().get('base_url', ''),
+            'upcoming_months': get_upcoming_months(),
+            'categories_with_counts': get_categories_with_event_counts(),
+        }
+
+    @app.route("/newsletter.html")
+    def newsletter_html():
+        return render_template('newsletter.html', **_newsletter_context())
 
     @app.route("/newsletter.txt")
     def newsletter_text():
-        events = get_events()
-        window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
-        upcoming_events = filter_events_to_upcoming_days(events, window_end)
-        days = prepare_events_by_day(upcoming_events, window_end=window_end)
-        prepare_newsletter_titles(days)
-        stats = get_stats().copy()
-        stats['upcoming_events'] = len(upcoming_events)
-        response = render_template('newsletter.txt',
-                                   days=days,
-                                   stats=stats,
-                                   base_url=get_config().get('base_url', ''),
-                                   upcoming_months=get_upcoming_months(),
-                                   categories_with_counts=get_categories_with_event_counts())
+        response = render_template('newsletter.txt', **_newsletter_context())
         return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
     @app.route("/locations/<slug>/")
