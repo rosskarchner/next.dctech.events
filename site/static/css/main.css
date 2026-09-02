@@ -483,13 +483,9 @@ footer {
     font-variant-numeric: tabular-nums;
 }
 
-/* DC/VA/MD share one row instead of three li.active rows — the active
-   state highlights the link itself, not the whole row. */
-.sidebar-list li.locations-row {
-    justify-content: flex-start;
-    gap: var(--spacing-md);
-}
-
+/* DC/VA/MD share one row (one "DC / VA / MD" span, not three separate
+   flex items — see the template's own comment) instead of three li.active
+   rows — the active state highlights the link itself, not the whole row. */
 .sidebar-list li.locations-row a.active {
     color: var(--color-text);
     font-weight: 600;

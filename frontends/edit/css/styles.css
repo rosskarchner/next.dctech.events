@@ -57,7 +57,17 @@ a:hover { text-decoration: underline; }
   height: 100%;
 }
 
-.nav-brand { font-weight: 700; font-size: 1.1rem; color: #fff; }
+/* Same Kenney Mini pixel font as the real site's logo — requires the
+   caller's own page to link /static/kenney-mini/kenney-mini.css, this
+   stylesheet has no way to pull in a @font-face itself. Single weight
+   font (no bold variant), hence 400 not the old 700. */
+.nav-brand {
+  font-family: 'Kenney Mini', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  font-size: 1.1rem;
+  color: #fff;
+}
 
 .nav-links { display: flex; gap: 0.5rem; list-style: none; }
 .nav-links a {
