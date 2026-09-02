@@ -35,18 +35,31 @@
 
   <main class="container">
     <h2 id="page-h2">Submit a Group to DC Tech Events</h2>
-    <p id="page-subtitle">To submit a group, you'll need to sign in. This allows us to add your group to the calendar.</p>
+    <p id="page-subtitle">No account needed — tell us your email and we'll send you a link to submit your group.</p>
 
-    <div id="auth-section">
-      <div class="auth-status" id="auth-status" data-auth="logged-out">
-        <p>Not signed in</p>
-        <button class="btn btn-primary" onclick="DctechAuth.login()">Sign In</button>
-      </div>
+    <div id="link-request" class="hidden">
+      <form id="link-form" class="card" style="padding: 1.25rem;">
+        <div class="form-group">
+          <label for="link-email">Your email <span class="required">*</span></label>
+          <input type="email" id="link-email" name="email" required
+                 autocomplete="email" placeholder="you@example.com">
+          <p class="hint" style="font-size: 0.9em; color: #666; margin-top: 0.35rem;">
+            We use it to send your submission link, and so we can follow up
+            about the group. It is not published.
+          </p>
+        </div>
+        <button type="submit" id="link-btn" class="btn btn-primary">Email me a submission link</button>
+      </form>
+      <p style="margin-top: 1rem; font-size: 0.9em; color: #666;">
+        Already have an account? <a href="#" onclick="DctechAuth.login(); return false;">Sign in instead</a>.
+      </p>
     </div>
 
-    <div id="form-response" class="response-area"></div>
+    <div id="form-response" class="response-area" role="status" aria-live="polite"></div>
 
-    <form id="group-form" class="hidden" data-auth="logged-in">
+    <div id="submitting-as" class="hidden" style="margin-bottom: 1rem; font-size: 0.95em; color: #666;"></div>
+
+    <form id="group-form" class="hidden">
       <input type="hidden" name="type" value="group">
       <input type="hidden" name="site" id="site-field" value="dctech">
 
@@ -97,6 +110,7 @@
 
   <script src="/edit/js/config.js"></script>
   <script src="/edit/js/auth.js"></script>
+  <script src="/edit/js/magic-link.js"></script>
   <script src="/edit/js/submission.js"></script>
   <script>
     function updateSiteBranding() {
@@ -107,7 +121,7 @@
         document.getElementById('page-title').textContent = 'Submit a Group - DC STEM Events';
         document.getElementById('nav-brand').textContent = 'DC STEM Events Edit';
         document.getElementById('page-h2').textContent = 'Submit a Group to DC STEM Events';
-        document.getElementById('page-subtitle').textContent = 'To submit a group, you\'ll need to sign in. This allows us to add your group to the calendar.';
+        document.getElementById('page-subtitle').textContent = 'No account needed — tell us your email and we\'ll send you a link to submit your group.';
       }
     }
     document.addEventListener('DOMContentLoaded', updateSiteBranding);

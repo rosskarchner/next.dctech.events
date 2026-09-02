@@ -100,7 +100,13 @@
     }
   }
 
-  function showEventForm(asEmail, { moveFocus } = {}) {
+  // Whichever of the two exists on this page — submit-event.html and
+  // submit-group.html each have exactly one, never both.
+  function submissionForm() {
+    return document.getElementById('event-form') || document.getElementById('group-form');
+  }
+
+  function showSubmissionForm(asEmail, { moveFocus } = {}) {
     const banner = document.getElementById('submitting-as');
     if (banner && asEmail) {
       banner.textContent = `Submitting as ${asEmail}`;
@@ -108,18 +114,18 @@
     }
     const linkRequest = document.getElementById('link-request');
     if (linkRequest) linkRequest.classList.add('hidden');
-    const eventForm = document.getElementById('event-form');
-    if (eventForm) {
-      eventForm.classList.remove('hidden');
-      if (moveFocus) focusFirstField(eventForm);
+    const form = submissionForm();
+    if (form) {
+      form.classList.remove('hidden');
+      if (moveFocus) focusFirstField(form);
     }
   }
 
   function showLinkRequest() {
     const linkRequest = document.getElementById('link-request');
     if (linkRequest) linkRequest.classList.remove('hidden');
-    const eventForm = document.getElementById('event-form');
-    if (eventForm) eventForm.classList.add('hidden');
+    const form = submissionForm();
+    if (form) form.classList.add('hidden');
   }
 
   function initSubmissionPage() {
@@ -131,10 +137,10 @@
     magicToken = readMagicToken();
     if (magicToken) {
       stripTokenFromUrl();
-      showEventForm(magicToken.email, { moveFocus: true });
+      showSubmissionForm(magicToken.email, { moveFocus: true });
     } else if (DctechAuth.isAuthenticated()) {
       const info = DctechAuth.getUserInfo ? DctechAuth.getUserInfo() : null;
-      showEventForm(info && info.email ? info.email : null);
+      showSubmissionForm(info && info.email ? info.email : null);
     } else {
       // No token and no session: ask for an email rather than bouncing the
       // visitor to a Cognito login they cannot even sign up for.

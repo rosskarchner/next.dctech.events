@@ -68,6 +68,11 @@ def test_extra_query_params_on_the_correction_path_do_not_leak_through():
     assert result == ('/edit/correct-event.html?guid=abc123ef', 'submit')
 
 
+def test_the_group_submission_form_is_allowed_with_the_submit_purpose():
+    assert _sanitize_redirect_path('/edit/submit-group.html') == \
+        ('/edit/submit-group.html', 'submit')
+
+
 def test_the_preferences_page_is_allowed_with_the_prefs_purpose():
     assert _sanitize_redirect_path('/edit/preferences.html') == \
         ('/edit/preferences.html', 'prefs')

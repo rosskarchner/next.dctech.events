@@ -290,6 +290,7 @@ def _maybe_subscribe(data, email):
 _LINK_REDIRECT_PATHS = {
     '/edit/submit-event.html': 'submit',
     '/edit/correct-event.html': 'submit',
+    '/edit/submit-group.html': 'submit',
     '/edit/preferences.html': 'prefs',
 }
 _DEFAULT_REDIRECT_PATH = '/edit/submit-event.html'
@@ -335,6 +336,7 @@ def request_link_json(event, jinja_env):
     redirect_path, purpose = _sanitize_redirect_path(data.get('redirect_path'))
     is_correction = redirect_path.startswith('/edit/correct-event.html')
     is_preferences = redirect_path.startswith('/edit/preferences.html')
+    is_group = redirect_path.startswith('/edit/submit-group.html')
 
     try:
         timestamp, signature = magic_link.generate_token(email, purpose=purpose)
@@ -355,6 +357,11 @@ def request_link_json(event, jinja_env):
             action_verb = 'suggest a correction to an event'
             action_label = 'Suggest a correction'
             not_requested = 'nothing was changed'
+        elif is_group:
+            subject = 'Your DC Tech Events group submission link'
+            action_verb = 'submit your group to'
+            action_label = 'Submit a group'
+            not_requested = 'nothing was submitted'
         else:
             subject = 'Your DC Tech Events submission link'
             action_verb = 'submit your event to'
