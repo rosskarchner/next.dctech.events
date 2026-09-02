@@ -1,6 +1,19 @@
 {# Cross-filterable browse sidebar: filter events by category and/or month. #}
 <aside class="event-sidebar" aria-label="Browse and filter events">
     <div class="sidebar-section">
+        <h2>Browse</h2>
+        <ul class="sidebar-list">
+            <li class="{% if request.path == '/' %}active{% endif %}"><a href="/">In-person</a></li>
+            <li class="{% if request.path == '/virtual/' %}active{% endif %}"><a href="/virtual/">Virtual</a></li>
+            <li class="{% if request.path == '/locations/dc/' %}active{% endif %}"><a href="/locations/dc/">DC</a></li>
+            <li class="{% if request.path == '/locations/va/' %}active{% endif %}"><a href="/locations/va/">VA</a></li>
+            <li class="{% if request.path == '/locations/md/' %}active{% endif %}"><a href="/locations/md/">MD</a></li>
+            <li class="{% if request.path == '/groups/' %}active{% endif %}"><a href="/groups/">Groups</a></li>
+            <li class="{% if request.path.startswith('/updates/') %}active{% endif %}"><a href="/updates/">Updates</a></li>
+        </ul>
+    </div>
+
+    <div class="sidebar-section">
         <h2>Category</h2>
         <ul class="sidebar-list">
             <li class="{% if not sidebar.active_category %}active{% endif %}">

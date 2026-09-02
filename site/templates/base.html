@@ -64,22 +64,14 @@
         <div class="container">
             <div class="logo"><a href="/">{{ site_name }}</a></div>
             <div>{{ tagline }}</div>
-            <nav aria-label="Main navigation">
-                {% if request.path == '/' %}<span aria-current="page">In-person</span>{% else %}<a href="/">In-person</a>{% endif %} <span aria-hidden="true">|</span>
-                {% if request.path == '/virtual/' %}<span aria-current="page">Virtual</span>{% else %}<a href="/virtual/">Virtual</a>{% endif %} <span aria-hidden="true">|</span>
-                {% if request.path == '/locations/dc/' %}<span aria-current="page">DC</span>{% else %}<a href="/locations/dc/">DC</a>{% endif %} <span aria-hidden="true">|</span>
-                {% if request.path == '/locations/va/' %}<span aria-current="page">VA</span>{% else %}<a href="/locations/va/">VA</a>{% endif %} <span aria-hidden="true">|</span>
-                {% if request.path == '/locations/md/' %}<span aria-current="page">MD</span>{% else %}<a href="/locations/md/">MD</a>{% endif %} <span aria-hidden="true">|</span>
-                {% if request.path == '/groups/' %}<span aria-current="page">Groups</span>{% else %}<a href="/groups/">Groups</a>{% endif %} <span aria-hidden="true">|</span>
-                {% if request.path.startswith('/updates/') %}<span aria-current="page">Updates</span>{% else %}<a href="/updates/">Updates</a>{% endif %} <span aria-hidden="true">|</span>
-                <a href="{{ add_events_link }}">Add an event</a>
-            </nav>
+            <p class="header-cta">You make it better! <a href="{{ add_events_link }}">Add an event</a>, <a href="{{ add_groups_link }}">add a group</a>, or <a href="mailto:ross@karchner.com">send feedback</a>.</p>
         </div>
     </header>
 
     <div class="container">
         <div class="{% if sidebar %}layout-with-sidebar{% endif %}">
             <main id="main-content">
+                {% if not sidebar %}<p class="back-home"><a href="/">&larr; Back to all events</a></p>{% endif %}
                 {% block content %}{% endblock %}
             </main>
             {% if sidebar %}{% include "partials/sidebar.html" %}{% endif %}

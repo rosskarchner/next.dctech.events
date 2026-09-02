@@ -152,23 +152,21 @@ a:focus {
     outline-offset: 2px;
 }
 
-/* Navigation */
-nav {
-    margin-top: var(--spacing-md);
+/* Header call to action — replaced the old header nav (its links moved into
+   the sidebar's Browse section; site.css .sidebar-list carries their
+   styling now). */
+.header-cta {
+    margin: var(--spacing-md) 0 0 0;
     font-size: 0.9rem;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-sm) var(--spacing-md);
+    color: var(--color-text-light);
 }
 
-nav a,
-nav span {
-    white-space: nowrap;
-}
-
-nav [aria-current="page"] {
-    font-weight: 600;
-    color: var(--color-text);
+/* Fallback for pages with no sidebar (event pages, groups, updates,
+   locations) — those lost the header's site navigation, so this is their
+   only way back short of the browser's back button. */
+.back-home {
+    margin: 0 0 var(--spacing-md) 0;
+    font-size: 0.9rem;
 }
 
 /* Newsletter Subscribe */
