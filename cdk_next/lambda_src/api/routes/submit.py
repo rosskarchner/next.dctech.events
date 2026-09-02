@@ -352,21 +352,25 @@ def request_link_json(event, jinja_env):
             action_verb = 'manage your DC Tech Events email preferences'
             action_label = 'Manage preferences'
             not_requested = 'nothing was changed'
+            response_thing = 'manage your preferences'
         elif is_correction:
             subject = 'Your DC Tech Events correction link'
             action_verb = 'suggest a correction to an event'
             action_label = 'Suggest a correction'
             not_requested = 'nothing was changed'
+            response_thing = 'suggest a correction'
         elif is_group:
             subject = 'Your DC Tech Events group submission link'
             action_verb = 'submit your group to'
             action_label = 'Submit a group'
             not_requested = 'nothing was submitted'
+            response_thing = 'submit your group'
         else:
             subject = 'Your DC Tech Events submission link'
             action_verb = 'submit your event to'
             action_label = 'Submit an event'
             not_requested = 'nothing was submitted'
+            response_thing = 'submit your event'
 
         ses = boto3.client('sesv2')
         ses.send_email(
@@ -400,8 +404,8 @@ def request_link_json(event, jinja_env):
             'We could not send that email. Please try again shortly.'), event)
 
     return _json(200, {
-        'message': ('Check your email — we sent you a link to submit your '
-                    'event. It may take a minute to arrive.'),
+        'message': (f'Check your email — we sent you a link to {response_thing}. '
+                    'It may take a minute to arrive.'),
     }, event)
 
 
