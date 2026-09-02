@@ -4,22 +4,36 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="temp_id" value="{{ temp_id }}">
 
-    {% if categories %}
-    <fieldset>
-        <legend>Only interested in certain topics? (optional — leave all unchecked for everything)</legend>
-        {% for slug, category in categories.items() %}
-        <label><input type="checkbox" name="categories" value="{{ slug }}"> {{ category.name }}</label>
-        {% endfor %}
-    </fieldset>
-    {% endif %}
+    {% if categories or regions %}
+    {# Inline styles throughout this block on purpose: this partial is also
+       embedded via htmx into the homepage's #subscribe box, where only the
+       fragment itself gets swapped in — a <style> block in base.html (which
+       wraps the standalone /newsletter/ page) never travels with it, and
+       main.css has no classes defined for this. #}
+    <details style="margin: 0.75rem 0 1rem 0;">
+        <summary style="cursor: pointer; font-weight: 600;">Customize what you get (optional)</summary>
+        <p style="margin: 0.5rem 0; font-size: 0.9em; color: #666;">Leave everything unchecked for everything.</p>
 
-    {% if regions %}
-    <fieldset>
-        <legend>Only interested in certain areas? (optional — leave all unchecked for everything)</legend>
-        {% for slug, region in regions.items() %}
-        <label><input type="checkbox" name="regions" value="{{ slug }}"> {{ region.name }}</label>
-        {% endfor %}
-    </fieldset>
+        {% if regions %}
+        <fieldset style="border: 0; margin: 0 0 0.75rem 0; padding: 0;">
+            <legend style="font-weight: 600; margin-bottom: 0.35rem;">Only interested in certain areas?</legend>
+            {% for slug, region in regions.items() %}
+            <label style="display: inline-block; margin: 0 1rem 0.35rem 0;"><input type="checkbox" name="regions" value="{{ slug }}"> {{ region.name }}</label>
+            {% endfor %}
+        </fieldset>
+        {% endif %}
+
+        {% if categories %}
+        <fieldset style="border: 0; margin: 0; padding: 0;">
+            <legend style="font-weight: 600; margin-bottom: 0.35rem;">Only interested in certain topics?</legend>
+            <div style="columns: 2; column-gap: 1.5rem;">
+                {% for slug, category in categories.items() %}
+                <label style="display: block; margin-bottom: 0.35rem; break-inside: avoid;"><input type="checkbox" name="categories" value="{{ slug }}"> {{ category.name }}</label>
+                {% endfor %}
+            </div>
+        </fieldset>
+        {% endif %}
+    </details>
     {% endif %}
 
     <button type="submit">Subscribe</button>
