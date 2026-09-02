@@ -1,10 +1,14 @@
-"""Per-subscriber category/region filtering for the newsletter.
+"""Per-subscriber category/region filtering for the newsletter, and the
+newsletter's unconditional exclusion of virtual events.
 
 _filter_events is what the sender's per-preference-group rendering (outside
 this package) relies on to actually narrow content; the two routes'
 ?categories=&regions= handling is what render.py calls into. The live
-public /newsletter.html page must be byte-for-byte unaffected when no
-params are passed — that's the load-bearing backward-compat guarantee here.
+public /newsletter.html page must be byte-for-byte unaffected by
+category/region query params when none are passed — that's the load-bearing
+backward-compat guarantee for that part. Virtual events, though, are always
+dropped regardless of params or preferences — email is a poor fit for
+"join from anywhere" listings, so this isn't a preference axis at all.
 
 Run: python -m pytest test_newsletter_preferences.py
 """
@@ -33,7 +37,8 @@ def _event(guid, categories=None, region=None, virtual=False, date=_SOON):
     }
 
 
-# ── _filter_events ──────────────────────────────────────────────────
+# ── _filter_events (category/region only — virtual exclusion happens a
+#    layer up, in _newsletter_context, before events ever reach this) ──
 
 def test_no_filters_returns_every_event_unchanged():
     events = [_event('a'), _event('b')]
@@ -58,16 +63,8 @@ def test_region_filter_keeps_only_matching_events():
     assert _filter_events([dc, va], None, ['dc']) == [dc]
 
 
-def test_a_virtual_event_bypasses_the_region_filter():
-    # A subscriber who picked a specific region should still see remote
-    # events — "region" doesn't meaningfully describe them.
-    virtual = _event('remote', region=None, virtual=True)
-    dc_only = _filter_events([virtual], None, ['dc'])
-    assert dc_only == [virtual]
-
-
-def test_a_non_virtual_event_with_no_region_is_excluded_by_a_region_filter():
-    no_region = _event('mystery', region=None, virtual=False)
+def test_an_event_with_no_region_is_excluded_by_a_region_filter():
+    no_region = _event('mystery', region=None)
     assert _filter_events([no_region], None, ['dc']) == []
 
 
@@ -97,13 +94,16 @@ def client(monkeypatch):
     return app.test_client()
 
 
-def test_no_query_params_is_the_original_unfiltered_behavior(client):
+def test_no_query_params_still_drops_virtual_events(client):
+    # Not "unfiltered" in the virtual sense — that exclusion is
+    # unconditional, not a category/region preference — but categories and
+    # regions themselves are otherwise untouched with no params.
     resp = client.get('/newsletter.html')
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
     assert 'Event ai-dc' in html
     assert 'Event cloud-va' in html
-    assert 'Event remote-ai' in html
+    assert 'Event remote-ai' not in html
 
 
 def test_categories_query_param_filters_the_html(client):
@@ -114,11 +114,11 @@ def test_categories_query_param_filters_the_html(client):
     assert 'Event remote-ai' not in html
 
 
-def test_regions_query_param_filters_the_html_and_keeps_virtual(client):
+def test_regions_query_param_filters_the_html_virtual_stays_excluded(client):
     resp = client.get('/newsletter.html?regions=dc')
     html = resp.get_data(as_text=True)
     assert 'Event ai-dc' in html
-    assert 'Event remote-ai' in html  # virtual bypasses the region filter
+    assert 'Event remote-ai' not in html
     assert 'Event cloud-va' not in html
 
 
@@ -127,7 +127,7 @@ def test_newsletter_text_route_respects_the_same_params(client):
     assert resp.status_code == 200
     text = resp.get_data(as_text=True)
     assert 'Event ai-dc' in text
-    assert 'Event remote-ai' in text
+    assert 'Event remote-ai' not in text
     assert 'Event cloud-va' not in text
 
 
@@ -143,3 +143,13 @@ def test_multiple_comma_separated_slugs_are_all_honored(client):
     html = resp.get_data(as_text=True)
     assert 'Event ai-dc' in html
     assert 'Event cloud-va' in html
+
+
+def test_a_purely_virtual_event_set_leaves_the_newsletter_empty(monkeypatch):
+    monkeypatch.setattr(
+        'calgen.routes.newsletter.get_events',
+        lambda: [_event('only-remote', virtual=True)])
+    app = create_app(site_dir=str(SITE_DIR))
+    app.testing = True
+    html = app.test_client().get('/newsletter.html').get_data(as_text=True)
+    assert 'Event only-remote' not in html

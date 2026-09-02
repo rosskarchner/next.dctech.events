@@ -24,17 +24,13 @@ def prepare_newsletter_titles(days):
     for day in days:
         for time_slot in day['time_slots']:
             for event in time_slot['events']:
-                base_title = event.get('display_title', event.get('title', 'Untitled Event'))
-                event['newsletter_title'] = f"Virtual: {base_title}" if is_virtual_event(event) else base_title
+                event['newsletter_title'] = event.get('display_title', event.get('title', 'Untitled Event'))
     return days
 
 
 def _filter_events(events, category_slugs, region_slugs):
     """category_slugs/region_slugs: None or empty means unfiltered on that
-    axis. A virtual event bypasses the region filter entirely — "region"
-    doesn't meaningfully describe it, and a subscriber who picked a
-    specific region almost certainly still wants to hear about remote
-    events, not silently lose them."""
+    axis."""
     if not category_slugs and not region_slugs:
         return events
 
@@ -42,8 +38,7 @@ def _filter_events(events, category_slugs, region_slugs):
         if category_slugs and not any(
                 c in (event.get('categories') or []) for c in category_slugs):
             return False
-        if region_slugs and not is_virtual_event(event) \
-                and event.get('region') not in region_slugs:
+        if region_slugs and event.get('region') not in region_slugs:
             return False
         return True
 
@@ -58,10 +53,16 @@ def _newsletter_context(category_slugs=None, region_slugs=None):
     forgotten; a shared helper closes that drift off for good.
 
     category_slugs/region_slugs: optional per-subscriber filters (see
-    _filter_events) — omitted, this is the exact unfiltered behavior the
-    live public /newsletter.html page has always had.
+    _filter_events) — omitted, this is the exact unfiltered (aside from
+    virtual events, always dropped — see below) behavior the live public
+    /newsletter.html page has always had.
     """
     events = get_events()
+    # Virtual events are excluded from the newsletter unconditionally, not
+    # as a subscriber preference — email is a poor fit for "join from
+    # anywhere" listings the way region/category actually narrow real
+    # differences in what a reader wants to hear about.
+    events = [e for e in events if not is_virtual_event(e)]
     events = _filter_events(events, category_slugs, region_slugs)
     window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
     upcoming_events = filter_events_to_upcoming_days(events, window_end)
