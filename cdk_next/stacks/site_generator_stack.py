@@ -76,9 +76,18 @@ BUILDSPEC = {
                 # --exclude/--include scope --delete to just that pass's
                 # file type — AWS CLI's sync explicitly exempts filtered-out
                 # files from deletion, so neither pass can touch the other's
-                # files.
+                # files. Filter order matters: the CLI applies rules
+                # left-to-right and the LAST matching rule wins. Pass 1 has
+                # no --include, so its two --exclude flags simply stack. Pass
+                # 2's "--include *.html" would otherwise re-include (and
+                # therefore delete, since build/ has no edit/ directory)
+                # every html file under edit/ — the manually-deployed
+                # frontend (scripts/deploy_edit_ui.sh) this pipeline doesn't
+                # own — unless "--exclude edit/*" is placed AFTER it so it's
+                # the last, winning rule for anything under edit/. This bit
+                # us in production once already: don't reorder these back.
                 'aws s3 sync build/ "s3://$SITE_BUCKET/" --delete --exclude "edit/*" --exclude "*.html" --cache-control "public, max-age=86400"',
-                'aws s3 sync build/ "s3://$SITE_BUCKET/" --delete --exclude "edit/*" --exclude "*" --include "*.html" --cache-control "public, max-age=0, must-revalidate"',
+                'aws s3 sync build/ "s3://$SITE_BUCKET/" --delete --exclude "*" --include "*.html" --exclude "edit/*" --cache-control "public, max-age=0, must-revalidate"',
                 'aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*"',
             ],
         },
