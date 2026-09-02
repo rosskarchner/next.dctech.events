@@ -3,5 +3,24 @@
     <input type="hidden" name="newsletters" value="dctech">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="temp_id" value="{{ temp_id }}">
+
+    {% if categories %}
+    <fieldset>
+        <legend>Only interested in certain topics? (optional — leave all unchecked for everything)</legend>
+        {% for slug, category in categories.items() %}
+        <label><input type="checkbox" name="categories" value="{{ slug }}"> {{ category.name }}</label>
+        {% endfor %}
+    </fieldset>
+    {% endif %}
+
+    {% if regions %}
+    <fieldset>
+        <legend>Only interested in certain areas? (optional — leave all unchecked for everything)</legend>
+        {% for slug, region in regions.items() %}
+        <label><input type="checkbox" name="regions" value="{{ slug }}"> {{ region.name }}</label>
+        {% endfor %}
+    </fieldset>
+    {% endif %}
+
     <button type="submit">Subscribe</button>
 </form>

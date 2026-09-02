@@ -13,6 +13,7 @@ from base64 import urlsafe_b64encode
 import pytest
 
 os.environ.setdefault("SUBMIT_KEY_ID", "test-key")
+os.environ.setdefault("PREFS_KEY_ID", "test-prefs-key")
 os.environ.setdefault("BASE_URL", "https://dctech.events")
 
 import magic_link  # noqa: E402
@@ -38,6 +39,7 @@ class FakeKms:
 def fake_kms(monkeypatch):
     monkeypatch.setattr(magic_link, "kms", FakeKms())
     monkeypatch.setattr(magic_link, "SUBMIT_KEY_ID", "test-key")
+    monkeypatch.setattr(magic_link, "PREFS_KEY_ID", "test-prefs-key")
 
 
 # ── Email validation ───────────────────────────────────────────────
@@ -168,3 +170,96 @@ def test_unconfigured_key_refuses_to_verify(monkeypatch):
     monkeypatch.setattr(magic_link, "SUBMIT_KEY_ID", "")
     ok, reason = magic_link.verify_token("user@example.com", 123, "sig")
     assert not ok and "configured" in reason.lower()
+
+
+def test_prefs_purpose_uses_its_own_key_independent_of_submit(monkeypatch):
+    # Clearing SUBMIT_KEY_ID must not affect prefs — each purpose's key is
+    # independent, matching this codebase's standing rule that the
+    # submission key and the newsletter's confirmation key are never shared
+    # so each can be rotated on its own.
+    monkeypatch.setattr(magic_link, "SUBMIT_KEY_ID", "")
+    ts, sig = magic_link.generate_token("user@example.com", purpose="prefs")
+    ok, reason = magic_link.verify_token("user@example.com", ts, sig, purpose="prefs")
+    assert ok and reason is None
+
+
+def test_submit_purpose_is_unaffected_by_a_missing_prefs_key(monkeypatch):
+    monkeypatch.setattr(magic_link, "PREFS_KEY_ID", "")
+    ts, sig = magic_link.generate_token("user@example.com", purpose="submit")
+    ok, reason = magic_link.verify_token("user@example.com", ts, sig, purpose="submit")
+    assert ok and reason is None
+
+
+def test_generate_token_with_no_prefs_key_configured_raises(monkeypatch):
+    monkeypatch.setattr(magic_link, "PREFS_KEY_ID", "")
+    with pytest.raises(ValueError, match="PREFS_KEY_ID"):
+        magic_link.generate_token("user@example.com", purpose="prefs")
+
+
+def test_verify_token_with_no_prefs_key_configured_refuses(monkeypatch):
+    monkeypatch.setattr(magic_link, "PREFS_KEY_ID", "")
+    ok, reason = magic_link.verify_token("user@example.com", 123, "sig", purpose="prefs")
+    assert not ok and "configured" in reason.lower()
+
+
+# ── Purpose separation ─────────────────────────────────────────────
+
+def test_default_purpose_reproduces_the_original_message_format():
+    # Locks in that purpose='submit' is byte-for-byte what _message()
+    # produced before purpose existed — a signature already issued (or in
+    # an inbox) must keep verifying after this change ships.
+    assert magic_link._message("user@example.com", 123) == b"submit:user@example.com:123"
+    assert (magic_link._message("user@example.com", 123)
+            == magic_link._message("user@example.com", 123, purpose="submit"))
+
+
+def test_a_submit_token_does_not_verify_as_a_prefs_token():
+    ts, sig = magic_link.generate_token("user@example.com", purpose="submit")
+    ok, _ = magic_link.verify_token("user@example.com", ts, sig, purpose="prefs")
+    assert not ok
+
+
+def test_a_prefs_token_does_not_verify_as_a_submit_token():
+    ts, sig = magic_link.generate_token("user@example.com", purpose="prefs")
+    ok, _ = magic_link.verify_token("user@example.com", ts, sig, purpose="submit")
+    assert not ok
+
+
+def test_a_prefs_token_round_trips_as_a_prefs_token():
+    ts, sig = magic_link.generate_token("user@example.com", purpose="prefs")
+    ok, reason = magic_link.verify_token("user@example.com", ts, sig, purpose="prefs")
+    assert ok and reason is None
+
+
+def test_prefs_purpose_gets_a_longer_default_ttl_than_submit():
+    import time as _time
+    # Well past the submit TTL but still inside the prefs TTL.
+    old = int(_time.time()) - magic_link.TOKEN_TTL_SECONDS - 3600
+    ts, sig = magic_link.generate_token("user@example.com", timestamp=old, purpose="prefs")
+
+    submit_ok, _ = magic_link.verify_token("user@example.com", ts, sig, purpose="prefs")
+    assert submit_ok  # still within the (longer) prefs TTL
+
+    # The same age, verified as a submit-purpose token, is expired — proves
+    # the TTL really is purpose-specific, not just a global bump.
+    ts2, sig2 = magic_link.generate_token("user@example.com", timestamp=old, purpose="submit")
+    expired_ok, reason = magic_link.verify_token("user@example.com", ts2, sig2, purpose="submit")
+    assert not expired_ok
+    assert "expired" in reason.lower()
+
+
+def test_explicit_ttl_seconds_overrides_the_purpose_default():
+    ts, sig = magic_link.generate_token("user@example.com", purpose="prefs")
+    ok, reason = magic_link.verify_token(
+        "user@example.com", ts, sig, purpose="prefs", ttl_seconds=0)
+    assert not ok
+    assert "expired" in reason.lower()
+
+
+def test_expired_prefs_token_error_message_says_preferences_link():
+    import time as _time
+    old = int(_time.time()) - magic_link._PURPOSE_TTL_SECONDS["prefs"] - 10
+    ts, sig = magic_link.generate_token("user@example.com", timestamp=old, purpose="prefs")
+    ok, reason = magic_link.verify_token("user@example.com", ts, sig, purpose="prefs")
+    assert not ok
+    assert "preferences link" in reason.lower()

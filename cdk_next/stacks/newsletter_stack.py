@@ -51,6 +51,29 @@ class NextNewsletterStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # Subscriber category/region preferences links (magic_link.py's
+        # purpose='prefs'). Its own key, not confirmation_key or
+        # NextApiStack's submit_key — matching the standing rule that each
+        # purpose's key is independent and separately rotatable. Owned here
+        # (not NextApiStack) because this stack's sender_function is what
+        # actually generates one per subscriber on every send; NextApiStack
+        # gets a reference to this same construct (self.prefs_key below,
+        # passed into NextApiStack's constructor in app.py) since its
+        # /api/preferences route is what verifies them — the one purpose
+        # that legitimately spans both stacks, wired the same way both
+        # already share the DynamoDB table.
+        self.prefs_key = kms.Key(
+            self,
+            "NextPreferencesLinkKey",
+            description="HMAC key for next.dctech.events subscriber preferences links",
+            key_spec=kms.KeySpec.HMAC_512,
+            key_usage=kms.KeyUsage.GENERATE_VERIFY_MAC,
+            # Destroying it invalidates every outstanding preferences link,
+            # which is recoverable (a subscriber requests a new one) but
+            # rude — matching submit_key's own reasoning in NextApiStack.
+            removal_policy=cdk.RemovalPolicy.RETAIN,
+        )
+
         csrf_secret = secretsmanager.Secret(
             self,
             "NextNewsletterCsrfSecret",
@@ -77,6 +100,7 @@ class NextNewsletterStack(cdk.Stack):
             "TEMPLATE_NAME": f"{config.PREFIX}-newsletter",
             "CONFIGURATION_SET": config.PREFIX,
             "CONFIRMATION_KEY_ID": confirmation_key.key_id,
+            "PREFS_KEY_ID": self.prefs_key.key_id,
             "CSRF_SECRET_NAME": csrf_secret.secret_name,
             "DYNAMODB_TABLE_NAME": table.table_name,
             # Served same-origin through the CloudFront /newsletter* behavior,
@@ -107,6 +131,9 @@ class NextNewsletterStack(cdk.Stack):
         )
         confirmation_key.grant(self.signup_function, "kms:GenerateMac", "kms:VerifyMac")
         csrf_secret.grant_read(self.signup_function)
+        # Writes subscriber category/region preferences (db.put_subscriber_preferences)
+        # on confirm — this Lambda touched no DynamoDB at all before that.
+        table.grant_read_write_data(self.signup_function)
 
         # 2. Weekly sender — same schedule as production
         self.sender_function = lambda_.Function(
@@ -128,6 +155,31 @@ class NextNewsletterStack(cdk.Stack):
             ),
         )
         table.grant_read_data(self.sender_function)
+        # Generates (never verifies) a purpose='prefs' magic_link token per
+        # subscriber, embedded in every send — see routes/preferences.py in
+        # NextApiStack for the other half (verification).
+        self.prefs_key.grant(self.sender_function, "kms:GenerateMac")
+        # Defense in depth beyond the IAM grant above, matching submit_key's
+        # own pattern in NextApiStack: an explicit statement on the key's
+        # own resource policy naming this role, so a wildcard IAM policy
+        # elsewhere still isn't enough on its own to use this key. Only for
+        # sender_function, not api_function too: this key is a
+        # NextNewsletterStack resource, so naming NextApiStack's role here
+        # would embed NextApiStack's role ARN into a NextNewsletterStack
+        # resource, creating a cyclic stack dependency the other direction
+        # (`cdk synth` refuses it) — api_function relies on the plain
+        # grant() in api_stack.py alone, which is sufficient on its own
+        # since a CDK-created key's default policy already trusts account
+        # identities.
+        self.prefs_key.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="RestrictMacGenerationToNewsletterSenderRole",
+                effect=iam.Effect.ALLOW,
+                principals=[iam.ArnPrincipal(self.sender_function.role.role_arn)],
+                actions=["kms:GenerateMac"],
+                resources=["*"],
+            )
+        )
 
         # 3. Bounce/complaint handler
         bounce_function = lambda_.Function(
@@ -205,3 +257,4 @@ class NextNewsletterStack(cdk.Stack):
         cdk.CfnOutput(self, "NextNewsletterApiUrl", value=api.url)
         cdk.CfnOutput(self, "NextNewsletterFeedbackTopicArn", value=feedback_topic.topic_arn)
         cdk.CfnOutput(self, "NextNewsletterKmsKeyId", value=confirmation_key.key_id)
+        cdk.CfnOutput(self, "NextPreferencesLinkKeyId", value=self.prefs_key.key_id)

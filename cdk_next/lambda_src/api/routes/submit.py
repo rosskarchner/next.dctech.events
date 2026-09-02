@@ -283,23 +283,33 @@ def _maybe_subscribe(data, email):
 # endpoint can never become an open redirect via a client-supplied path, and
 # so a malformed or unrecognized value costs nothing worse than falling back
 # to the default rather than erroring out the whole request.
-_LINK_REDIRECT_PATHS = ('/edit/submit-event.html', '/edit/correct-event.html')
+# path -> the magic-link purpose it should be issued for (magic_link.py's
+# generate_token/verify_token purpose param). Keeps a preferences-link
+# request from minting a token that could also be replayed as a submission
+# token, and vice versa.
+_LINK_REDIRECT_PATHS = {
+    '/edit/submit-event.html': 'submit',
+    '/edit/correct-event.html': 'submit',
+    '/edit/preferences.html': 'prefs',
+}
+_DEFAULT_REDIRECT_PATH = '/edit/submit-event.html'
 _GUID_RE = re.compile(r'^[0-9a-f]{1,64}$')
 
 
 def _sanitize_redirect_path(raw):
-    """Only ever returns one of _LINK_REDIRECT_PATHS, optionally with a
-    validated `guid` query param carried through for the correction form.
-    """
+    """Returns (path, purpose). path is always one of _LINK_REDIRECT_PATHS'
+    keys, optionally with a validated `guid` query param carried through
+    for the correction form."""
     parsed = urlparse(str(raw or ''))
     if parsed.scheme or parsed.netloc or parsed.path not in _LINK_REDIRECT_PATHS:
-        return _LINK_REDIRECT_PATHS[0]
+        return _DEFAULT_REDIRECT_PATH, _LINK_REDIRECT_PATHS[_DEFAULT_REDIRECT_PATH]
+    purpose = _LINK_REDIRECT_PATHS[parsed.path]
     if parsed.path == '/edit/correct-event.html':
         guid = (parse_qs(parsed.query).get('guid') or [''])[0]
         if guid and _GUID_RE.match(guid):
-            return f'/edit/correct-event.html?guid={guid}'
-        return '/edit/correct-event.html'
-    return parsed.path
+            return f'/edit/correct-event.html?guid={guid}', purpose
+        return '/edit/correct-event.html', purpose
+    return parsed.path, purpose
 
 
 def request_link_json(event, jinja_env):
@@ -322,15 +332,25 @@ def request_link_json(event, jinja_env):
             f'or try again in {minutes} minute{"s" if minutes != 1 else ""}.'
         ), event)
 
-    redirect_path = _sanitize_redirect_path(data.get('redirect_path'))
+    redirect_path, purpose = _sanitize_redirect_path(data.get('redirect_path'))
     is_correction = redirect_path.startswith('/edit/correct-event.html')
+    is_preferences = redirect_path.startswith('/edit/preferences.html')
 
     try:
-        timestamp, signature = magic_link.generate_token(email)
+        timestamp, signature = magic_link.generate_token(email, purpose=purpose)
         link = magic_link.build_link(email, timestamp, signature, path=redirect_path)
-        hours = magic_link.TOKEN_TTL_SECONDS // 3600
+        ttl = magic_link.ttl_seconds_for(purpose)
+        # Preferences links are valid for weeks, not hours — say so in
+        # whichever unit actually reads naturally.
+        duration = (f'{ttl // 86400} days' if ttl >= 86400
+                    else f'{ttl // 3600} hours')
 
-        if is_correction:
+        if is_preferences:
+            subject = 'Your DC Tech Events preferences link'
+            action_verb = 'manage your DC Tech Events email preferences'
+            action_label = 'Manage preferences'
+            not_requested = 'nothing was changed'
+        elif is_correction:
             subject = 'Your DC Tech Events correction link'
             action_verb = 'suggest a correction to an event'
             action_label = 'Suggest a correction'
@@ -353,14 +373,14 @@ def request_link_json(event, jinja_env):
                         f'<p>Use this link to {action_verb} '
                         'DC Tech Events:</p>'
                         f'<p><a href="{link}">{action_label}</a></p>'
-                        f'<p>The link works for the next {hours} hours. '
+                        f'<p>The link works for the next {duration}. '
                         'If you did not request it, you can ignore this '
                         f'email — {not_requested}.</p>'
                     )},
                     'Text': {'Data': (
                         f'Use this link to {action_verb} '
                         f'DC Tech Events:\n\n{link}\n\n'
-                        f'The link works for the next {hours} hours. If you '
+                        f'The link works for the next {duration}. If you '
                         'did not request it, you can ignore this email — '
                         f'{not_requested}.\n'
                     )},

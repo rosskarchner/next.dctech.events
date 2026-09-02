@@ -52,16 +52,25 @@
               <tr>
                 <th>Email Address</th>
                 <th>Subscribed</th>
+                <th>Categories</th>
+                <th>Regions</th>
               </tr>
             </thead>
             <tbody>
         `;
 
         for (const sub of subscribers) {
+          // Empty means unfiltered — see db.get_subscriber_preferences.
+          const categories = (sub.categories && sub.categories.length)
+            ? sub.categories.join(', ') : 'All';
+          const regions = (sub.regions && sub.regions.length)
+            ? sub.regions.join(', ') : 'All';
           html += `
             <tr>
               <td class="email">${DctechUtil.escapeHtml(sub.email)}</td>
               <td class="timestamp">${DctechUtil.escapeHtml(formatDate(sub.subscribed_at))}</td>
+              <td>${DctechUtil.escapeHtml(categories)}</td>
+              <td>${DctechUtil.escapeHtml(regions)}</td>
             </tr>
           `;
         }

@@ -2041,6 +2041,40 @@ def subscribe_to_newsletter(email, contact_list, topic):
         return 'updated'
 
 
+def get_subscriber_preferences(email):
+    """A subscriber's category/region newsletter filters, or None if never
+    set. Absent (or an empty list within an existing item) means
+    unfiltered — callers must treat that as "send everything", not "send
+    nothing", so every subscriber who predates this feature keeps getting
+    the full newsletter until they explicitly narrow it."""
+    email = str(email or '').strip().lower()
+    if not email:
+        return None
+    table = _get_table()
+    response = table.get_item(Key={'PK': f'SUBSCRIBER#{email}', 'SK': 'PREFS'})
+    item = response.get('Item')
+    if not item:
+        return None
+    return {
+        'email': email,
+        'categories': _to_plain(item.get('categories', [])),
+        'regions': _to_plain(item.get('regions', [])),
+    }
+
+
+def put_subscriber_preferences(email, categories, regions):
+    """Create or update a subscriber's category/region newsletter filters."""
+    email = str(email or '').strip().lower()
+    table = _get_table()
+    table.put_item(Item={
+        'PK': f'SUBSCRIBER#{email}',
+        'SK': 'PREFS',
+        'categories': list(categories or []),
+        'regions': list(regions or []),
+        'updated_at': datetime.now(_tz.utc).isoformat(),
+    })
+
+
 # ─── Trusted submitters ───────────────────────────────────────────
 
 # Trust is keyed by normalized email, not submitter_id: magic-link submitters

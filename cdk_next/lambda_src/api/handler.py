@@ -12,7 +12,7 @@ import traceback
 
 from jinja2 import Environment, FileSystemLoader
 
-from routes import public, submit, admin, events, corrections
+from routes import public, submit, admin, events, corrections, preferences
 
 # Set up Jinja2 template environment
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -151,6 +151,15 @@ def lambda_handler(event, context):
 
         if path == '/api/my-submissions' and http_method == 'GET':
             return add_cors(submit.my_submissions_json(event, jinja_env))
+
+        # Subscriber category/region preferences: reached via the same
+        # account-free magic-link pattern (purpose='prefs'), public at the
+        # gateway for the same reason /api/submissions is.
+        if path == '/api/preferences' and http_method == 'GET':
+            return add_cors(preferences.get_preferences_json(event, jinja_env))
+
+        if path == '/api/preferences' and http_method == 'POST':
+            return add_cors(preferences.update_preferences_json(event, jinja_env))
 
         # Corrections: public POST is unauthenticated at the gateway for the
         # same reason /api/submissions is — the Lambda verifies the magic

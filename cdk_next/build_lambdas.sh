@@ -50,7 +50,12 @@ fi
 if [ -d lambda_src/newsletter ] && [ -e lambda_src/newsletter/app.py ]; then
   mkdir -p build/newsletter
   cp -r lambda_src/newsletter/. build/newsletter/
-  cp lambda_src/api/db.py lambda_src/api/constants.py build/newsletter/
+  # Tests live next to the handlers; they have no business in the bundle.
+  rm -rf build/newsletter/test_*.py build/newsletter/__pycache__
+  # magic_link.py: sender.py signs each subscriber's preferences link with
+  # it (purpose='prefs'); db.py: both sender.py (reads preferences) and
+  # app.py (writes them on confirm) need it now.
+  cp lambda_src/api/db.py lambda_src/api/constants.py lambda_src/api/magic_link.py build/newsletter/
   # render.py rebuilds the calgen site in /tmp from DynamoDB
   cp lambda_src/site_generator/export_dynamo_to_calgen.py build/newsletter/
   cp -r ../site build/newsletter/site

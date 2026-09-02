@@ -17,6 +17,7 @@ from urllib.parse import parse_qs
 import boto3
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+import db
 from constants import FROM_EMAIL, REPLY_TO_EMAIL, CONTACT_LIST_NAME
 
 env = Environment(
@@ -46,6 +47,33 @@ NEWSLETTERS = {
     },
 }
 DEFAULT_NEWSLETTERS = ['dctech']
+
+# Static and effectively permanent — same list, same reasoning, as
+# routes/preferences.py in the API Lambda (see that module's own comment):
+# no DynamoDB equivalent exists, site/regions.py is the source of truth.
+# Update all three places if a region is ever added.
+REGIONS = {
+    'dc': {'slug': 'dc', 'name': 'Washington DC'},
+    'md': {'slug': 'md', 'name': 'Maryland'},
+    'va': {'slug': 'va', 'name': 'Virginia'},
+}
+
+
+def _clean_slugs(values, valid_slugs):
+    """Normalize a categories/regions selection to a deduped list of only
+    real, currently-existing slugs — matching routes/preferences.py's own
+    _clean_slugs (not shared code, but the same invariant: a stale or
+    hand-crafted slug is dropped rather than stored)."""
+    if not values:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    seen = []
+    for v in values:
+        v = str(v or '').strip()
+        if v and v in valid_slugs and v not in seen:
+            seen.append(v)
+    return seen
 
 
 def _now_ts():
@@ -134,8 +162,18 @@ def verify_confirmation_signature(email, timestamp, signature, newsletters=None)
         return False
 
 
-def generate_confirmation_url(email, newsletters=None):
-    """Generate a signed confirmation URL using path parameters and base64 encoded email"""
+def generate_confirmation_url(email, newsletters=None, categories=None, regions=None):
+    """Generate a signed confirmation URL using path parameters and base64
+    encoded email.
+
+    categories/regions ride along as plain, unsigned query params — unlike
+    email/newsletters (covered by generate_confirmation_signature's
+    message), they're not worth protecting the way those are: the worst a
+    tampered value could do is set the *same, already-signature-verified*
+    email's own category/region preferences to something else, not forge a
+    subscription or impersonate anyone. Keeping them out of the signed
+    message avoids changing that message's shape at all.
+    """
     if newsletters is None:
         newsletters = DEFAULT_NEWSLETTERS
     timestamp = int(_now_ts())
@@ -143,7 +181,13 @@ def generate_confirmation_url(email, newsletters=None):
     encoded_email = urlsafe_b64encode(email.encode()).decode('utf-8').rstrip('=')
     encoded_timestamp = urlsafe_b64encode(str(timestamp).encode()).decode('utf-8').rstrip('=')
     newsletters_param = ','.join(sorted(newsletters))
-    return f"/confirm/{encoded_email}/{encoded_timestamp}/{signature}?newsletters={newsletters_param}"
+    url = (f"/confirm/{encoded_email}/{encoded_timestamp}/{signature}"
+           f"?newsletters={newsletters_param}")
+    if categories:
+        url += f"&categories={','.join(categories)}"
+    if regions:
+        url += f"&regions={','.join(regions)}"
+    return url
 
 
 # ─── HTTP helpers ─────────────────────────────────────────────────
@@ -190,7 +234,9 @@ def route_index(event):
     temp_id = str(uuid.uuid4())
     csrf_token = generate_csrf_token(temp_id)
     template = 'partials/signup_form.html' if _is_htmx(event) else 'index.html'
-    return _html(_render(template, csrf_token=csrf_token, temp_id=temp_id))
+    return _html(_render(
+        template, csrf_token=csrf_token, temp_id=temp_id,
+        categories=db.get_all_categories(), regions=REGIONS))
 
 
 def route_signup(event):
@@ -203,15 +249,26 @@ def route_signup(event):
             data = _parse_form(event)
             email = data.get('email', [''])[0]
             newsletters = data.get('newsletters', DEFAULT_NEWSLETTERS)
+            categories = data.get('categories', [])
+            regions = data.get('regions', [])
         else:
             body = json.loads(event.get('body') or '{}')
             email = body.get('email', '')
             newsletters = body.get('newsletters', DEFAULT_NEWSLETTERS)
             if isinstance(newsletters, str):
                 newsletters = [newsletters]
+            categories = body.get('categories', [])
+            regions = body.get('regions', [])
     except Exception:
         email = ''
         newsletters = DEFAULT_NEWSLETTERS
+        categories = []
+        regions = []
+
+    # Optional — a signup with no selections just means "everything",
+    # same default as a subscriber who never visits the preferences page.
+    categories = _clean_slugs(categories, set(db.get_all_categories().keys()))
+    regions = _clean_slugs(regions, set(REGIONS.keys()))
 
     if not email:
         error_msg = 'Email is required'
@@ -230,7 +287,8 @@ def route_signup(event):
         if not CONFIRMATION_KEY_ID:
             raise ValueError('Missing CONFIRMATION_KEY_ID configuration')
 
-        confirmation_url = generate_confirmation_url(email, newsletters)
+        confirmation_url = generate_confirmation_url(
+            email, newsletters, categories=categories, regions=regions)
         full_confirmation_url = f"{BASE_URL}{confirmation_url}"
 
         html_content = _render('confirmation_email.html',
@@ -278,11 +336,22 @@ def route_confirm_link(event, encoded_email, encoded_timestamp, signature):
         if not verify_confirmation_signature(email, timestamp, signature, newsletters):
             return _html(_render('error.html', error='Invalid confirmation link'), 400)
 
+        # Unsigned, carried straight through to the confirm form's hidden
+        # fields — see generate_confirmation_url's own docstring for why
+        # that's fine here.
+        categories = _clean_slugs(
+            query_params.get('categories', '').split(','),
+            set(db.get_all_categories().keys()))
+        regions = _clean_slugs(
+            query_params.get('regions', '').split(','), set(REGIONS.keys()))
+
         return _html(_render('confirm.html',
                              email=email,
                              timestamp=timestamp,
                              signature=signature,
-                             newsletters=','.join(newsletters)))
+                             newsletters=','.join(newsletters),
+                             categories=','.join(categories),
+                             regions=','.join(regions)))
     except Exception as e:
         print(f"Error in confirmation: {e}")
         return _html(_render('error.html', error='Invalid confirmation link'), 400)
@@ -296,6 +365,8 @@ def route_confirm_post(event):
         signature = data.get('signature', [''])[0]
         newsletters_str = data.get('newsletters', ['dctech'])[0]
         newsletters = [n.strip() for n in newsletters_str.split(',')]
+        categories_str = data.get('categories', [''])[0]
+        regions_str = data.get('regions', [''])[0]
 
         if not all([email, timestamp, signature]):
             return _html(_render('error.html', error='Invalid confirmation data'), 400)
@@ -342,6 +413,16 @@ def route_confirm_post(event):
                     EmailAddress=email,
                     TopicPreferences=existing_preferences,
                 )
+
+        # Re-validated here (not trusted from confirm.html's hidden fields
+        # as-is) the same way route_confirm_link validated them going out —
+        # a confirm POST is unsigned data riding alongside a signature that
+        # only ever covered email/newsletters/timestamp.
+        categories = _clean_slugs(
+            categories_str.split(','), set(db.get_all_categories().keys()))
+        regions = _clean_slugs(regions_str.split(','), set(REGIONS.keys()))
+        if categories or regions:
+            db.put_subscriber_preferences(email, categories, regions)
 
         return {'statusCode': 303, 'body': '',
                 'headers': {'Location': f'{BASE_URL}/confirm/success',

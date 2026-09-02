@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">Email Preferences - DC Tech Events</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+  <link rel="stylesheet" href="/edit/css/front-suggest.css">
+  <style>
+    header { display: none; }
+    .container { max-width: 700px; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px; padding: 0.5rem 1rem;">
+      <div style="display:flex; align-items: center; gap: 2rem;">
+        <a href="index.html" class="nav-brand" id="nav-brand" style="font-weight: bold; text-decoration: none; color: inherit;">DC Tech Events Edit</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h2>Email preferences</h2>
+    <p id="page-subtitle">
+      Choose which categories and regions you want to hear about in the
+      weekly newsletter. Leave everything unchecked for no filter — you'll
+      get the full newsletter, same as today.
+    </p>
+
+    <div id="link-request" class="hidden">
+      <form id="link-form" class="card" style="padding: 1.25rem;">
+        <div class="form-group">
+          <label for="link-email">Your email <span class="required">*</span></label>
+          <input type="email" id="link-email" name="email" required
+                 autocomplete="email" placeholder="you@example.com">
+          <p class="hint" style="font-size: 0.9em; color: #666; margin-top: 0.35rem;">
+            We'll email you a link to manage your preferences. It only
+            works for the address it was sent to.
+          </p>
+        </div>
+        <button type="submit" id="link-btn" class="btn btn-primary">Email me a preferences link</button>
+      </form>
+    </div>
+
+    <div id="form-response" class="response-area" role="status" aria-live="polite"></div>
+
+    <div id="editing-as" class="hidden" style="margin-bottom: 1rem; font-size: 0.95em; color: #666;"></div>
+
+    <form id="preferences-form" class="hidden">
+      <div class="form-group">
+        <fieldset style="border: 0; margin: 0; padding: 0;">
+          <legend>Categories</legend>
+          <div id="category-checkboxes" class="checkbox-group">
+            <span class="loading">Loading categories...</span>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="form-group">
+        <fieldset style="border: 0; margin: 0; padding: 0;">
+          <legend>Regions</legend>
+          <div id="region-checkboxes" class="checkbox-group">
+            <span class="loading">Loading regions...</span>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" id="submit-btn" class="btn btn-primary">
+          <span class="htmx-indicator" id="submit-indicator"><span class="spinner"></span></span>
+          Save preferences
+        </button>
+      </div>
+    </form>
+  </main>
+
+  <script src="/edit/js/config.js"></script>
+  <script src="/edit/js/magic-link.js"></script>
+  <script src="/edit/js/preferences.js"></script>
+  <script>
+    DctechPreferencesPage.init();
+  </script>
+</body>
+</html>

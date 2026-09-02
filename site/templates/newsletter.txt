@@ -47,3 +47,4 @@ No categorized events.
 
 ---
 View more events at https://dctech.events
+Manage your email preferences: {{ preferences_link_placeholder }}

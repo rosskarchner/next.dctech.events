@@ -24,6 +24,7 @@ from db import (
     get_all_posts, get_post as db_get_post, put_post, delete_post,
     trust_submitter, untrust_submitter, list_trusted_submitters,
     is_trusted_submitter, promote_draft,
+    get_subscriber_preferences,
 )
 
 CODEBUILD_PROJECT_NAME = os.environ.get('CODEBUILD_PROJECT_NAME', '')
@@ -295,11 +296,19 @@ def get_subscribers_json(event, jinja_env):
         # Sort by LastUpdatedTimestamp (newest first)
         contacts.sort(key=lambda x: x.get('LastUpdatedTimestamp', ''), reverse=True)
 
-        subscribers = [{
-            'email': c['EmailAddress'],
-            'subscribed_at': c.get('LastUpdatedTimestamp', '').isoformat() if c.get('LastUpdatedTimestamp') else '',
-            'unsubscribe_all': c.get('UnsubscribeAll', False),
-        } for c in contacts]
+        subscribers = []
+        for c in contacts:
+            prefs = get_subscriber_preferences(c['EmailAddress']) or {}
+            subscribers.append({
+                'email': c['EmailAddress'],
+                'subscribed_at': c.get('LastUpdatedTimestamp', '').isoformat() if c.get('LastUpdatedTimestamp') else '',
+                'unsubscribe_all': c.get('UnsubscribeAll', False),
+                # Empty means unfiltered (see db.get_subscriber_preferences) —
+                # not "preferences haven't loaded," so the admin UI can show
+                # these lists as-is with no further empty-state handling.
+                'categories': prefs.get('categories', []),
+                'regions': prefs.get('regions', []),
+            })
 
         return _json(200, {
             'subscribers': subscribers,
