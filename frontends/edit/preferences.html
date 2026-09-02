@@ -6,16 +6,30 @@
   <title id="page-title">Email Preferences - DC Tech Events</title>
   <link rel="stylesheet" href="/edit/css/styles.css">
   <link rel="stylesheet" href="/edit/css/front-suggest.css">
+  <link rel="stylesheet" href="/static/kenney-mini/kenney-mini.css">
   <style>
     header { display: none; }
     .container { max-width: 700px; }
+    /* Two columns instead of front-suggest.css's default flex-wrap pill
+       row — with 26 categories that wraps raggedly across many short
+       lines; a grid reads as two clean columns instead. Scoped to this
+       page only (submit-event.html's own category picker keeps the
+       original pill layout). */
+    .checkbox-group-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem 1rem;
+    }
+    @media (max-width: 480px) {
+      .checkbox-group-columns { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <nav class="nav">
     <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px; padding: 0.5rem 1rem;">
       <div style="display:flex; align-items: center; gap: 2rem;">
-        <a href="index.html" class="nav-brand" id="nav-brand" style="font-weight: bold; text-decoration: none; color: inherit;">DC Tech Events Edit</a>
+        <a href="index.html" class="nav-brand" id="nav-brand" style="font-family: 'Kenney Mini', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-weight: 400; letter-spacing: -0.02em; text-decoration: none; color: inherit;">DC Tech Events</a>
       </div>
     </div>
   </nav>
@@ -50,18 +64,18 @@
     <form id="preferences-form" class="hidden">
       <div class="form-group">
         <fieldset style="border: 0; margin: 0; padding: 0;">
-          <legend>Categories</legend>
-          <div id="category-checkboxes" class="checkbox-group">
-            <span class="loading">Loading categories...</span>
+          <legend>Regions</legend>
+          <div id="region-checkboxes" class="checkbox-group">
+            <span class="loading">Loading regions...</span>
           </div>
         </fieldset>
       </div>
 
       <div class="form-group">
         <fieldset style="border: 0; margin: 0; padding: 0;">
-          <legend>Regions</legend>
-          <div id="region-checkboxes" class="checkbox-group">
-            <span class="loading">Loading regions...</span>
+          <legend>Categories</legend>
+          <div id="category-checkboxes" class="checkbox-group checkbox-group-columns">
+            <span class="loading">Loading categories...</span>
           </div>
         </fieldset>
       </div>
