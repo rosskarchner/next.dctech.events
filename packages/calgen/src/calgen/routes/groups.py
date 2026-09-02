@@ -6,7 +6,7 @@ closures, no other module depends on it) before repeating it for the rest.
 """
 from flask import render_template
 
-from calgen.routes.common import get_approved_groups
+from calgen.routes.common import get_approved_groups, get_sidebar_data
 
 
 def register_routes(app):
@@ -16,4 +16,5 @@ def register_routes(app):
         return render_template('approved_groups_list.html',
                                groups=groups,
                                next_key=None,
-                               has_next=False)
+                               has_next=False,
+                               sidebar=get_sidebar_data())

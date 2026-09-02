@@ -3,13 +3,13 @@
     <div class="sidebar-section">
         <h2>Browse</h2>
         <ul class="sidebar-list">
-            <li class="{% if request.path == '/' %}active{% endif %}"><a href="/">In-person</a></li>
-            <li class="{% if request.path == '/virtual/' %}active{% endif %}"><a href="/virtual/">Virtual</a></li>
-            <li class="{% if request.path == '/locations/dc/' %}active{% endif %}"><a href="/locations/dc/">DC</a></li>
-            <li class="{% if request.path == '/locations/va/' %}active{% endif %}"><a href="/locations/va/">VA</a></li>
-            <li class="{% if request.path == '/locations/md/' %}active{% endif %}"><a href="/locations/md/">MD</a></li>
+            <li class="locations-row">
+                <a href="/locations/dc/" class="{% if request.path == '/locations/dc/' %}active{% endif %}">DC</a>
+                <a href="/locations/va/" class="{% if request.path == '/locations/va/' %}active{% endif %}">VA</a>
+                <a href="/locations/md/" class="{% if request.path == '/locations/md/' %}active{% endif %}">MD</a>
+            </li>
             <li class="{% if request.path == '/groups/' %}active{% endif %}"><a href="/groups/">Groups</a></li>
-            <li class="{% if request.path.startswith('/updates/') %}active{% endif %}"><a href="/updates/">Updates</a></li>
+            <li class="{% if request.path == '/just-added/' %}active{% endif %}"><a href="/just-added/">Recently Added</a></li>
         </ul>
     </div>
 

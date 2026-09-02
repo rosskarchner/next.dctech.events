@@ -43,7 +43,7 @@ body {
 /* Header & Logo */
 header {
     margin-bottom: var(--spacing-xl);
-    padding-bottom: var(--spacing-lg);
+    padding-bottom: var(--spacing-xs);
     border-bottom: 2px solid var(--color-border);
 }
 
@@ -161,8 +161,8 @@ a:focus {
     color: var(--color-text-light);
 }
 
-/* Fallback for pages with no sidebar (event pages, groups, updates,
-   locations) — those lost the header's site navigation, so this is their
+/* Fallback for pages with no sidebar (event pages, updates, feeds,
+   newsletter) — those lost the header's site navigation, so this is their
    only way back short of the browser's back button. */
 .back-home {
     margin: 0 0 var(--spacing-md) 0;
@@ -483,16 +483,16 @@ footer {
     font-variant-numeric: tabular-nums;
 }
 
-/* Recently Added Line — a single-line freshness signal replacing the old
-   boxed just-added preview, so it no longer eats above-the-fold space. */
-.recently-added-line {
-    margin: 0 0 var(--spacing-md) 0;
-    font-size: 0.9rem;
-    color: var(--color-text-light);
+/* DC/VA/MD share one row instead of three li.active rows — the active
+   state highlights the link itself, not the whole row. */
+.sidebar-list li.locations-row {
+    justify-content: flex-start;
+    gap: var(--spacing-md);
 }
 
-.recently-added-line a {
-    font-weight: 500;
+.sidebar-list li.locations-row a.active {
+    color: var(--color-text);
+    font-weight: 600;
 }
 
 /* Recurring Event Badge */

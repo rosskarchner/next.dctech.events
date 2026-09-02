@@ -1,9 +1,12 @@
 """Homepage above-the-fold redesign (next_dctech_events-czy): only one event
 was visible without scrolling, worse on narrow screens, because the full-size
 h1, a tall #subscribe box, and a boxed "just added" preview all stacked above
-any events. This shrinks the h1 to a subheading, collapses "just added" into
-one line, and moves #subscribe down so it sits between the first two
-day-groups and the rest — not before all events.
+any events. This shrinks the h1 to a subheading and moves #subscribe down so
+it sits between the first two day-groups and the rest — not before all
+events. The "just added" freshness line moved again later, off the homepage
+entirely and into the sidebar's Browse section as a plain "Recently Added"
+link (no count, no longer wired to get_recently_added_count) — this file
+just confirms it's no longer rendered inline here.
 
 Run: python -m pytest test_homepage_above_the_fold.py
 """
@@ -69,35 +72,16 @@ def test_h1_is_styled_as_a_subheading_not_removed(client):
     assert '<h1 class="page-subheading">Upcoming Tech Events' in html
 
 
-def test_freshness_line_shown_and_links_to_just_added(client, monkeypatch):
-    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 3)
-    html = _get(client).get_data(as_text=True)
-    assert 'recently-added-line' in html
-    assert '3 new events added this week' in html
-    assert 'href="/just-added/"' in html
-
-
-def test_freshness_line_uses_singular_for_one_event(client, monkeypatch):
-    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 1)
-    html = _get(client).get_data(as_text=True)
-    assert '1 new event added this week' in html
-    assert '1 new events' not in html
-
-
-def test_freshness_line_hidden_when_count_is_zero(client, monkeypatch):
-    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 0)
+def test_no_inline_freshness_line_on_the_homepage(client):
+    """The freshness line lives in the sidebar's Browse section now (as a
+    plain "Recently Added" link, no count) — the homepage itself no longer
+    renders one inline, boxed or otherwise."""
     html = _get(client).get_data(as_text=True)
     assert 'recently-added-line' not in html
-
-
-def test_old_boxed_just_added_preview_is_gone(client, monkeypatch):
-    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 3)
-    html = _get(client).get_data(as_text=True)
     assert 'just-added-preview' not in html
 
 
-def test_subscribe_box_sits_after_the_first_two_day_groups(client, monkeypatch):
-    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 0)
+def test_subscribe_box_sits_after_the_first_two_day_groups(client):
     html = _get(client).get_data(as_text=True)
     # The JSON-LD ItemList in <head> deliberately lists every day
     # (unaffected by the {% with days=... %} body slicing — see the design
@@ -117,7 +101,6 @@ def test_subscribe_box_sits_after_the_first_two_day_groups(client, monkeypatch):
 
 
 def test_with_two_or_fewer_days_the_second_slice_include_is_skipped(client, monkeypatch):
-    monkeypatch.setattr('calgen.routes.listings.get_recently_added_count', lambda: 0)
     monkeypatch.setattr(
         'calgen.routes.listings.prepare_events_by_day', lambda *a, **k: list(_DAYS[:2]))
     html = _get(client).get_data(as_text=True)

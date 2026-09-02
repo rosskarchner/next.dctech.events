@@ -68,8 +68,7 @@ def _format_added_day(day):
 
 
 def get_recently_added_count(window_days=RECENTLY_ADDED_WINDOW_DAYS):
-    """How many events were added in the last N days — the homepage's one-
-    line freshness signal."""
+    """How many events were added in the last N days."""
     cutoff = (datetime.now(local_tz).date() - timedelta(days=window_days - 1)).isoformat()
     count = 0
     for day in group_by_added_date(get_events()):
@@ -98,7 +97,6 @@ def register_routes(app):
                                days=days,
                                stats=stats,
                                base_url=base_url,
-                               recently_added_count=get_recently_added_count(),
                                upcoming_months=get_upcoming_months(),
                                categories_with_counts=get_categories_with_event_counts(),
                                sidebar=get_sidebar_data())
@@ -205,4 +203,5 @@ def register_routes(app):
         return render_template('just_added.html',
                                days_with_events=days,
                                error_message=None if days else
-                               "Nothing has been recorded as newly added yet.")
+                               "Nothing has been recorded as newly added yet.",
+                               sidebar=get_sidebar_data())

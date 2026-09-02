@@ -4,6 +4,7 @@ from flask import render_template
 from calgen.site_config import get_config
 from calgen.routes.common import (
     get_events, prepare_events_by_day, _generate_ical_feed, _generate_rss_feed,
+    get_sidebar_data,
 )
 
 
@@ -43,7 +44,8 @@ def register_routes(app):
                                days=days,
                                stats=stats,
                                location_name=region['name'],
-                               location_type='region')
+                               location_type='region',
+                               sidebar=get_sidebar_data())
 
     @app.route("/locations/<slug>/feed.ics")
     def location_ical_feed(slug):
