@@ -51,7 +51,11 @@ def register_routes(app):
                                post=post,
                                days=days,
                                summary=summarize(post),
-                               base_url=cfg.get('base_url', ''))
+                               base_url=cfg.get('base_url', ''),
+                               # og_images (calgen og-images) keys this
+                               # post's card the same way, since the post
+                               # dict itself has no slug to reuse.
+                               og_image_key=f'{year}-{month:02d}-{day:02d}')
 
     @app.route("/updates/feed.xml")
     def updates_rss_feed():

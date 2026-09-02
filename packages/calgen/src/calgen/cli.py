@@ -120,20 +120,28 @@ def og_preview(title, date_display, category, site_name, group_name, out):
 @cli.command('og-images')
 @click.option('--site-dir', default='.', type=click.Path(), help='Site directory (default: .)')
 def og_images(site_dir):
-    """Generate static/og/{slug}.png for every event in _data/all_events.json.
+    """Generate social share cards: one per event, plus category pages, week
+    pages, and /updates/ posts (free-form and weekly roundup).
 
-    Run after `calgen pipeline` (which produces that file) and before
-    `calgen build` (Frozen-Flask copies static/ into the frozen output
-    wholesale, so these need to already exist there by then).
+    Run after `calgen pipeline` (which produces _data/all_events.json) and
+    before `calgen build` (Frozen-Flask copies static/ into the frozen
+    output wholesale, so these need to already exist there by then).
     """
     site_dir = _prepare_site_dir(site_dir)
     import json
     import os
 
+    from calgen.archive import get_archived_week, merge_events
     from calgen.event_utils import event_slug
-    from calgen.routes.common import get_categories
+    from calgen.routes.common import get_categories, get_events, get_all_week_ids
     from calgen.routes.events import _format_event_date
-    from calgen.og_image import render_event_card
+    from calgen.routes.listings import (
+        get_iso_week_dates, parse_week_identifier, filter_events_by_week,
+    )
+    from calgen.updates import get_free_posts, get_paged_update_posts
+    from calgen.og_image import (
+        render_event_card, render_category_card, render_week_card, render_post_card,
+    )
     from calgen.site_config import get_config
 
     events_file = os.path.join('_data', 'all_events.json')
@@ -147,6 +155,7 @@ def og_images(site_dir):
     site_name = get_config().get('site_name', 'Tech Events')
     out_dir = os.path.join(site_dir, 'static', 'og')
     os.makedirs(out_dir, exist_ok=True)
+    written = 0
 
     for event in events:
         slug = event_slug(event)
@@ -160,8 +169,47 @@ def og_images(site_dir):
             group_name=event.get('group'),
         )
         card.save(os.path.join(out_dir, f'{slug}.png'))
+        written += 1
 
-    click.echo(f"Wrote {len(events)} social share cards to {out_dir}")
+    # Category cards — same slugs/counting category_page() itself uses.
+    live_events = get_events()
+    for slug, category in categories.items():
+        count = len([e for e in live_events if slug in e.get('categories', [])])
+        card = render_category_card(category['name'], count, site_name)
+        card.save(os.path.join(out_dir, f'category-{slug}.png'))
+        written += 1
+
+    # Week cards — the same weeks freeze.py's week_page generator builds
+    # (upcoming plus every archived week), computed the same way week_page()
+    # itself does: live events merged with that week's archive capture.
+    for week_id in get_all_week_ids():
+        year, week_num = parse_week_identifier(week_id)
+        week_start, week_end = get_iso_week_dates(year, week_num)
+        archived = get_archived_week(week_id)
+        week_events = merge_events(
+            filter_events_by_week(live_events, week_start, week_end),
+            filter_events_by_week(archived['events'], week_start, week_end)
+            if archived else [],
+        )
+        card = render_week_card(week_start.strftime('%B %-d, %Y'), len(week_events), site_name)
+        card.save(os.path.join(out_dir, f'week-{week_id}.png'))
+        written += 1
+
+    # /updates/ posts that own a page — a link post's page IS the week page
+    # it points at (see calgen.updates's own docstring), which already got
+    # its card above, so it needs none of its own.
+    for post in get_free_posts():
+        card = render_post_card(post['title'], post['date_formatted'], site_name)
+        card.save(os.path.join(out_dir, f"post-{post['slug']}.png"))
+        written += 1
+
+    for post in get_paged_update_posts():
+        card = render_post_card(post['title'], post['date_formatted'], site_name)
+        key = f"{post['year']}-{post['month']:02d}-{post['day']:02d}"
+        card.save(os.path.join(out_dir, f'post-{key}.png'))
+        written += 1
+
+    click.echo(f"Wrote {written} social share cards to {out_dir}")
 
 
 @cli.command()

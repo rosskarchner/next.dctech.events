@@ -1,6 +1,6 @@
-"""`calgen og-images` — generates static/og/{slug}.png for every event in
-_data/all_events.json, run between `calgen pipeline` and `calgen build` in
-the site-generator buildspec.
+"""`calgen og-images` — generates social share cards (events, category pages,
+week pages, /updates/ posts) run between `calgen pipeline` and `calgen
+build` in the site-generator buildspec.
 
 Run: python -m pytest test_og_images_cli.py
 """
@@ -91,6 +91,93 @@ def test_passes_the_events_group_through_to_the_card(tmp_path, monkeypatch):
     result = CliRunner().invoke(cli_module.cli, ['og-images', '--site-dir', str(tmp_path)])
     assert result.exit_code == 0, result.output
     assert calls and calls[0]['group_name'] == 'DC Rust'
+
+
+def test_generates_a_card_for_every_category(tmp_path):
+    events = [{
+        'title': 'AI Meetup', 'date': '2026-09-01', 'time': '18:00', 'guid': 'fff666',
+        'categories': ['ai'],
+    }]
+    _write_site(tmp_path, events, categories={'ai': {'name': 'Artificial Intelligence'}})
+
+    result = CliRunner().invoke(cli, ['og-images', '--site-dir', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+
+    png_path = tmp_path / 'static' / 'og' / 'category-ai.png'
+    assert png_path.exists()
+    with Image.open(png_path) as img:
+        assert img.size == (1200, 630)
+
+
+def test_generates_at_least_one_week_card(tmp_path):
+    # get_all_week_ids() is relative to "today", so this can't assert an
+    # exact week id — just that the upcoming-weeks half of it (always
+    # non-empty) produced real files.
+    _write_site(tmp_path, [])
+
+    result = CliRunner().invoke(cli, ['og-images', '--site-dir', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+
+    week_cards = list((tmp_path / 'static' / 'og').glob('week-*.png'))
+    assert week_cards
+    with Image.open(week_cards[0]) as img:
+        assert img.size == (1200, 630)
+
+
+def test_generates_a_card_for_a_free_form_post(tmp_path):
+    _write_site(tmp_path, [])
+    (tmp_path / '_posts').mkdir()
+    (tmp_path / '_posts' / 'welcome.yaml').write_text(
+        "slug: welcome\n"
+        "title: Welcome to DC Tech Events\n"
+        "published_on: 2026-08-01\n"
+        "status: published\n"
+        "body: Hello there.\n"
+    )
+
+    result = CliRunner().invoke(cli, ['og-images', '--site-dir', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+
+    png_path = tmp_path / 'static' / 'og' / 'post-welcome.png'
+    assert png_path.exists()
+    with Image.open(png_path) as img:
+        assert img.size == (1200, 630)
+
+
+def test_generates_a_card_for_a_weekly_roundup_post(tmp_path):
+    _write_site(tmp_path, [])
+    (tmp_path / '_updates').mkdir()
+    (tmp_path / '_updates' / '2026-09-15.yaml').write_text(
+        "week_id: 2026-W38\n"
+        "published_on: 2026-09-15\n"
+        "title: This week in DC tech\n"
+        "events: []\n"
+    )
+
+    result = CliRunner().invoke(cli, ['og-images', '--site-dir', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+
+    png_path = tmp_path / 'static' / 'og' / 'post-2026-09-15.png'
+    assert png_path.exists()
+    with Image.open(png_path) as img:
+        assert img.size == (1200, 630)
+
+
+def test_a_link_post_does_not_get_its_own_card(tmp_path):
+    # A link post's page IS the week page it points at (no page of its own),
+    # so it must not produce a post-*.png that nothing ever links to.
+    _write_site(tmp_path, [])
+    (tmp_path / '_updates').mkdir()
+    (tmp_path / '_updates' / '2026-09-15.yaml').write_text(
+        "week_id: 2026-W38\n"
+        "published_on: 2026-09-15\n"
+        "title: The week ahead\n"
+        "post_kind: link\n"
+    )
+
+    result = CliRunner().invoke(cli, ['og-images', '--site-dir', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / 'static' / 'og' / 'post-2026-09-15.png').exists()
 
 
 def test_missing_all_events_json_errors_instead_of_crashing(tmp_path):

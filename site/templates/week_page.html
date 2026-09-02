@@ -12,6 +12,9 @@
 {% block twitter_title %}Events for Week of {{ week_start_formatted }}{% endblock %}
 {% block twitter_description %}{{ stats.upcoming_events }} tech events in the DC area for the week of {{ week_start_formatted }}{% endblock %}
 
+{% block og_image %}/static/og/week-{{ week_id }}.png{% endblock %}
+{% block og_image_alt %}Events for Week of {{ week_start_formatted }}{% endblock %}
+
 {% block extra_head %}
 <!-- JSON-LD Structured Data -->
 <script type="application/ld+json">

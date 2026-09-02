@@ -1,11 +1,14 @@
-"""Per-event social share card generation (next_dctech_events-409).
+"""Social share card generation (next_dctech_events-409): one per event,
+plus category pages, week pages, and /updates/ posts.
 
-render_event_card() is a pure function — event fields in, a Pillow Image
-out, no filesystem/network access — specifically so it's fast to iterate on
-without a real site build: see cli.py's `og-preview` command, which calls it
-directly against sample data and writes a PNG you can open immediately, and
-this module's own `__main__` block, which does the same without even
-needing calgen installed as a console script.
+Every render_*_card() function is pure — text fields in, a Pillow Image out,
+no filesystem/network access — specifically so it's fast to iterate on
+without a real site build: see cli.py's `og-preview` command, which calls
+render_event_card directly against sample data and writes a PNG you can open
+immediately, and this module's own `__main__` block, which does the same
+without even needing calgen installed as a console script. They all share
+one skeleton (_render_card) — background, site label, fitted title, one
+meta line — and differ only in what goes in the title and meta line.
 
 Title/date/category text uses PIL.ImageFont.load_default(size=...) rather
 than a bundled or system-installed TTF: that embedded font (Pillow >=10.1)
@@ -107,16 +110,15 @@ def _fit_title(draw, title, max_width):
     return font, lines
 
 
-def render_event_card(title, date_display, category_name=None, site_name='Tech Events',
-                       group_name=None):
-    """Render one 1200x630 social share card.
+def _render_card(title, meta_text, site_name='Tech Events', group_name=None):
+    """Shared skeleton behind every card kind — background, site label
+    (+ optional group), fitted title, one meta line in the bottom band.
 
-    title: the event's own title, wrapped/shrunk to fit.
-    date_display: already-formatted (e.g. "Tuesday, September 1, 2026") —
-    this module has no opinion on date formatting, matching how
-    routes/events.py's own _format_event_date already owns that elsewhere.
-    category_name: the category's display name (not its slug), or None to
-    omit the meta line's category segment entirely.
+    title: shrunk/wrapped to fit, same as an event's own title.
+    meta_text: whatever the bottom band should say — already fully composed
+    (e.g. "Tuesday, September 1, 2026  ·  AI" or "12 upcoming events"); this
+    function has no opinion on what belongs in it, matching how it already
+    had none about date formatting.
     group_name: the organizing group's name, or None to omit it — set in
     the label row after site_name, in the portable default font (not Kenney
     Mini: it's event-submitted text, not fixed config text) so it reads as
@@ -162,15 +164,52 @@ def render_event_card(title, date_display, category_name=None, site_name='Tech E
     for i, line in enumerate(lines):
         draw.text((PADDING, title_top + i * line_height), line, font=title_font, fill=TEXT_COLOR)
 
-    # Meta line (date + category) in the bottom band.
+    # Meta line in the bottom band.
     meta_font = _font(META_FONT_SIZE)
-    meta_text = date_display
-    if category_name:
-        meta_text = f"{date_display}  ·  {category_name}"
     meta_y = CARD_HEIGHT - 140 + (140 - META_FONT_SIZE) // 2 - 6
     draw.text((PADDING, meta_y), meta_text, font=meta_font, fill=META_COLOR)
 
     return image
+
+
+def render_event_card(title, date_display, category_name=None, site_name='Tech Events',
+                       group_name=None):
+    """Render one event's 1200x630 social share card.
+
+    title: the event's own title, wrapped/shrunk to fit.
+    date_display: already-formatted (e.g. "Tuesday, September 1, 2026") —
+    this module has no opinion on date formatting, matching how
+    routes/events.py's own _format_event_date already owns that elsewhere.
+    category_name: the category's display name (not its slug), or None to
+    omit the meta line's category segment entirely.
+    group_name: see _render_card.
+    """
+    meta_text = date_display
+    if category_name:
+        meta_text = f"{date_display}  ·  {category_name}"
+    return _render_card(title, meta_text, site_name, group_name)
+
+
+def render_category_card(category_name, event_count, site_name='Tech Events'):
+    """Render a category page's card — the category itself as the title, an
+    event count instead of a date/category meta line (it'd be redundant with
+    the title here)."""
+    meta_text = f"{event_count} upcoming event{'' if event_count == 1 else 's'}"
+    return _render_card(category_name, meta_text, site_name)
+
+
+def render_week_card(week_start_formatted, event_count, site_name='Tech Events'):
+    """Render a week page's card. week_start_formatted: already-formatted,
+    same convention as render_event_card's date_display."""
+    title = f"Week of {week_start_formatted}"
+    meta_text = f"{event_count} event{'' if event_count == 1 else 's'} this week"
+    return _render_card(title, meta_text, site_name)
+
+
+def render_post_card(title, date_formatted, site_name='Tech Events'):
+    """Render an /updates/ post's card (free-form or weekly roundup — both
+    share this same title-plus-date shape)."""
+    return _render_card(title, date_formatted, site_name)
 
 
 if __name__ == '__main__':

@@ -10,6 +10,9 @@
 {% block twitter_title %}{{ post.title }}{% endblock %}
 {% block twitter_description %}{{ summary }}{% endblock %}
 
+{% block og_image %}/static/og/post-{{ post.slug }}.png{% endblock %}
+{% block og_image_alt %}{{ post.title }}{% endblock %}
+
 {% block extra_head %}
 <link rel="alternate" type="application/rss+xml" title="{{ site_name }} Updates" href="/updates/feed.xml">
 <script type="application/ld+json">
@@ -18,6 +21,7 @@
   "@type": "BlogPosting",
   "headline": post.title,
   "description": summary,
+  "image": [base_url ~ self.og_image()],
   "datePublished": post.published_on.strftime('%Y-%m-%d'),
   "url": base_url ~ post.url,
   "isPartOf": {

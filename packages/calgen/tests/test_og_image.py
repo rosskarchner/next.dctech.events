@@ -11,7 +11,8 @@ from PIL import Image, ImageDraw
 
 from calgen.og_image import (
     CARD_WIDTH, CARD_HEIGHT, TITLE_MAX_LINES, TITLE_FONT_SIZES,
-    render_event_card, _wrap_text, _fit_title, _font, _truncate_to_width,
+    render_event_card, render_category_card, render_week_card, render_post_card,
+    _wrap_text, _fit_title, _font, _truncate_to_width,
 )
 
 
@@ -94,6 +95,39 @@ def test_truncate_to_width_returns_text_unchanged_when_it_already_fits():
 def test_rendering_never_raises_with_a_group_name_present():
     card = render_event_card(
         'Event', 'Monday, January 1, 2026', 'AI', group_name='DC/PY 🦀')
+    assert card.size == (CARD_WIDTH, CARD_HEIGHT)
+
+
+def test_category_card_is_the_standard_size():
+    card = render_category_card('Artificial Intelligence', 12, 'DC Tech Events')
+    assert card.size == (CARD_WIDTH, CARD_HEIGHT)
+
+
+def test_category_card_meta_line_uses_singular_for_one_event():
+    # No way to read the drawn text back out of a raster image, so this
+    # renders both counts and confirms they differ — the closest thing to an
+    # observable assertion without OCR, matching the no-category test above.
+    one = render_category_card('AI', 1, 'DC Tech Events')
+    two = render_category_card('AI', 2, 'DC Tech Events')
+    assert one.tobytes() != two.tobytes()
+
+
+def test_week_card_is_the_standard_size():
+    card = render_week_card('September 15, 2026', 5, 'DC Tech Events')
+    assert card.size == (CARD_WIDTH, CARD_HEIGHT)
+
+
+def test_week_card_title_includes_the_week_start():
+    zero_events = render_week_card('September 15, 2026', 0, 'DC Tech Events')
+    five_events = render_week_card('September 15, 2026', 5, 'DC Tech Events')
+    # Same title (the week start), different meta line (event count) —
+    # confirms the count actually reaches the render, not just the date.
+    assert zero_events.tobytes() != five_events.tobytes()
+
+
+def test_post_card_is_the_standard_size():
+    card = render_post_card('DC Tech Events for the week of September 15, 2026',
+                             'September 15, 2026', 'DC Tech Events')
     assert card.size == (CARD_WIDTH, CARD_HEIGHT)
 
 

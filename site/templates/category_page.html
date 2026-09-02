@@ -12,6 +12,9 @@
 {% block twitter_title %}Upcoming {{ category_name }} Events in DC{% endblock %}
 {% block twitter_description %}{{ stats.upcoming_events }} upcoming {{ category_name }} tech event{{ '' if stats.upcoming_events == 1 else 's' }} in the DC, Maryland and Virginia area.{% endblock %}
 
+{% block og_image %}/static/og/category-{{ category_slug }}.png{% endblock %}
+{% block og_image_alt %}{{ category_name }} Events{% endblock %}
+
 {% block content %}
 <div class="home-container">
     <section class="events-section">
