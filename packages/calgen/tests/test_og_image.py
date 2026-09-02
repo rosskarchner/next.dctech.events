@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw
 
 from calgen.og_image import (
     CARD_WIDTH, CARD_HEIGHT, TITLE_MAX_LINES, TITLE_FONT_SIZES,
-    render_event_card, _wrap_text, _fit_title, _font,
+    render_event_card, _wrap_text, _fit_title, _font, _truncate_to_width,
 )
 
 
@@ -64,6 +64,37 @@ def test_no_category_omits_the_category_and_its_separator():
     with_category = render_event_card('Event', 'Monday, January 1, 2026', 'AI')
     without_category = render_event_card('Event', 'Monday, January 1, 2026', None)
     assert with_category.tobytes() != without_category.tobytes()
+
+
+def test_group_name_changes_the_rendered_card():
+    # Same reasoning as the no-category test above: no way to read the
+    # label row's text back out of a raster image, so this confirms the
+    # group_name arg actually affects rendering rather than being ignored.
+    without_group = render_event_card('Event', 'Monday, January 1, 2026', 'AI', group_name=None)
+    with_group = render_event_card('Event', 'Monday, January 1, 2026', 'AI', group_name='DC Rust')
+    assert with_group.tobytes() != without_group.tobytes()
+
+
+def test_a_pathologically_long_group_name_is_truncated_to_the_available_width():
+    draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    font = _font(30)
+    max_width = 400
+    huge = 'The Extremely Long Winded Washington DC Metropolitan Area Networking Collective'
+    truncated = _truncate_to_width(draw, huge, font, max_width)
+    assert truncated.endswith('…')
+    assert draw.textbbox((0, 0), truncated, font=font)[2] <= max_width
+
+
+def test_truncate_to_width_returns_text_unchanged_when_it_already_fits():
+    draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    font = _font(30)
+    assert _truncate_to_width(draw, 'DC Rust', font, 1000) == 'DC Rust'
+
+
+def test_rendering_never_raises_with_a_group_name_present():
+    card = render_event_card(
+        'Event', 'Monday, January 1, 2026', 'AI', group_name='DC/PY 🦀')
+    assert card.size == (CARD_WIDTH, CARD_HEIGHT)
 
 
 def test_wrap_text_never_splits_a_single_word():

@@ -63,15 +63,16 @@ def pipeline(site_dir):
 
 
 _OG_PREVIEW_SAMPLES = [
-    ('DC Python', 'Monday, September 15, 2026', 'Programming'),
-    ('AI/ML Meetup: LLMs & Vector DBs', 'Wednesday, September 10, 2026', 'AI'),
-    ('Networking Happy Hour', 'Friday, September 5, 2026', None),
+    ('DC Python', 'Monday, September 15, 2026', 'Programming', 'DC Python'),
+    ('AI/ML Meetup: LLMs & Vector DBs', 'Wednesday, September 10, 2026', 'AI', 'Data Community DC'),
+    ('Networking Happy Hour', 'Friday, September 5, 2026', None, None),
     ('Precision Raster Data for Scanning Tunneling Microscopes',
-     'Thursday, August 27, 2026', 'Hardware'),
+     'Thursday, August 27, 2026', 'Hardware', 'DC Hardware Hackers'),
     ('The Annual Washington DC Metropolitan Area Comprehensive Deep Dive '
      'Workshop on Advanced Distributed Systems Architecture, Kubernetes '
      'Orchestration Patterns, and Cloud-Native Best Practices for '
-     'Enterprise Teams', 'Saturday, October 3, 2026', 'Cloud'),
+     'Enterprise Teams', 'Saturday, October 3, 2026', 'Cloud',
+     'Cloud Native DC'),
 ]
 
 
@@ -81,9 +82,10 @@ _OG_PREVIEW_SAMPLES = [
               show_default=True, help='Pre-formatted date string')
 @click.option('--category', default=None, help='Category display name (omit for none)')
 @click.option('--site-name', default='DC Tech Events', show_default=True)
+@click.option('--group', 'group_name', default=None, help='Organizing group name (omit for none)')
 @click.option('--out', default='og-preview.png', show_default=True, type=click.Path(),
               help='Where to write the PNG')
-def og_preview(title, date_display, category, site_name, out):
+def og_preview(title, date_display, category, site_name, group_name, out):
     """Render one social share card, or a sample grid, with no site data.
 
     No --site-dir, no _data/all_events.json, no DynamoDB export — the point
@@ -98,12 +100,12 @@ def og_preview(title, date_display, category, site_name, out):
     from PIL import Image
 
     if title is not None:
-        render_event_card(title, date_display, category, site_name).save(out)
+        render_event_card(title, date_display, category, site_name, group_name).save(out)
         click.echo(f"Wrote {out}")
         return
 
     cards = [
-        render_event_card(t, d, c, site_name) for t, d, c in _OG_PREVIEW_SAMPLES
+        render_event_card(t, d, c, site_name, g) for t, d, c, g in _OG_PREVIEW_SAMPLES
     ]
     cols = 2
     rows = -(-len(cards) // cols)  # ceil
@@ -155,6 +157,7 @@ def og_images(site_dir):
             _format_event_date(event),
             category_name,
             site_name,
+            group_name=event.get('group'),
         )
         card.save(os.path.join(out_dir, f'{slug}.png'))
 

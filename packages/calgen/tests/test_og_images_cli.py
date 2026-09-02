@@ -69,6 +69,30 @@ def test_an_event_with_no_categories_does_not_error(tmp_path):
     assert (tmp_path / 'static' / 'og' / f"{event_slug(events[0])}.png").exists()
 
 
+def test_passes_the_events_group_through_to_the_card(tmp_path, monkeypatch):
+    events = [{
+        'title': 'Intro to Rust', 'date': '2026-09-01', 'time': '18:00',
+        'guid': 'eee555', 'group': 'DC Rust',
+    }]
+    _write_site(tmp_path, events)
+
+    calls = []
+    import calgen.cli as cli_module
+
+    def fake_render(*args, **kwargs):
+        calls.append(kwargs)
+        return Image.new('RGB', (1200, 630))
+
+    # og-images imports render_event_card into its own function body at call
+    # time (`from calgen.og_image import render_event_card`), so patching
+    # the source module — not calgen.cli — is what actually takes effect.
+    monkeypatch.setattr('calgen.og_image.render_event_card', fake_render)
+
+    result = CliRunner().invoke(cli_module.cli, ['og-images', '--site-dir', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert calls and calls[0]['group_name'] == 'DC Rust'
+
+
 def test_missing_all_events_json_errors_instead_of_crashing(tmp_path):
     (tmp_path / 'config.yaml').write_text("site_name: Test Events\n")
     result = CliRunner().invoke(cli, ['og-images', '--site-dir', str(tmp_path)])

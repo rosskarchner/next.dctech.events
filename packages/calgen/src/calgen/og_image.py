@@ -7,14 +7,26 @@ directly against sample data and writes a PNG you can open immediately, and
 this module's own `__main__` block, which does the same without even
 needing calgen installed as a console script.
 
-Uses PIL.ImageFont.load_default(size=...) rather than a bundled or
-system-installed TTF: that embedded font (Pillow >=10.1) renders identically
-in local dev and in the CodeBuild environment that actually runs
-`calgen og-images` in production, with zero font-file asset management. It
-is a single regular weight — the card's visual hierarchy comes from size
-alone, not weight, which is why title/meta font sizes are pushed further
-apart than a bold/regular pairing would need.
+Title/date/category text uses PIL.ImageFont.load_default(size=...) rather
+than a bundled or system-installed TTF: that embedded font (Pillow >=10.1)
+renders identically in local dev and in the CodeBuild environment that
+actually runs `calgen og-images` in production, with zero font-file asset
+management, and covers arbitrary event-submitted text (unicode, emoji)
+that a small decorative font can't be relied on for. It is a single regular
+weight — the card's visual hierarchy comes from size alone, not weight,
+which is why title/meta font sizes are pushed further apart than a
+bold/regular pairing would need.
+
+The site-name label is the one exception: it's fixed, short, plain-ASCII
+config text (not event-submitted), so it renders in the same Kenney Mini
+pixel font as the real site's logo (site/static/css/main.css's .logo) for
+brand consistency — bundled as fonts/kenney-mini.ttf, converted from
+site/static/kenney-mini/kenney-mini.woff2 (Pillow can't load woff2
+directly) via `fontTools.ttLib.TTFont(...).save()` with flavor=None. Kenney
+fonts are CC0 (kenney.nl).
 """
+import os
+
 from PIL import Image, ImageDraw, ImageFont
 
 CARD_WIDTH = 1200
@@ -35,9 +47,15 @@ TITLE_LINE_SPACING = 1.15
 LABEL_FONT_SIZE = 30
 META_FONT_SIZE = 34
 
+_LABEL_FONT_PATH = os.path.join(os.path.dirname(__file__), 'fonts', 'kenney-mini.ttf')
+
 
 def _font(size):
     return ImageFont.load_default(size=size)
+
+
+def _label_font(size):
+    return ImageFont.truetype(_LABEL_FONT_PATH, size)
 
 
 def _wrap_text(draw, text, font, max_width):
@@ -57,6 +75,16 @@ def _wrap_text(draw, text, font, max_width):
             current = word
     lines.append(current)
     return lines
+
+
+def _truncate_to_width(draw, text, font, max_width):
+    """Truncate text from the end, with an ellipsis, until it fits max_width.
+    Text that already fits is returned unchanged."""
+    if draw.textbbox((0, 0), text, font=font)[2] <= max_width:
+        return text
+    while text and draw.textbbox((0, 0), text + '…', font=font)[2] > max_width:
+        text = text[:-1]
+    return text.rstrip() + '…'
 
 
 def _fit_title(draw, title, max_width):
@@ -79,7 +107,8 @@ def _fit_title(draw, title, max_width):
     return font, lines
 
 
-def render_event_card(title, date_display, category_name=None, site_name='Tech Events'):
+def render_event_card(title, date_display, category_name=None, site_name='Tech Events',
+                       group_name=None):
     """Render one 1200x630 social share card.
 
     title: the event's own title, wrapped/shrunk to fit.
@@ -88,6 +117,10 @@ def render_event_card(title, date_display, category_name=None, site_name='Tech E
     routes/events.py's own _format_event_date already owns that elsewhere.
     category_name: the category's display name (not its slug), or None to
     omit the meta line's category segment entirely.
+    group_name: the organizing group's name, or None to omit it — set in
+    the label row after site_name, in the portable default font (not Kenney
+    Mini: it's event-submitted text, not fixed config text) so it reads as
+    a distinct, secondary element rather than part of the brand mark.
     """
     image = Image.new('RGB', (CARD_WIDTH, CARD_HEIGHT), color=BACKGROUND_COLOR)
     draw = ImageDraw.Draw(image)
@@ -101,9 +134,21 @@ def render_event_card(title, date_display, category_name=None, site_name='Tech E
 
     content_width = CARD_WIDTH - 2 * PADDING
 
-    # Site label, top-left.
-    label_font = _font(LABEL_FONT_SIZE)
-    draw.text((PADDING, PADDING), site_name.upper(), font=label_font, fill=ACCENT_COLOR)
+    # Site label, top-left — same Kenney Mini pixel font as the real site's
+    # logo (site/static/css/main.css's .logo), for brand consistency.
+    label_font = _label_font(LABEL_FONT_SIZE)
+    label_text = site_name.upper()
+    draw.text((PADDING, PADDING), label_text, font=label_font, fill=ACCENT_COLOR)
+
+    # Organizing group, same line, portable font — "DC TECH EVENTS | DC
+    # Rust". textbbox's right edge (computed from the label's own origin)
+    # doubles as the group text's start x.
+    if group_name:
+        label_right = draw.textbbox((PADDING, PADDING), label_text, font=label_font)[2]
+        group_font = _font(LABEL_FONT_SIZE)
+        group_text = _truncate_to_width(
+            draw, f"  |  {group_name}", group_font, CARD_WIDTH - PADDING - label_right)
+        draw.text((label_right, PADDING), group_text, font=group_font, fill=ACCENT_COLOR)
 
     # Title, vertically centered in the space between the label and the
     # meta band rather than pinned to a fixed y — a one-line title and a
@@ -136,5 +181,6 @@ if __name__ == '__main__':
         'Precision Raster Data for Scanning Tunneling Microscopes',
         'Thursday, August 27, 2026',
         'Hardware',
+        group_name='DC Hardware Hackers',
     ).save('preview.png')
     print('Wrote preview.png')
