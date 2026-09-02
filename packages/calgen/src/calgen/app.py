@@ -91,6 +91,7 @@ def _register_routes(app):
             'tagline': cfg.get('tagline', 'Technology conferences and meetups'),
             'base_url': cfg.get('base_url', ''),
             'add_events_link': cfg.get('add_events_link', ''),
+            'add_groups_link': cfg.get('add_groups_link', ''),
             'newsletter_signup_link': cfg.get('newsletter_signup_link', ''),
             'sponsors': _load_sponsors(),
             'categories': get_categories(),
