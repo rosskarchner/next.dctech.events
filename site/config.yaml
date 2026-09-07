@@ -7,6 +7,8 @@ base_url: https://dctech.events
 add_events_link: https://dctech.events/edit/submit-event.html
 add_groups_link: https://dctech.events/edit/submit-group.html
 newsletter_signup_link: https://dctech.events/newsletter/
+edit_home_link: https://dctech.events/edit/index.html
+newsletter_preferences_link: https://dctech.events/edit/preferences.html
 
 # Timezone for event display and processing
 timezone: "US/Eastern"

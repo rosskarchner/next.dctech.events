@@ -93,6 +93,8 @@ def _register_routes(app):
             'add_events_link': cfg.get('add_events_link', ''),
             'add_groups_link': cfg.get('add_groups_link', ''),
             'newsletter_signup_link': cfg.get('newsletter_signup_link', ''),
+            'edit_home_link': cfg.get('edit_home_link', ''),
+            'newsletter_preferences_link': cfg.get('newsletter_preferences_link', ''),
             'sponsors': _load_sponsors(),
             'categories': get_categories(),
             'nav_locations': nav_locations,

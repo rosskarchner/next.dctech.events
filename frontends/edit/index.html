@@ -19,75 +19,99 @@
           <span id="user-info" data-user="name"></span>
           <button class="btn-sign-out" onclick="DctechAuth.logout()">Sign Out</button>
         </span>
-        <span data-auth="logged-out">
-          <button class="btn-sign-out" onclick="DctechAuth.login()">Sign In</button>
-        </span>
       </div>
     </div>
   </nav>
 
   <main class="container">
-    <!-- Logged-out view -->
-    <div data-auth="logged-out">
-      <div class="hero">
-        <h1 id="hero-title">Welcome to DC Tech Events</h1>
-        <p id="hero-subtitle">Submit and manage tech events in the DC area.</p>
-        <button class="btn btn-primary" onclick="DctechAuth.login()">Sign in to get started</button>
+    <div class="hero">
+      <h1 id="hero-title">Welcome to DC Tech Events</h1>
+      <p id="hero-subtitle">Submit and manage tech events in the DC area.</p>
+    </div>
+
+    <div class="action-links" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem;">
+      <a class="card" href="submit-event.html" style="text-decoration: none; color: inherit;">
+        <div class="card-header">Submit an Event</div>
+        <p id="submit-event-desc">Add a new tech event happening in the DC area.</p>
+      </a>
+      <a class="card" href="submit-group.html" style="text-decoration: none; color: inherit;">
+        <div class="card-header">Submit a Group</div>
+        <p id="submit-group-desc">Add a new tech group or organization.</p>
+      </a>
+      <a class="card" href="my-submissions.html" style="text-decoration: none; color: inherit;">
+        <div class="card-header">My Submissions</div>
+        <p>Check the status of something you already sent in.</p>
+      </a>
+    </div>
+
+    <section class="help-section" style="margin-top: 3rem; max-width: 700px;">
+      <h2 style="margin-bottom: 0.5rem;">Spot something wrong with an event?</h2>
+      <p style="color: var(--color-text-muted);">
+        No account needed — corrections go through the same email-a-link flow
+        as submissions.
+      </p>
+
+      <p><strong>1. Find the event's page on this site.</strong>
+      On any listing — the homepage, a category, a week — an event's title
+      links out to the organizer's own site, not here. Look instead for the
+      small magnifying glass right after the title; that's the link to this
+      site's own page for the event.</p>
+      <img src="img/help-permalink-icon.png"
+           alt="An event listing row, with the small magnifying-glass permalink icon circled after the event title"
+           style="max-width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--shadow); margin: 0.75rem 0 1.5rem;">
+
+      <p><strong>2. On the event's page, click "Report an issue with this event."</strong>
+      It's in the links row near the bottom, next to "Email us directly."</p>
+      <img src="img/help-report-issue-link.png"
+           alt="An event page's footer links, including &quot;Report an issue with this event&quot;"
+           style="max-width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--shadow); margin: 0.75rem 0 1.5rem;">
+
+      <p><strong>3. Enter your email and request a correction link.</strong>
+      We use it to send the link and to follow up if we have questions — it's never published.</p>
+      <img src="img/help-correction-form.png"
+           alt="The 'Report an issue with this event' form, asking for an email address"
+           style="max-width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--shadow); margin: 0.75rem 0 1.5rem;">
+
+      <p><strong>4. Click the link we email you.</strong>
+      It opens a form pre-filled with the event's current details. Fill in
+      what's wrong and how you know, and a moderator will review it. Prefer
+      email instead? Write to <a href="mailto:ross@karchner.com">ross@karchner.com</a>.</p>
+    </section>
+
+    <div data-auth="admin" class="hidden" style="margin-top: 3rem;">
+      <h2 style="margin-bottom: 1rem; border-top: 1px solid var(--color-border); padding-top: 2rem;">Admin</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem;">
+        <a class="card" href="queue.html" style="text-decoration: none; color: inherit;">
+          <div class="card-header">Moderation Queue</div>
+          <p>Review and approve event and group submissions.</p>
+        </a>
+        <a class="card" href="events.html" style="text-decoration: none; color: inherit;">
+          <div class="card-header">Events &amp; QA</div>
+          <p>Browse the calendar, work the review queue, fix duplicates.</p>
+        </a>
+        <a class="card" href="posts.html" style="text-decoration: none; color: inherit;">
+          <div class="card-header">Updates Posts</div>
+          <p>Write and publish free-form posts for the /updates page.</p>
+        </a>
+        <a class="card" href="subscribers.html" style="text-decoration: none; color: inherit;">
+          <div class="card-header">Newsletter Subscribers</div>
+          <p>View all email addresses subscribed to the newsletter.</p>
+        </a>
       </div>
     </div>
 
-    <!-- Logged-in view -->
-    <div data-auth="logged-in" class="hidden">
-      <div class="page-header">
-        <h1>What would you like to do?</h1>
-      </div>
-
-      <div class="action-links" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
-        <!-- Public Submission Actions -->
-        <a class="card" href="submit-event.html" style="text-decoration: none; color: inherit;">
-          <div class="card-header">Submit an Event</div>
-          <p id="submit-event-desc">Add a new tech event happening in the DC area.</p>
-        </a>
-        <a class="card" href="submit-group.html" style="text-decoration: none; color: inherit;">
-          <div class="card-header">Submit a Group</div>
-          <p id="submit-group-desc">Add a new tech group or organization.</p>
-        </a>
-        <a class="card" href="my-submissions.html" style="text-decoration: none; color: inherit;">
-          <div class="card-header">My Submissions</div>
-          <p>View the status of your submitted events.</p>
-        </a>
-
-        <!-- Admin Actions (Conditional) -->
-        <div data-auth="admin" class="hidden" style="grid-column: 1 / -1;">
-          <h2 style="margin-top: 2rem; margin-bottom: 1rem; border-top: 1px solid var(--color-border); padding-top: 2rem;">Admin</h2>
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem;">
-            <a class="card" href="queue.html" style="text-decoration: none; color: inherit;">
-              <div class="card-header">Moderation Queue</div>
-              <p>Review and approve event and group submissions.</p>
-            </a>
-            <a class="card" href="events.html" style="text-decoration: none; color: inherit;">
-              <div class="card-header">Events &amp; QA</div>
-              <p>Browse the calendar, work the review queue, fix duplicates.</p>
-            </a>
-            <a class="card" href="posts.html" style="text-decoration: none; color: inherit;">
-              <div class="card-header">Updates Posts</div>
-              <p>Write and publish free-form posts for the /updates page.</p>
-            </a>
-            <a class="card" href="subscribers.html" style="text-decoration: none; color: inherit;">
-              <div class="card-header">Newsletter Subscribers</div>
-              <p>View all email addresses subscribed to the newsletter.</p>
-            </a>
-          </div>
-        </div>
-      </div>
+    <div data-auth="logged-out" style="margin-top: 3rem; border-top: 1px solid var(--color-border); padding-top: 1.5rem; text-align: center;">
+      <p style="color: var(--color-text-muted); font-size: 0.9em;">
+        DC Tech Events admin?
+        <a href="#" onclick="DctechAuth.login(); return false;">Sign in</a>.
+      </p>
     </div>
   </main>
 
   <style>
-    /* Merge some styles from both */
     .hero {
       text-align: center;
-      padding: 4rem 1rem;
+      padding: 3rem 1rem;
     }
     .hero h1 {
       font-size: 2.5rem;
@@ -96,13 +120,16 @@
     .hero p {
       font-size: 1.25rem;
       color: var(--color-text-muted);
-      margin-bottom: 2rem;
+      margin-bottom: 0;
     }
     .action-links .card:hover {
       border-color: var(--color-primary);
       box-shadow: var(--shadow-md);
       transform: translateY(-2px);
       transition: all 0.2s ease;
+    }
+    .help-section p {
+      line-height: 1.6;
     }
   </style>
 
@@ -111,7 +138,7 @@
     function updateSiteBranding() {
       const host = window.location.hostname;
       const onStemSite = host === 'dc.localstem.events' || host === 'www.dc.localstem.events';
-      
+
       if (onStemSite) {
         document.getElementById('page-title').textContent = 'Edit - DC STEM Events';
         document.getElementById('nav-brand').textContent = 'DC STEM Events Edit';
@@ -121,7 +148,7 @@
         document.getElementById('submit-group-desc').textContent = 'Add a new STEM group or organization.';
       }
     }
-    
+
     // Update on page load
     document.addEventListener('DOMContentLoaded', updateSiteBranding);
   </script>
