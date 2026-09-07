@@ -146,7 +146,15 @@ class NextNewsletterStack(cdk.Stack):
             code=lambda_.Code.from_asset(os.path.join(BUILD_DIR, "newsletter")),
             timeout=cdk.Duration.minutes(15),
             memory_size=2048,
-            environment=newsletter_env,
+            environment={
+                **newsletter_env,
+                # Unlike the signup app's own confirm links, the prefs
+                # link this function's magic_link.build_link() embeds
+                # points at /edit/preferences.html on the public site
+                # root, not anything under /newsletter -- reusing
+                # newsletter_env's BASE_URL here 404s the emailed link.
+                "BASE_URL": config.BASE_URL,
+            },
             log_group=logs.LogGroup(
                 self,
                 "NextNewsletterSenderLogGroup",
@@ -216,7 +224,16 @@ class NextNewsletterStack(cdk.Stack):
             )
             fn.add_to_role_policy(
                 iam.PolicyStatement(
+                    # SendTemplatedEmail with ListManagementOptions (used to
+                    # attach a contact list for unsubscribe tracking) checks
+                    # IAM on the contact-list ARN in addition to the identity
+                    # ARN above -- Send* has to be granted here too, or SES
+                    # AccessDenies every send that carries ListManagementOptions
+                    # (next-dctech-events: broke the 2026-09-07 newsletter run,
+                    # 0/67 sent, after the grants here were scoped down from "*").
                     actions=[
+                        "ses:SendEmail",
+                        "ses:SendTemplatedEmail",
                         "ses:CreateContact",
                         "ses:GetContact",
                         "ses:UpdateContact",
@@ -226,6 +243,31 @@ class NextNewsletterStack(cdk.Stack):
                     resources=[
                         f"arn:aws:ses:{config.REGION}:{config.ACCOUNT}:"
                         f"contact-list/{config.NEWSLETTER_CONTACT_LIST}"
+                    ],
+                )
+            )
+            fn.add_to_role_policy(
+                iam.PolicyStatement(
+                    # SendTemplatedEmail also checks IAM on the template
+                    # ARN itself, separately from the identity and
+                    # contact-list ARNs above -- SES authorizes every
+                    # resource named in the call, not just one of them.
+                    actions=["ses:SendTemplatedEmail"],
+                    resources=[
+                        f"arn:aws:ses:{config.REGION}:{config.ACCOUNT}:"
+                        f"template/{config.NEWSLETTER_TEMPLATE}"
+                    ],
+                )
+            )
+            fn.add_to_role_policy(
+                iam.PolicyStatement(
+                    # ...and again on the configuration-set ARN (sender.py
+                    # passes ConfigurationSetName=config.PREFIX) -- same
+                    # per-resource IAM check, fourth resource in the call.
+                    actions=["ses:SendTemplatedEmail"],
+                    resources=[
+                        f"arn:aws:ses:{config.REGION}:{config.ACCOUNT}:"
+                        f"configuration-set/{config.PREFIX}"
                     ],
                 )
             )

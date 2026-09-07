@@ -27,6 +27,7 @@ PREFIX = "dctech-events-next"  # resource-name prefix for all new resources
 # Newsletter. Uses the long-standing SES contact list and topic so existing
 # subscribers carry over; only the template and configuration set are ours.
 NEWSLETTER_CONTACT_LIST = "newsletters"
+NEWSLETTER_TEMPLATE = "dctech-events-next-newsletter"
 NEWSLETTER_TOPIC = "dctech"
 NEWSLETTER_FROM_EMAIL = "newsletter@dctech.events"
 NEWSLETTER_ADMIN_EMAIL = "ross@karchner.com"
