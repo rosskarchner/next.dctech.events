@@ -6,6 +6,7 @@ from flask import render_template
 
 from calgen.location_utils import extract_location_info
 from calgen.site_config import get_config
+from calgen.event_utils import has_specific_time
 from calgen.routes.common import get_categories, get_event_by_slug, _generate_ical_feed
 
 
@@ -20,7 +21,7 @@ def _format_event_time(event):
     raw = event.get('time', '')
     if isinstance(raw, dict):
         raw = raw.get(event.get('date', ''), '')
-    if not (raw and isinstance(raw, str) and ':' in raw):
+    if not has_specific_time(raw):
         return ''
     try:
         return datetime.strptime(raw.strip(), '%H:%M').time().strftime('%-I:%M %p').lower()

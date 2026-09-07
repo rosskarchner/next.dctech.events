@@ -37,7 +37,7 @@ from icalendar import Calendar, Event as ICalEvent
 
 from calgen.added_at import group_by_added_date
 from calgen.archive import get_archived_events, get_archived_weeks
-from calgen.event_utils import calculate_event_hash, event_slug
+from calgen.event_utils import calculate_event_hash, event_slug, has_specific_time
 from calgen.location_utils import extract_location_info
 from calgen.site_config import get_config
 
@@ -514,7 +514,7 @@ def prepare_events_by_day(events, add_week_links=False, window_end=None):
             original_time = event.get('time', '')
             if isinstance(original_time, dict):
                 original_time = original_time.get(day_key, '')
-            if original_time and isinstance(original_time, str) and ':' in original_time:
+            if has_specific_time(original_time):
                 try:
                     time_obj = datetime.strptime(original_time.strip(), '%H:%M').time()
                     time_key = time_obj.strftime('%H:%M')
@@ -592,7 +592,7 @@ def _generate_ical_feed(filtered_events, calendar_name, calendar_description):
             continue
 
         event_time_str = event.get('time', '')
-        is_all_day = not (event_time_str and isinstance(event_time_str, str) and ':' in event_time_str)
+        is_all_day = not has_specific_time(event_time_str)
 
         if is_all_day:
             event_datetime = event_date

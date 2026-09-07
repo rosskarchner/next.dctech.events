@@ -21,6 +21,18 @@ def _normalize_title(s: str) -> str:
     return re.sub(r'\s+', ' ', cleaned).strip()
 
 
+def has_specific_time(raw):
+    """True if `raw` names an actual time of day, not calgen's all-day sentinel.
+
+    db.py's put_event/update_event/etc. all fall back to storing the literal
+    string '00:00' for events with no time (so GSI1SK/GSI5SK sort keys always
+    have a TIME# component) — see cdk_next/lambda_src/api/db.py. Every display
+    path that parses `event['time']` as a clock time must treat '00:00' the
+    same as '' or missing, or an all-day event renders as "12:00 am".
+    """
+    return bool(raw) and isinstance(raw, str) and ':' in raw and raw.strip() != '00:00'
+
+
 def calculate_event_hash(date, time, title, url=None):
     uid_parts = [date, time, title]
     if url:
