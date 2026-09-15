@@ -45,6 +45,11 @@ RUNTIME_NAME = "dctechEventsCalendarQc"
 TRIAGE_MODEL = "us.amazon.nova-2-lite-v1:0"
 POLISH_MODEL = "us.anthropic.claude-sonnet-5"
 
+# Polish is off as of 2026-09-15: a heavy-backlog week (46 events, 33 browser
+# page-reads) cost $12 in one run. Flip back to "true" once that's budgeted
+# for — see the agent's QC_ENABLE_POLISH.
+ENABLE_POLISH = "false"
+
 
 class NextQaAgentStack(cdk.Stack):
     def __init__(
@@ -197,6 +202,7 @@ class NextQaAgentStack(cdk.Stack):
                 "DCTECH_MCP_URL": mcp_url,
                 "QC_TRIAGE_MODEL": TRIAGE_MODEL,
                 "QC_POLISH_MODEL": POLISH_MODEL,
+                "QC_ENABLE_POLISH": ENABLE_POLISH,
                 "SEARCH_SECRET_ARN": search_secret.secret_arn,
                 "ADMIN_EMAIL": config.NEWSLETTER_ADMIN_EMAIL,
                 "FROM_EMAIL": config.NEWSLETTER_FROM_EMAIL,

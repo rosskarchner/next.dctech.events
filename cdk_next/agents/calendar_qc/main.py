@@ -63,6 +63,12 @@ MAX_TOKENS = int(os.environ.get('QC_MAX_TOKENS', '16000'))
 QC_TOOL_CALLS_PER_EVENT = int(os.environ.get('QC_TOOL_CALLS_PER_EVENT', '5'))
 QC_MIN_TOOL_CALLS = int(os.environ.get('QC_MIN_TOOL_CALLS', '40'))
 
+# Off switch for pass 2. Polish is the expensive half of a run — it's the
+# strong model plus the browser tool reading real event pages — and a heavy
+# backlog week can run it up past $10 (see next_dctech_events cost review,
+# 2026-09-15). Default on; set false from the stack to run triage only.
+QC_ENABLE_POLISH = os.environ.get('QC_ENABLE_POLISH', 'true').lower() not in ('false', '0', '')
+
 # Tools that change something. Withheld entirely in dry-run mode — the agent
 # can then physically not write, which is a stronger guarantee than asking it
 # not to.
@@ -350,7 +356,10 @@ def run_qc(dry_run=False, limit=None, run_id=None, own_rebuild=True):
         removed = _removed_guids(audit('triage-audit'), triage_claims)
         survivors = [g for g in guids if g not in removed]
         polish_claims = {}
-        if survivors:
+        if survivors and not QC_ENABLE_POLISH:
+            print(f'run {run_id}: polish disabled (QC_ENABLE_POLISH=false), '
+                  f'skipping {len(survivors)} survivors')
+        elif survivors:
             print(f'run {run_id}: polishing {len(survivors)} of {len(guids)} '
                   f'({len(removed)} removed by triage)')
             polish = _build_agent(
