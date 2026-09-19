@@ -9,22 +9,32 @@ was already running, so the collisions were not harmless:
 * QC writes overlays onto EVENT# items, which is a rebuild trigger. Landing
   those writes inside the 09:00 scheduled build meant the trigger skipped, and
   nothing queued another build. (The trigger no longer skips — see
-  next_dctech_events-lux — but the ordering below is still what makes the
-  week-ahead post count a clean calendar.)
+  next_dctech_events-lux.)
 * The week-ahead post freezes a count read from the published events.json. If
-  no build had run since QC, that count included the events QC had just
-  hidden.
+  no build had run since QC, that count included events QC had just hidden.
 
-The order actually required is a chain, and a chain is what a state machine
+QC used to be a synchronous step in this chain (RunQualityControl, waiting on
+a Step Functions task token the AgentCore agent released itself) specifically
+so the week-ahead count was always taken after QC's fixes landed. As of
+2026-09-19 QC runs as a Claude Scheduled Task, nightly, independent of this
+chain — see the retired NextQaAgentStack and NEXT_MCP_AGENT_MIGRATION.md. A
+cron-based, pull-only scheduled task has no way to receive a task token and
+signal completion back synchronously, so that guarantee is now approximate
+instead of exact: nightly QC means at most one night's worth of newly
+imported events can be uncorrected when this chain freezes Monday's count,
+rather than a whole week's, which was judged an acceptable trade for
+retiring the AgentCore/Bedrock cost surface entirely. Revisit if that
+approximation ever visibly matters (e.g. a bad Sunday-night duplicate making
+it into the week-ahead post).
+
+The remaining order is still a chain, and a chain is what a state machine
 expresses:
 
-    RefreshFeeds        so QC and the post both see the weekend's imports
+    RefreshFeeds        so the post sees the weekend's imports
         │
-    RunQualityControl   waits on a task token the agent releases itself
-        │               (failure is caught: QC is best-effort)
-    BuildSite           events.json now reflects QC's hides
+    BuildSite           events.json reflects the latest nightly QC pass
         │
-    PublishWeekAhead    freezes a count taken from the clean events.json
+    PublishWeekAhead    freezes a count taken from that events.json
         │
     BuildSite           the post is live
         │
@@ -39,7 +49,7 @@ the batch once this machine's build is done.
 
 Referenced by function name rather than by cross-stack import, matching the
 reasoning NextUpdatesStack already applies to the social secrets: this stack
-touches five others, and a CloudFormation dependency on each would mean a
+touches several others, and a CloudFormation dependency on each would mean a
 change to any one of them could not deploy without this one.
 
 The newsletter's own rule survives in NextNewsletterStack, disabled, so
@@ -60,12 +70,6 @@ from constructs import Construct
 
 import config
 
-# A pass over ~30 events with browser lookups runs well past Lambda's ceiling;
-# an hour is generous rather than tight. The point of the timeout is that a
-# crashed agent that never releases its token cannot stall Monday forever —
-# the agent reports its own failures, so this only covers a hard death.
-QC_TIMEOUT = cdk.Duration.hours(1)
-
 # Two site builds, each waited on. A cold build of the whole site takes a
 # couple of minutes; the ceiling is for a wedged one — and for the wait when
 # the project's concurrent_build_limit of 1 has queued this build behind the
@@ -79,9 +83,6 @@ class NextOrchestrationStack(cdk.Stack):
 
         aggregator = lambda_.Function.from_function_name(
             self, "IcalAggregatorRef", f"{config.PREFIX}-ical-aggregator"
-        )
-        qa_trigger = lambda_.Function.from_function_name(
-            self, "QaTriggerRef", f"{config.PREFIX}-qa-trigger"
         )
         updates_publisher = lambda_.Function.from_function_name(
             self, "UpdatesPublisherRef", f"{config.PREFIX}-updates-publisher"
@@ -103,39 +104,14 @@ class NextOrchestrationStack(cdk.Stack):
             comment="Import the weekend's iCal updates before anything reads them",
         )
 
-        run_qc = tasks.LambdaInvoke(
+        build_after_refresh = tasks.CodeBuildStartBuild(
             self,
-            "RunQualityControl",
-            lambda_function=qa_trigger,
-            integration_pattern=sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-            # The trigger forwards this into the agent's payload; the agent
-            # calls SendTaskSuccess when the pass is genuinely over. Releasing
-            # it here would defeat the point.
-            #
-            # This depends on the trigger returning promptly, which it only
-            # does because it abandons the blocking InvokeAgentRuntime response
-            # on a short read timeout. Before that fix the trigger always died
-            # at its own 60s timeout, which this step would have read as a task
-            # failure and caught straight past — skipping QC every Monday while
-            # the agent ran on regardless and released its token into a dead
-            # execution. If the trigger ever goes back to waiting, this breaks
-            # silently in exactly that way.
-            payload=sfn.TaskInput.from_object({
-                "run_id": sfn.JsonPath.string_at("$$.Execution.Name"),
-                "task_token": sfn.JsonPath.task_token,
-            }),
-            task_timeout=sfn.Timeout.duration(QC_TIMEOUT),
-            result_path=sfn.JsonPath.DISCARD,
-        )
-
-        build_after_qc = tasks.CodeBuildStartBuild(
-            self,
-            "BuildSiteAfterQc",
+            "BuildSiteAfterRefresh",
             project=site_generator,
             integration_pattern=sfn.IntegrationPattern.RUN_JOB,
             task_timeout=sfn.Timeout.duration(BUILD_TIMEOUT),
             result_path=sfn.JsonPath.DISCARD,
-            comment="Publish QC's hides so the next step counts the real calendar",
+            comment="Publish the latest feed imports (and nightly QC's fixes) so the next step counts the real calendar",
         )
 
         publish_week_ahead = tasks.LambdaInvoke(
@@ -164,7 +140,7 @@ class NextOrchestrationStack(cdk.Stack):
             payload_response_only=True,
         )
 
-        for step, attempts in ((refresh_feeds, 2), (build_after_qc, 1),
+        for step, attempts in ((refresh_feeds, 2), (build_after_refresh, 1),
                                (publish_week_ahead, 2), (build_after_post, 1),
                                (send_newsletter, 1)):
             step.add_retry(
@@ -175,23 +151,10 @@ class NextOrchestrationStack(cdk.Stack):
                 backoff_rate=2.0,
             )
 
-        # QC is the one step allowed to fail without stopping Monday. It
-        # improves the calendar; it does not produce it. A crashed agent must
-        # not cost the week its post and its newsletter, so both the task
-        # failure the agent reports and the timeout on a hard death fall
-        # through to the build.
-        run_qc.add_catch(
-            build_after_qc,
-            errors=["States.ALL"],
-            result_path=sfn.JsonPath.DISCARD,
-        )
-
         definition = refresh_feeds.next(
-            run_qc.next(
-                build_after_qc.next(
-                    publish_week_ahead.next(
-                        build_after_post.next(send_newsletter)
-                    )
+            build_after_refresh.next(
+                publish_week_ahead.next(
+                    build_after_post.next(send_newsletter)
                 )
             )
         )
@@ -201,9 +164,9 @@ class NextOrchestrationStack(cdk.Stack):
             "NextMondayStateMachine",
             state_machine_name=f"{config.PREFIX}-monday",
             definition_body=sfn.DefinitionBody.from_chainable(definition),
-            # Longer than QC_TIMEOUT plus both builds, so the execution
-            # timeout is a backstop and never the thing that fires first.
-            timeout=cdk.Duration.hours(2),
+            # Longer than both builds combined, so the execution timeout is a
+            # backstop and never the thing that fires first.
+            timeout=cdk.Duration.hours(1),
             logs=sfn.LogOptions(
                 destination=logs.LogGroup(
                     self,
@@ -212,9 +175,7 @@ class NextOrchestrationStack(cdk.Stack):
                     removal_policy=cdk.RemovalPolicy.DESTROY,
                 ),
                 level=sfn.LogLevel.ALL,
-                # The QC step's payload carries a task token. Execution data
-                # is what would put it in CloudWatch.
-                include_execution_data=False,
+                include_execution_data=True,
             ),
             tracing_enabled=True,
         )
@@ -223,21 +184,18 @@ class NextOrchestrationStack(cdk.Stack):
             self,
             "NextMondaySchedule",
             # 09:15 UTC, a quarter hour after the daily site build, so the
-            # machine's first waited-on build is not queued behind it. The
-            # chain then lands the newsletter around 10:00-10:30 UTC, earlier
-            # than the 11:00 it used to go out at, because it no longer has to
-            # leave slack for a QC pass whose finish nothing could observe.
+            # machine's first waited-on build is not queued behind it. QC no
+            # longer runs inside this chain (nightly Scheduled Task instead —
+            # see the module docstring), so the newsletter lands as soon as
+            # both builds and the week-ahead post are done.
             schedule=events.Schedule.expression("cron(15 9 ? * MON *)"),
             targets=[targets.SfnStateMachine(self.state_machine)],
-            description="Monday: refresh feeds, QC, build, week-ahead post, newsletter",
+            description="Monday: refresh feeds, build, week-ahead post, newsletter",
         )
 
         cdk.CfnOutput(
             self,
             "NextMondayStateMachineArn",
             value=self.state_machine.state_machine_arn,
-            description=(
-                "Start an execution to run Monday's chain by hand; the "
-                "execution name becomes the QC run id"
-            ),
+            description="Start an execution to run Monday's chain by hand",
         )
