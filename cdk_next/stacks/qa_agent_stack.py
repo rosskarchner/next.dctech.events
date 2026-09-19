@@ -1,4 +1,16 @@
-"""NextQaAgentStack — the weekly calendar quality-control agent.
+"""NextQaAgentStack — RETIRED, no longer instantiated in app.py.
+
+Superseded 2026-09-19 by a Claude Scheduled Task calling the MCP server
+directly over the bearer-token /mcp-agent route (see api_stack.py's
+McpAgentToken/NextMcpAgentTokenAuthorizer and NEXT_MCP_AGENT_MIGRATION.md
+for the QA/discovery instructions the scheduled task runs). Kept on disk,
+unreferenced, as a record of the prior design; the deployed CloudFormation
+stack still exists and needs an explicit `cdk destroy NextQaAgentStack` to
+actually tear down the AgentCore runtime, its trigger Lambda, and the Tavily
+secret — do that once the scheduled task has been running cleanly for a
+while, not automatically.
+
+Original docstring, describing the retired design:
 
 A Strands agent on Bedrock AgentCore Runtime that makes two passes over each
 week's newly-imported iCal events: one for duplicates and out-of-area listings

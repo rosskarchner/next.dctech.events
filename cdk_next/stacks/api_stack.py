@@ -2,7 +2,9 @@
 
 Mirrors infrastructure/lib/lambda-api-stack.ts route/authorizer layout, minus
 the queue-notification/cleanup Lambdas (not part of this scope). The /mcp
-resource uses an AWS_IAM authorizer (trusted agents/Lambdas only).
+resource uses an AWS_IAM authorizer (trusted agents/Lambdas only); /mcp-agent
+uses a bearer-token authorizer for callers with no AWS credentials to sign
+with, namely Claude Scheduled Tasks — see the comment above that resource.
 """
 import os
 
@@ -15,6 +17,7 @@ from aws_cdk import (
     aws_kms as kms,
     aws_lambda as lambda_,
     aws_logs as logs,
+    aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
 
@@ -331,6 +334,66 @@ class NextApiStack(cdk.Stack):
             any_method=True,
         )
 
+        # /mcp-agent — bearer-token auth for callers with no AWS credentials
+        # to SigV4-sign with, namely Claude Scheduled Tasks (which replaced
+        # the AgentCore-based discovery/QC agents; see NextOrchestrationStack
+        # and the retired NextQaAgentStack). Same Lambda/tool implementations
+        # as /mcp, but handler.py restricts the callable tool set for
+        # requests that arrive through this authorizer — see
+        # SCHEDULED_AGENT_TOOLS in cdk_next/lambda_src/mcp/handler.py.
+        self.mcp_agent_token = secretsmanager.Secret(
+            self,
+            "McpAgentToken",
+            secret_name=f"{config.PREFIX}/mcp-agent-token",
+            description="Bearer token for Claude Scheduled Task access to /mcp-agent",
+            generate_secret_string=secretsmanager.SecretStringGenerator(
+                exclude_punctuation=True,
+                password_length=48,
+            ),
+        )
+
+        self.mcp_agent_authorizer_function = lambda_.Function(
+            self,
+            "NextMcpAgentAuthorizer",
+            function_name=f"{config.PREFIX}-mcp-agent-authorizer",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            architecture=lambda_.Architecture.X86_64,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset(os.path.join(BUILD_DIR, "mcp_agent_authorizer")),
+            timeout=cdk.Duration.seconds(10),
+            memory_size=128,
+            environment={"TOKEN_SECRET_ARN": self.mcp_agent_token.secret_arn},
+            log_group=logs.LogGroup(
+                self,
+                "NextMcpAgentAuthorizerLogGroup",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=cdk.RemovalPolicy.DESTROY,
+            ),
+        )
+        self.mcp_agent_token.grant_read(self.mcp_agent_authorizer_function)
+
+        mcp_agent_authorizer = apigateway.TokenAuthorizer(
+            self,
+            "NextMcpAgentTokenAuthorizer",
+            handler=self.mcp_agent_authorizer_function,
+            identity_source="method.request.header.Authorization",
+            # The token is static and rotated by hand, not per-session, so a
+            # short cache only cuts down on authorizer invocations, not risk.
+            results_cache_ttl=cdk.Duration.minutes(5),
+        )
+        mcp_agent_authed = {
+            "authorizer": mcp_agent_authorizer,
+            "authorization_type": apigateway.AuthorizationType.CUSTOM,
+        }
+
+        mcp_agent_res = api.root.add_resource("mcp-agent")
+        mcp_agent_res.add_method("ANY", mcp_integration, **mcp_agent_authed)
+        mcp_agent_res.add_proxy(
+            default_integration=mcp_integration,
+            default_method_options=apigateway.MethodOptions(**mcp_agent_authed),
+            any_method=True,
+        )
+
         # Cognito authorizer rejections bypass Lambda entirely, so they have no
         # CORS headers by default; without one, the legitimate admin frontend
         # can't even read a 401 to show "please log in" (the request just
@@ -360,12 +423,15 @@ class NextApiStack(cdk.Stack):
 
         self.api = api
         self.api_endpoint = api.url
-        # Consumed by NextQaAgentStack — the QC agent reaches events only
-        # through this endpoint.
         self.mcp_url = f"{api.url}mcp"
+        # The scheduled-agent route — give this URL plus the McpAgentToken
+        # secret's value to a Claude Scheduled Task's MCP connector config.
+        self.mcp_agent_url = f"{api.url}mcp-agent"
 
         cdk.CfnOutput(self, "NextApiEndpoint", value=api.url)
         cdk.CfnOutput(self, "NextMcpUrl", value=self.mcp_url)
+        cdk.CfnOutput(self, "NextMcpAgentUrl", value=self.mcp_agent_url)
+        cdk.CfnOutput(self, "NextMcpAgentTokenSecretArn", value=self.mcp_agent_token.secret_arn)
         # The sole authentication factor for anonymous submission/correction
         # (magic_link.py's SUBMIT_KEY_ID) — surfaced here so the active key
         # is always one `aws cloudformation describe-stacks` away instead of

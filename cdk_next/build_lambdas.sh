@@ -35,6 +35,13 @@ cp lambda_src/api/db.py lambda_src/api/event_utils.py build/mcp/
 rm -rf build/mcp/test_*.py build/mcp/__pycache__
 uv pip install "${UV_ARGS[@]}" --target build/mcp "mcp>=1.9,<2" mangum requests
 
+# ── mcp_agent_authorizer (bearer-token check for /mcp-agent; boto3 only) ──
+if [ -e lambda_src/mcp_agent_authorizer/handler.py ]; then
+  mkdir -p build/mcp_agent_authorizer
+  cp -r lambda_src/mcp_agent_authorizer/. build/mcp_agent_authorizer/
+  rm -rf build/mcp_agent_authorizer/test_*.py build/mcp_agent_authorizer/__pycache__
+fi
+
 # ── ical_aggregator ─────────────────────────────────────────────────
 if [ -d lambda_src/ical_aggregator ] && [ -e lambda_src/ical_aggregator/handler.py ]; then
   mkdir -p build/ical_aggregator

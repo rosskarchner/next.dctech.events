@@ -3,12 +3,13 @@
 Python CDK stack serving **https://dctech.events** (and `www`). Built as a
 parallel stack at `next.dctech.events`, it took over the main domain at
 cutover; the repo keeps its original name. DynamoDB is the hub: the
-submission UI, three
-agents (iCal aggregator, QA, newsletter sender), and the static
-site generator all read/write the `dctech-events-next` table. The discovery
-agent was deleted 2026-09-01 (its infrastructure and source, not the
-`propose_group`/`propose_event`/`CANDIDATE#` intake it fed — that stayed,
-since nothing else calls it but nothing else depends on removing it either).
+submission UI, two in-AWS agents (iCal aggregator, newsletter sender), and the
+static site generator all read/write the `dctech-events-next` table. QA runs
+as a nightly Claude Scheduled Task outside AWS instead of a third in-repo
+agent as of 2026-09-19 (see [NEXT_MCP_AGENT_MIGRATION.md](NEXT_MCP_AGENT_MIGRATION.md)).
+The discovery agent was deleted 2026-09-01 (its infrastructure and source, not
+the `propose_group`/`propose_event`/`CANDIDATE#` intake it fed — that stayed,
+and is now what the nightly Scheduled Task drives instead).
 See
 `next-architecture-plan.md` for the full design and the scope decisions
 behind it.
@@ -34,7 +35,10 @@ being installed from a separate repo, so a single checkout builds everything.
   minus the git-commit hop), MCP server (calgen's tool surface against
   DynamoDB), iCal aggregator (imports `calgen.calendars` unmodified via a
   /tmp adapter), newsletter (port of the live `dctech-newsletter` Chalice
-  app), site-generator export/trigger, QA agent trigger
+  app), site-generator export/trigger; `qa_trigger` and `mcp_agent_authorizer`
+  are the two Lambda sources tied to QA (the former unused now that
+  `NextQaAgentStack` is retired, the latter backing the new `/mcp-agent`
+  bearer-token route)
 - `cdk_next/scripts/` — `migrate_to_next_table.py` (one-time seed, dry-run by
   default) and `setup_ses_next.py` (idempotent SES provisioning)
 - `site/` — calgen site source (config/templates/static/regions.py); the
@@ -88,6 +92,14 @@ MCP clients do not sign requests, so `scripts/mcp_sigv4_bridge.py` bridges
 stdio to the signed endpoint using your ordinary AWS credentials. `.mcp.json`
 wires it up, so a client started in this repo picks it up automatically.
 
+A second route, `/mcp-agent`, exists for callers with no AWS credentials to
+sign with — namely the Claude Scheduled Task that runs nightly QA/discovery
+(see [NEXT_MCP_AGENT_MIGRATION.md](NEXT_MCP_AGENT_MIGRATION.md)). It's gated
+by a bearer token (`McpAgentToken` in Secrets Manager) instead of IAM, and
+`cdk_next/lambda_src/mcp/handler.py`'s `SCHEDULED_AGENT_TOOLS` restricts it to
+a safe, non-destructive subset of the tools below — no deletes, no trust
+changes, no `trigger_rebuild`.
+
 Verify it by hand with:
 
 ```bash
@@ -120,9 +132,7 @@ whole Monday chain in order, started by a single rule at **09:15 UTC**:
 ```
 RefreshFeeds        iCal aggregator — the weekend's imports land first
       |
-RunQualityControl   the QC agent; the execution waits on a task token the
-      |             agent releases itself when the pass is really done
-BuildSite           .sync — events.json now reflects QC's hides
+BuildSite           .sync — events.json reflects the latest nightly QC pass
       |
 PublishWeekAhead    the link post, counting the clean calendar
       |
@@ -132,23 +142,25 @@ SendNewsletter      last, so it never links a post that is not up yet
 ```
 
 Before this, Monday was four rules ordered only by wall clock, and the site
-build trigger *drops* work when a build is already running. Two real
-consequences: QC's overlay writes (which land on `EVENT#` items, so they *are*
-a rebuild trigger) were skipped when they collided with the 09:00 scheduled
-build, and the week-ahead post froze a count read from an `events.json` that
-predated QC — so it counted events QC had just hidden.
+build trigger *drops* work when a build is already running. QC's overlay
+writes (which land on `EVENT#` items, so they *are* a rebuild trigger) were
+skipped when they collided with the 09:00 scheduled build.
 
 `codebuild:startBuild.sync` is the load-bearing piece: it waits for the build.
 The project now also carries `concurrent_build_limit=1`, so overlapping builds
 queue instead of running two `s3 sync --delete` passes over one bucket.
 
-**QC is allowed to fail.** It improves the calendar; it does not produce it. A
-`States.ALL` catch on that step falls through to the build, so a crashed agent
-costs the week its QC pass and nothing else. The 1-hour task timeout covers a
-hard death that never reports at all.
+QC used to be a synchronous step here (`RunQualityControl`, waiting on a
+task token the AgentCore agent released itself), specifically so the
+week-ahead count was always taken after QC's fixes landed. As of 2026-09-19 QC
+runs as a nightly Claude Scheduled Task, independent of this chain — see
+[NEXT_MCP_AGENT_MIGRATION.md](NEXT_MCP_AGENT_MIGRATION.md). A cron-based,
+pull-only scheduled task can't receive a task token and signal back
+synchronously, so the guarantee is now approximate (at most one night's worth
+of events can be uncorrected when Monday's count freezes) rather than exact —
+judged an acceptable trade for retiring the AgentCore/Bedrock cost surface.
 
-Run it by hand — the execution name becomes the QC run id, which is what the
-digest prints for `revert_qa_run`:
+Run it by hand:
 
 ```bash
 aws stepfunctions start-execution \
@@ -164,56 +176,29 @@ Rules that used to do this and no longer fire: `CalendarQcSchedule` and
 removed. The daily 09:00 site build stays as the safety net for other days, and
 the Wednesday roundup keeps its own rule — nothing has to happen before it.
 
-## The calendar QC agent
+## The calendar QC agent (retired) → nightly Claude Scheduled Task
 
-`dctechEventsCalendarQc` (`cdk_next/agents/calendar_qc/`) is a Strands agent on
-Bedrock AgentCore Runtime, run as the second step of the Monday state machine.
-AgentCore rather than Lambda because a pass runs well past the 15-minute
-ceiling and it needs the managed Browser tool.
+`dctechEventsCalendarQc` (`cdk_next/agents/calendar_qc/`) was a Strands agent
+on Bedrock AgentCore Runtime, run as a synchronous step of the Monday state
+machine. It made two passes — **triage** (duplicates/out-of-area removals,
+deliberately reluctant) and **polish** (title/location/category corrections
+against the event's own page, deliberately less reluctant) — writing
+everything as *overlays* via `set_overlay`, stamped with a run id
+`revert_qa_run` could undo in one call.
 
-It makes **two passes**, deliberately separate:
+As of 2026-09-19 this is retired (`NextQaAgentStack` is no longer deployed by
+`app.py`; the CloudFormation stack itself still needs an explicit
+`cdk destroy NextQaAgentStack` once its replacement has proven out) in favor
+of a **nightly Claude Scheduled Task** calling the MCP server directly over
+the bearer-token `/mcp-agent` route — no Bedrock/AgentCore inference cost, and
+nightly batches instead of one weekly batch (the thing that made a
+heavy-backlog week cost $12 and got the polish pass disabled in the first
+place). See [NEXT_MCP_AGENT_MIGRATION.md](NEXT_MCP_AGENT_MIGRATION.md) for the
+task's actual instructions, tool scope, and setup steps.
 
-1. **Triage** — duplicates and out-of-area listings. Both *remove* an event, so
-   the prompt is built around reluctance: "skipping is always a valid answer,"
-   because a false positive costs a reader the listing they came for.
-2. **Polish** — titles, locations and categories that disagree with the event's
-   own page, on whatever triage did not remove. A correction leaves the event on
-   the calendar, so the bar is lower and hesitancy is not a virtue.
-
-One prompt cannot hold both instincts without blunting one, which is why
-`TRIAGE_PROMPT` and `POLISH_PROMPT` carry their own tool sets, writable fields
-and judgement sections, and only the site description, scope and page-reading
-mechanics are shared.
-
-Everything is written as *overlays* — per-event overrides merged in at render
-time. The feed value stays underneath, so nothing is destructive, and every
-write is stamped with the run id that `revert_qa_run` undoes in one call.
-
-**Tavily** (`tavily_extract`, `tavily_search`) sits in front of the browser as
-the cheaper first try, using its own secret owned by `NextQaAgentStack`
-(`{prefix}/qa/tavily` — until 2026-09-01 this referenced the discovery
-agent's key by name; deleting that stack force-deleted the secret along with
-it, so the QC agent now owns a fresh one directly). Extract reads the event
-page; search resolves a venue the page only names. The browser stays as the fallback,
-because Meetup and Eventbrite are what it was added for.
-
-The polish pass is a **revival**, and worth watching. It was built once on a
-cheaper model with only the browser, and dropped after producing zero overlays
-across four runs. Two things changed: it now runs on the same Sonnet 5 as
-triage, and it reads the canonical page instead of inferring from a title. If
-it still produces nothing, cut it again:
-
-```bash
-aws lambda invoke --function-name dctech-events-next-qa-trigger \
-  --cli-binary-format raw-in-base64-out \
-  --payload '{"dry_run":true,"limit":10}' /dev/stdout
-```
-
-`dry_run` withholds every write tool, so the agent can physically not write —
-a stronger guarantee than asking it not to. The digest is printed instead of
-emailed. Corrections show up under **Details corrected**; anything landing in
-**Other overlay fields written** is a field neither pass is supposed to touch
-and wants looking at.
+`cdk_next/agents/calendar_qc/` is kept on disk, unreferenced, as a record of
+the retired design and a source of the original triage/polish judgement
+criteria the new instructions are ported from.
 
 ## The /updates posts
 
