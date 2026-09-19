@@ -45,16 +45,33 @@ bearer-token `/mcp-agent` MCP route instead of the IAM-only `/mcp` route.
    Use Sonnet 5 as the model — Nova 2 Lite's triage trial was tied to the
    Strands/AgentCore setup and doesn't carry over here.
 
-Verify the route by hand before wiring it into a Scheduled Task:
+Verify the route by hand before wiring it into a Scheduled Task. Unlike the
+`/mcp` example above, there's no bridge script doing the work here, so do it
+directly: **one POST per JSON-RPC message** (the server is stateless — see
+`handler.py`'s docstring — and does not accept several messages batched into
+one body), each with `Accept: application/json, text/event-stream` (the
+server 406s without it):
 
 ```bash
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  | curl -s -X POST "$MCP_AGENT_URL" \
-      -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-      --data-binary @-
+send() {
+  curl -s -X POST "$MCP_AGENT_URL" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    --data-binary "$1"
+  echo
+}
+send '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+send '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+send '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
+
+The `tools/list` reply should show only the `SCHEDULED_AGENT_TOOLS` subset.
+To confirm the deny path, try a disallowed tool and expect the `-32001`
+rejection from `handler.py` (not the MCP server itself):
+
+```bash
+send '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"delete_single_event","arguments":{"guid":"x"}}}'
 ```
 
 ## Guardrail: cap the batch size at the tool call, not the prompt
