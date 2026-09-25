@@ -27,10 +27,25 @@ function handler(event) {
   // If URI ends with '/', append 'index.html'
   if (uri.endsWith('/')) {
     request.uri += 'index.html';
+    return request;
   }
-  // If URI has no extension, append '/index.html'
-  else if (!uri.includes('.')) {
-    request.uri += '/index.html';
+
+  // Extensionless, no trailing slash (e.g. "/edit"): 301 to "/edit/" rather
+  // than silently serving "/edit/index.html" in place. Serving in place
+  // leaves the browser's address bar at "/edit", so every *relative* link
+  // on that page (subscribers.html, queue.html, ...) resolves one directory
+  // level too high — dctech.events/edit/subscribers.html becomes
+  // dctech.events/subscribers.html and 404s. Confirmed live 2026-09-25.
+  if (!uri.includes('.')) {
+    var qs = '';
+    for (var key in request.querystring) {
+      qs += (qs ? '&' : '?') + key + '=' + request.querystring[key].value;
+    }
+    return {
+      statusCode: 301,
+      statusDescription: 'Moved Permanently',
+      headers: { location: { value: uri + '/' + qs } }
+    };
   }
 
   return request;
@@ -104,6 +119,12 @@ class NextHostingStack(cdk.Stack):
             certificate=self.certificate,
             http_version=cloudfront.HttpVersion.HTTP2_AND_3,
             enable_ipv6=True,
+            # No explicit price_class: this distribution is enrolled in the
+            # CloudFront Security Savings Bundle ("Free" pricing plan per its
+            # own error message), which rejects any Price Class setting —
+            # confirmed via a failed deploy attempt 2026-09-24. The bundle's
+            # committed pricing already covers this, so there's nothing to
+            # tune here.
             minimum_protocol_version=cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
             # AWS auto-provisions this WebACL (name: CreatedByCloudFront-*)
             # for accounts enrolled in the CloudFront Security Savings
