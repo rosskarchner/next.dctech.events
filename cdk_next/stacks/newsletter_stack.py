@@ -145,7 +145,10 @@ class NextNewsletterStack(cdk.Stack):
             handler="sender.lambda_handler",
             code=lambda_.Code.from_asset(os.path.join(BUILD_DIR, "newsletter")),
             timeout=cdk.Duration.minutes(15),
-            memory_size=2048,
+            # Last measured run: 153 MB max used at 60-ish subscribers
+            # (CloudWatch REPORT line) — 512 MB keeps ~3x headroom without
+            # paying for the 2048 MB this was originally set to.
+            memory_size=512,
             environment={
                 **newsletter_env,
                 # Unlike the signup app's own confirm links, the prefs
