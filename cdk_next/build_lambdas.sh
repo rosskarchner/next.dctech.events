@@ -92,6 +92,32 @@ if [ -e lambda_src/social_publisher/app.py ]; then
   rm -rf build/social_publisher/test_*.py build/social_publisher/__pycache__
 fi
 
+# ── social_queue_enqueue (queues newly INSERTed EVENT# rows; boto3 only) ──
+if [ -e lambda_src/social_queue_enqueue/handler.py ]; then
+  mkdir -p build/social_queue_enqueue
+  cp -r lambda_src/social_queue_enqueue/. build/social_queue_enqueue/
+  rm -rf build/social_queue_enqueue/test_*.py build/social_queue_enqueue/__pycache__
+fi
+
+# ── social_queue_worker (posts one queued new-event announcement/hour) ──
+if [ -e lambda_src/social_queue_worker/app.py ]; then
+  mkdir -p build/social_queue_worker
+  cp -r lambda_src/social_queue_worker/. build/social_queue_worker/
+  rm -rf build/social_queue_worker/test_*.py build/social_queue_worker/__pycache__
+  # networks.py: the same stdlib-only Mastodon/Bluesky HTTP clients
+  # social_publisher uses, copied rather than duplicated so there is one
+  # place that knows how to talk to either API.
+  cp lambda_src/social_publisher/networks.py build/social_queue_worker/
+  # event_utils.py comes from packages/calgen, NOT lambda_src/api: the api
+  # Lambdas' own event_utils.py is a stripped-down stub with only
+  # calculate_event_hash. calgen's version (slugify/event_slug/
+  # has_specific_time, stdlib-only) is the single source of truth calgen
+  # itself uses for /events/{slug}/ permalinks — copying it exactly avoids
+  # a hand-built link drifting from what the site actually serves.
+  cp ../packages/calgen/src/calgen/event_utils.py build/social_queue_worker/
+  uv pip install "${UV_ARGS[@]}" --target build/social_queue_worker tzdata
+fi
+
 # ── qa_trigger (invokes the AgentCore runtime; boto3 only) ──────────
 if [ -e lambda_src/qa_trigger/handler.py ]; then
   mkdir -p build/qa_trigger

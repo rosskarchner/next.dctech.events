@@ -32,6 +32,15 @@ summary and calgen keys the rendering off post_kind.
 The same stream also feeds a social publisher that cross-posts to Mastodon and
 Bluesky — every UPDATE# kind, and free-form POST# announcements written in
 /edit, all through the same code. See lambda_src/social_publisher/app.py.
+
+A second, independent pair of Lambdas cross-posts individual newly-added
+events (not /updates posts): social_queue_enqueue watches the same stream for
+INSERTed EVENT# rows and drops a SOCIALQUEUE# placeholder for each one;
+social_queue_worker drains that queue one item per hour, so a burst of new
+events (a freshly-added iCal feed, a run of approved submissions) trickles
+out instead of flooding followers' timelines. See
+lambda_src/social_queue_enqueue/handler.py and
+lambda_src/social_queue_worker/app.py.
 """
 import os
 
@@ -194,4 +203,105 @@ class NextUpdatesStack(cdk.Stack):
                 "Invoke with {\"pk\": \"UPDATE#YYYY-Www\"} to backfill a post "
                 "(add \"dry_run\": true to preview, \"force\": true to repost)"
             ),
+        )
+
+        # ── new-event social queue ──────────────────────────────────
+        # Independent of the publisher above: it announces individual EVENT#
+        # rows, not /updates posts, and drains one per hour instead of
+        # posting immediately, so a burst of new events doesn't flood
+        # followers' timelines. Shares the same Mastodon/Bluesky secrets.
+        self.social_queue_enqueue_function = lambda_.Function(
+            self,
+            "NextSocialQueueEnqueue",
+            function_name=f"{config.PREFIX}-social-queue-enqueue",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            architecture=lambda_.Architecture.X86_64,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset(
+                os.path.join(BUILD_DIR, "social_queue_enqueue")
+            ),
+            timeout=cdk.Duration.minutes(2),
+            environment={
+                "DYNAMODB_TABLE_NAME": table.table_name,
+            },
+            log_group=logs.LogGroup(
+                self,
+                "NextSocialQueueEnqueueLogGroup",
+                retention=logs.RetentionDays.ONE_MONTH,
+                removal_policy=cdk.RemovalPolicy.DESTROY,
+            ),
+        )
+        table.grant_read_write_data(self.social_queue_enqueue_function)
+
+        self.social_queue_enqueue_function.add_event_source(
+            event_sources.DynamoEventSource(
+                table,
+                starting_position=lambda_.StartingPosition.LATEST,
+                batch_size=100,
+                max_batching_window=cdk.Duration.seconds(30),
+                # A PutItem on an existing key streams as MODIFY, so this
+                # already excludes the iCal aggregator's routine re-sync of
+                # an event it has seen before, and correction overlays
+                # (UpdateItem) — no db.put_event() changes needed to tell
+                # "genuinely new" from "touched again".
+                filters=[
+                    lambda_.FilterCriteria.filter({
+                        "eventName": lambda_.FilterRule.is_equal("INSERT"),
+                        "dynamodb": {"Keys": {"PK": {
+                            "S": lambda_.FilterRule.begins_with("EVENT#")
+                        }}},
+                    }),
+                ],
+                retry_attempts=2,
+            )
+        )
+
+        self.social_queue_worker_function = lambda_.Function(
+            self,
+            "NextSocialQueueWorker",
+            function_name=f"{config.PREFIX}-social-queue-worker",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            architecture=lambda_.Architecture.X86_64,
+            handler="app.lambda_handler",
+            code=lambda_.Code.from_asset(
+                os.path.join(BUILD_DIR, "social_queue_worker")
+            ),
+            timeout=cdk.Duration.minutes(2),
+            environment={
+                "DYNAMODB_TABLE_NAME": table.table_name,
+                "SITE_BASE_URL": config.BASE_URL,
+                "MASTODON_SECRET_NAME": f"{config.PREFIX}/mastodon",
+                "BLUESKY_SECRET_NAME": f"{config.PREFIX}/bluesky",
+            },
+            log_group=logs.LogGroup(
+                self,
+                "NextSocialQueueWorkerLogGroup",
+                retention=logs.RetentionDays.ONE_MONTH,
+                removal_policy=cdk.RemovalPolicy.DESTROY,
+            ),
+        )
+        table.grant_read_write_data(self.social_queue_worker_function)
+        mastodon_secret.grant_read(self.social_queue_worker_function)
+        bluesky_secret.grant_read(self.social_queue_worker_function)
+
+        # Hourly, but only ~6am-midnight Eastern. Fixed UTC offset (EDT):
+        # the window drifts by an hour across the DST transition, which is
+        # acceptable rather than pulling in EventBridge Scheduler (unused
+        # elsewhere in this codebase) for timezone-aware cron.
+        events.Rule(
+            self,
+            "NextSocialQueueWorkerSchedule",
+            schedule=events.Schedule.expression("cron(0 10-23,0-3 * * ? *)"),
+            targets=[targets.LambdaFunction(self.social_queue_worker_function)],
+            description=(
+                "Post one queued new-event announcement per hour, "
+                "~6am-midnight Eastern (fixed UTC offset; drifts across DST)"
+            ),
+        )
+
+        cdk.CfnOutput(
+            self,
+            "NextSocialQueueWorkerFunction",
+            value=self.social_queue_worker_function.function_name,
+            description="Invoke with {} to drain the oldest queued event now",
         )
