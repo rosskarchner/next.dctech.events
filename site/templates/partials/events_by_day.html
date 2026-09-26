@@ -19,7 +19,16 @@
                             <h3 class="time-heading">{{ time_slot.events[0].formatted_time }}</h3>
                             <ul class="events-list">
                             {% for event in time_slot.events %}
-                                <li class="h-event event">
+                                {% set ns = namespace(icon_slug=None) %}
+                                {% for cat_slug in event.categories %}
+                                    {% if not ns.icon_slug and category_icon_slugs and cat_slug in category_icon_slugs %}
+                                        {% set ns.icon_slug = cat_slug %}
+                                    {% endif %}
+                                {% endfor %}
+                                <li class="h-event event{% if ns.icon_slug %} has-category-icon{% endif %}">
+                                    {% if ns.icon_slug %}
+                                        <img class="event-category-icon" src="/static/images/categories/{{ ns.icon_slug }}.png" width="64" height="64" loading="lazy" alt="{{ categories[ns.icon_slug].name if categories and ns.icon_slug in categories else ns.icon_slug }}">
+                                    {% endif %}
                                     <a class="u-url p-name" href="{{ event.url }}" target="_blank" rel="noopener noreferrer">{{ event.title }}</a>{% if event.display_title != event.title %} <span class="p-summary">{{ event.display_title | replace(event.title, '') }}</span>{% endif %}{% if event.permalink %}<a class="event-permalink" href="{{ event.permalink }}" aria-label="Permalink to {{ event.title }} on {{ site_name }}" title="Permalink on {{ site_name }}">🔎</a>{% endif %}
                                     {% if event.is_recurring %}<span class="recurring-badge">🔄 Recurring</span><span class="recurring-note">Confirm date/time with the organizer</span>{% endif %}
                                     {% if event.time %}<time class="dt-start" datetime="{{ day.date }}T{{ event.time }}">{{ event.formatted_time }}</time>{% endif %}

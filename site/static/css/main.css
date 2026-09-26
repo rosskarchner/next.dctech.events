@@ -2,9 +2,9 @@
 :root {
     --color-primary: #2563eb;
     --color-primary-hover: #1d4ed8;
-    --color-text: #1f2937;
+    --color-text: #222323;
     --color-text-light: #6b7280;
-    --color-background: #ffffff;
+    --color-background: #f0f6f0;
     --color-background-alt: #f9fafb;
     --color-border: #e5e7eb;
     --color-accent: #fef3c7;
@@ -221,6 +221,7 @@ a:focus {
 
 /* Events */
 .event {
+    position: relative;
     line-height: 1.5;
     padding: var(--spacing-md);
     margin-bottom: var(--spacing-sm);
@@ -229,6 +230,12 @@ a:focus {
     transition: transform 0.2s, box-shadow 0.2s;
     /* Mobile-first: no left margin */
     margin-left: 0;
+}
+
+/* Room for the category icon anchored to the card's right edge — only
+   cards that have one pay for the reserved space. */
+.event.has-category-icon {
+    padding-right: calc(64px + var(--spacing-lg));
 }
 
 @media (min-width: 768px) {
@@ -245,6 +252,21 @@ a:focus {
 .event:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Category icon — anchored to the card's own right edge, vertically
+   centered, rather than tied to the (desktop-only) time column. Shows at
+   every width since it now lives entirely inside the card. */
+.event-category-icon {
+    position: absolute;
+    top: 50%;
+    right: var(--spacing-md);
+    transform: translateY(-50%);
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    border: 1px solid #222323;
+    border-radius: 4px;
 }
 
 .event .p-name {

@@ -61,6 +61,7 @@ def create_app(site_dir=None):
     # which made edits to the packaged copies silently do nothing.
     app.jinja_loader = FileSystemLoader(os.path.join(site_dir, 'templates'))
     app.region_plugin = load_region_plugin(site_dir)
+    app.category_icon_slugs = _load_category_icon_slugs(static_dir)
 
     _register_routes(app)
     _groups_routes.register_routes(app)
@@ -98,6 +99,7 @@ def _register_routes(app):
             'sponsors': _load_sponsors(),
             'categories': get_categories(),
             'nav_locations': nav_locations,
+            'category_icon_slugs': app.category_icon_slugs,
         }
 
     @app.route("/robots.txt")
@@ -107,6 +109,22 @@ def _register_routes(app):
     @app.route('/404.html')
     def not_found_page():
         return render_template('404.html')
+
+
+def _load_category_icon_slugs(static_dir):
+    """Category slugs with a 64x64 icon at static/images/categories/<slug>.png.
+
+    Read once at app creation — icon set only changes when someone adds a
+    file and rebuilds, not per-request.
+    """
+    icons_dir = os.path.join(static_dir, 'images', 'categories')
+    if not os.path.isdir(icons_dir):
+        return set()
+    return {
+        os.path.splitext(fname)[0]
+        for fname in os.listdir(icons_dir)
+        if fname.lower().endswith('.png')
+    }
 
 
 def _load_sponsors():
