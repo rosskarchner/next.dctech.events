@@ -107,14 +107,20 @@ h2.day-heading a:hover {
     text-decoration: underline;
 }
 
-/* Homepage subheading — kept as <h1> for SEO/a11y, styled down from the
-   default h1 weight/spacing so it reads as a label above the events, not a
-   full title pushing them below the fold. */
-.page-subheading {
-    margin: 0 0 var(--spacing-sm) 0;
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--color-text);
+/* Visually hides content while keeping it in the accessibility tree and
+   readable by search engines — e.g. the homepage's <h1>, kept for SEO/a11y
+   (a page needs exactly one) but not shown, so events start at the top of
+   the page instead of below a repeated "Upcoming Tech Events..." label. */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 h3.time-heading {

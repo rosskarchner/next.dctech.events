@@ -66,10 +66,11 @@ def _get(app):
     return app.test_client().get('/')
 
 
-def test_h1_is_styled_as_a_subheading_not_removed(client):
-    """Kept as <h1> for SEO/a11y — only the styling changes."""
+def test_h1_is_visually_hidden_not_removed(client):
+    """Kept as <h1> for SEO/a11y (a page needs exactly one) — visually
+    hidden rather than removed, so events start at the top of the page."""
     html = _get(client).get_data(as_text=True)
-    assert '<h1 class="page-subheading">Upcoming Tech Events' in html
+    assert '<h1 class="visually-hidden">Upcoming Tech Events' in html
 
 
 def test_no_inline_freshness_line_on_the_homepage(client):
