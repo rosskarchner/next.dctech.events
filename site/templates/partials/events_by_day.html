@@ -4,7 +4,7 @@
         {% for day in days %}
 
             {% if day.has_events %}
-                <div class="day-container {{ loop.cycle('odd', 'even') }}">
+                <div class="day-container">
                     <h2 class="day-heading" id="{{ day.date }}">
                         {% if day.week_url %}
                             <a href="{{ day.week_url }}">{{ day.short_date }}</a>

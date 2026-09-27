@@ -157,6 +157,18 @@ def og_images(site_dir):
     os.makedirs(out_dir, exist_ok=True)
     written = 0
 
+    # Same icon set and "first category with an icon wins" policy as the
+    # live site's feed cards (site/static/images/categories/, main.css's
+    # .event-category-icon, events_by_day.html's category_icon_slugs).
+    icons_dir = os.path.join(site_dir, 'static', 'images', 'categories')
+
+    def icon_path_for(category_slugs):
+        for slug in category_slugs:
+            path = os.path.join(icons_dir, f'{slug}.png')
+            if os.path.exists(path):
+                return path
+        return None
+
     for event in events:
         slug = event_slug(event)
         category_slugs = event.get('categories') or []
@@ -167,6 +179,7 @@ def og_images(site_dir):
             category_name,
             site_name,
             group_name=event.get('group'),
+            icon_path=icon_path_for(category_slugs),
         )
         card.save(os.path.join(out_dir, f'{slug}.png'))
         written += 1
@@ -175,7 +188,8 @@ def og_images(site_dir):
     live_events = get_events()
     for slug, category in categories.items():
         count = len([e for e in live_events if slug in e.get('categories', [])])
-        card = render_category_card(category['name'], count, site_name)
+        card = render_category_card(category['name'], count, site_name,
+                                     icon_path=icon_path_for([slug]))
         card.save(os.path.join(out_dir, f'category-{slug}.png'))
         written += 1
 
