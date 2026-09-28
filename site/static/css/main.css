@@ -108,9 +108,7 @@ h2.day-heading a:hover {
 }
 
 /* Visually hides content while keeping it in the accessibility tree and
-   readable by search engines — e.g. the homepage's <h1>, kept for SEO/a11y
-   (a page needs exactly one) but not shown, so events start at the top of
-   the page instead of below a repeated "Upcoming Tech Events..." label. */
+   readable by search engines. */
 .visually-hidden {
     position: absolute;
     width: 1px;

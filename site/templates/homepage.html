@@ -12,8 +12,6 @@
 <div class="home-container">
 
     <section class="events-section">
-        <h1 class="visually-hidden">Upcoming Tech Events in DC, Maryland &amp; Virginia</h1>
-
         {% with days=days[:2] %}
             {% include "partials/events_by_day.html" %}
         {% endwith %}

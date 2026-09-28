@@ -62,8 +62,12 @@
     <a href="#main-content" class="skip-link">Skip to main content</a>
     <header>
         <div class="container">
+            {% if request.path == '/' %}
+            <h1 class="logo"><a href="/">{{ site_name }}</a></h1>
+            {% else %}
             <div class="logo"><a href="/">{{ site_name }}</a></div>
-            <div>{{ tagline }}</div>
+            {% endif %}
+            <div>Upcoming Tech Events in DC, Maryland &amp; Virginia</div>
             <p class="header-cta">You make it better! <a href="{{ add_events_link }}">Add an event</a>, <a href="{{ add_groups_link }}">add a group</a>, or <a href="mailto:ross@karchner.com">send feedback</a>.</p>
         </div>
     </header>
