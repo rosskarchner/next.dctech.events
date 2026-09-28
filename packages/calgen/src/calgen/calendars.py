@@ -116,8 +116,17 @@ def should_fetch(meta_data, group_id):
 
 
 def fetch_json_ld_data(url):
-    """Fetch JSON-LD metadata from a URL (Meetup-aware)."""
-    if "meetup.com" not in url:
+    """Fetch JSON-LD metadata from a URL (Meetup- and Luma-aware).
+
+    Luma's iCal LOCATION field is always the event's own luma.com/lu.ma URL,
+    never real venue text (see fetch_ical_and_extract_events's virtual-keyword
+    fallback below), so a Luma virtual event is only detectable by fetching
+    the event page's schema.org JSON-LD — eventAttendanceMode and a
+    VirtualLocation location, the same shape Meetup emits, which is why this
+    function's existing parsing works unchanged once the domain is allowed
+    through.
+    """
+    if not any(host in url for host in ('meetup.com', 'luma.com', 'lu.ma')):
         return {'title': None, 'is_virtual': False, 'location': None}
 
     url_hash = hashlib.md5(url.encode('utf-8'), usedforsecurity=False).hexdigest()

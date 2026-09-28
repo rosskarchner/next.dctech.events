@@ -88,3 +88,48 @@ def test_unrelated_ld_types_are_still_ignored(monkeypatch):
     }))
     result = fetch_json_ld_data('https://www.meetup.com/some-group/events/3/')
     assert result == {'title': None, 'is_virtual': False, 'location': None, 'cancelled': False}
+
+
+@pytest.mark.parametrize('url', [
+    'https://luma.com/1nqnrqug',
+    'https://lu.ma/1nqnrqug',
+])
+def test_luma_online_event_is_detected(monkeypatch, url):
+    # Luma's iCal LOCATION field is always the event's own luma.com/lu.ma URL
+    # (never real venue text), so this JSON-LD fetch is the only way to catch
+    # a Luma virtual event — see fetch_json_ld_data's docstring.
+    _mock_get(monkeypatch, _ld_page({
+        '@context': 'https://schema.org',
+        '@type': 'Event',
+        'name': 'DC DAO Annual Meeting 2026',
+        'eventAttendanceMode': 'https://schema.org/OnlineEventAttendanceMode',
+        'location': {'@type': 'VirtualLocation', 'name': 'Online Event', 'url': url},
+    }))
+    result = fetch_json_ld_data(url)
+    assert result['is_virtual'] is True
+    assert result['title'] == 'DC DAO Annual Meeting 2026'
+
+
+def test_luma_physical_event_is_not_forced_virtual(monkeypatch):
+    _mock_get(monkeypatch, _ld_page({
+        '@context': 'https://schema.org',
+        '@type': 'Event',
+        'name': 'Groundwork',
+        'eventAttendanceMode': 'https://schema.org/OfflineEventAttendanceMode',
+        'location': {
+            '@type': 'Place',
+            'name': 'National Union Building',
+            'address': {'addressLocality': 'Washington', 'addressRegion': 'DC'},
+        },
+    }))
+    result = fetch_json_ld_data('https://luma.com/groundwork_dc')
+    assert result['is_virtual'] is False
+    assert result['location'] == 'National Union Building, Washington, DC'
+
+
+def test_non_meetup_non_luma_urls_still_skip_the_fetch(monkeypatch):
+    def _boom(*a, **k):
+        raise AssertionError('should not fetch for an unrelated domain')
+    monkeypatch.setattr('calgen.calendars.safe_get', _boom)
+    result = fetch_json_ld_data('https://www.eventbrite.com/e/some-event')
+    assert result == {'title': None, 'is_virtual': False, 'location': None}
