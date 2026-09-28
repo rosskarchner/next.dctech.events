@@ -45,7 +45,17 @@ the build, so the chain never races ahead of the site it just published.
 The stream-fed trigger still fires during a run and now attempts a build rather
 than skipping. The project's concurrent_build_limit of 1 makes that attempt fail
 rather than queue, so the trigger raises and its event source mapping re-drives
-the batch once this machine's build is done.
+the batch once this machine's build is done — but the reverse can happen too:
+this machine's own BuildSiteAfterRefresh/BuildSiteAfterPost can just as easily
+be the one that loses the race (2026-09-28: RefreshFeeds's writes triggered the
+stream-fed rebuild, which won the slot 4 seconds before BuildSiteAfterRefresh
+tried to start its own build — one retry at a 30s interval wasn't enough
+against a build that took ~4 minutes, and the whole execution failed before
+SendNewsletter ever ran, missing that week's send). Both CodeBuild steps retry
+up to 4 times (30s/60s/120s/240s, ~7.5 min total) specifically for this —
+comfortably past a normal build's few minutes, without touching the actual
+race, which still exists and could in principle still exhaust the budget on a
+slow enough build.
 
 Referenced by function name rather than by cross-stack import, matching the
 reasoning NextUpdatesStack already applies to the social secrets: this stack
@@ -140,8 +150,8 @@ class NextOrchestrationStack(cdk.Stack):
             payload_response_only=True,
         )
 
-        for step, attempts in ((refresh_feeds, 2), (build_after_refresh, 1),
-                               (publish_week_ahead, 2), (build_after_post, 1),
+        for step, attempts in ((refresh_feeds, 2), (build_after_refresh, 4),
+                               (publish_week_ahead, 2), (build_after_post, 4),
                                (send_newsletter, 1)):
             step.add_retry(
                 errors=["States.TaskFailed", "Lambda.ServiceException",
