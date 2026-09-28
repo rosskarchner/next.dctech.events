@@ -66,11 +66,15 @@ def _get(app):
     return app.test_client().get('/')
 
 
-def test_h1_is_visually_hidden_not_removed(client):
-    """Kept as <h1> for SEO/a11y (a page needs exactly one) — visually
-    hidden rather than removed, so events start at the top of the page."""
+def test_h1_is_the_header_logo_not_a_duplicate_in_the_body(client):
+    """The "Upcoming Tech Events..." line moved into the header as the
+    site's visible subheading; the page's one <h1> (still needed for
+    SEO/a11y) is now the header logo, promoted to <h1> on '/' only — the
+    body no longer carries its own (hidden or otherwise) duplicate."""
     html = _get(client).get_data(as_text=True)
-    assert '<h1 class="visually-hidden">Upcoming Tech Events' in html
+    assert '<h1 class="logo">' in html
+    assert 'Upcoming Tech Events in DC, Maryland &amp; Virginia' in html
+    assert 'visually-hidden' not in html
 
 
 def test_no_inline_freshness_line_on_the_homepage(client):
