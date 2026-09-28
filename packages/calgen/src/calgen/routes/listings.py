@@ -126,11 +126,11 @@ def register_routes(app):
         # capture for the part already gone. For a wholly future week the
         # archive adds nothing; for a wholly past one it is all there is.
         archived = get_archived_week(week_id)
-        week_events = merge_events(
+        week_events = filter_in_person_events(merge_events(
             filter_events_by_week(get_events(), week_start, week_end),
             filter_events_by_week(archived['events'], week_start, week_end)
             if archived else [],
-        )
+        ))
         days = prepare_events_by_day(week_events)
         week_start_formatted = week_start.strftime('%B %-d, %Y')
         stats = {'upcoming_events': len(week_events)}
