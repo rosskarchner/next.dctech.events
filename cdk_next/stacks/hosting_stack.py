@@ -126,6 +126,9 @@ class NextHostingStack(cdk.Stack):
             # committed pricing already covers this, so there's nothing to
             # tune here.
             minimum_protocol_version=cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
+            # China and Singapore were consuming ~90% of the free-plan
+            # allowance (mostly bot traffic). Blocked viewers get a 403.
+            geo_restriction=cloudfront.GeoRestriction.denylist("CN", "SG"),
             # AWS auto-provisions this WebACL (name: CreatedByCloudFront-*)
             # for accounts enrolled in the CloudFront Security Savings
             # Bundle, which requires every distribution on it to keep a
