@@ -4,17 +4,24 @@ Runs on an hourly EventBridge schedule limited to roughly 6am-midnight
 Eastern (cdk_next/stacks/updates_stack.py) — a fixed UTC cron, so the window
 drifts by an hour across the DST transition; that's accepted, not a bug.
 
-Each invocation grabs the single oldest pending SOCIALQUEUE#{guid} item (a
-GSI1 query on the constant partition SOCIALQUEUE#PENDING, oldest
-GSI1SK first — see lambda_src/social_queue_enqueue/handler.py for how items
-get there) and either posts it to Mastodon and Bluesky, or resolves it
-without posting:
+Each invocation looks at the oldest CANDIDATE_LIMIT pending SOCIALQUEUE#{guid}
+items (a GSI1 query on the constant partition SOCIALQUEUE#PENDING — see
+lambda_src/social_queue_enqueue/handler.py for how items get there), resolves
+any that are not worth announcing, and posts exactly one of the rest to
+Mastodon and Bluesky. Items are resolved without posting when:
 
 * the EVENT# item it points at has been deleted since it was queued, or
 * the event's date (and time, if it has one) is already in the past by the
-  time it reaches the front of the queue — never announce something over, or
+  time it comes up — never announce something over, or
 * it is a virtual event (the enqueuer already drops these; this catches ones
   queued before that, or reclassified since).
+
+Which one gets posted is not plain FIFO. A feed that lands dozens of events in
+one sync would otherwise hold the queue for days, so the worker prefers an
+event whose group is not among the last RECENT_GROUP_WINDOW groups posted
+(tracked on a SOCIALQUEUE#STATE item), and among those the soonest event
+first. If every candidate is from a recently-posted group it just takes the
+soonest one, so the queue always drains.
 
 Posting reuses the same Mastodon/Bluesky HTTP clients and Secrets Manager
 credentials as the /updates cross-poster (lambda_src/social_publisher/), and
@@ -49,6 +56,12 @@ MASTODON_CHAR_LIMIT = int(os.environ.get("MASTODON_CHAR_LIMIT", "500"))
 # One post attempt per hour, so a permanently-broken item (e.g. a network
 # outage lasting a day) does not wedge every event behind it forever.
 MAX_ATTEMPTS = 8
+
+# How many of the oldest pending items to consider per run, and how many of
+# the most recently posted groups to steer away from.
+CANDIDATE_LIMIT = 100
+RECENT_GROUP_WINDOW = 3
+STATE_PK = "SOCIALQUEUE#STATE"
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -136,15 +149,42 @@ def _is_past(event, now=None):
 # ── the queue ────────────────────────────────────────────────────────
 
 
-def _oldest_pending(table):
+def _pending(table):
     resp = table.query(
         IndexName="GSI1",
         KeyConditionExpression=Key("GSI1PK").eq("SOCIALQUEUE#PENDING"),
         ScanIndexForward=True,
-        Limit=1,
+        Limit=CANDIDATE_LIMIT,
     )
-    items = resp.get("Items", [])
-    return items[0] if items else None
+    return resp.get("Items", [])
+
+
+def _recent_groups(table):
+    item = table.get_item(Key={"PK": STATE_PK, "SK": "META"}).get("Item") or {}
+    return list(item.get("recent_groups") or [])
+
+
+def _remember_group(table, group):
+    """Record a posted group, keeping only the newest RECENT_GROUP_WINDOW."""
+    if not group:
+        return
+    recent = [g for g in _recent_groups(table) if g != group] + [group]
+    _save_progress(table, STATE_PK, {"recent_groups": recent[-RECENT_GROUP_WINDOW:]})
+
+
+def _event_sort_key(event):
+    return (str(event.get("date") or ""), str(event.get("time") or ""))
+
+
+def _choose(candidates, recent):
+    """candidates: [(queue_item, event)] in enqueue order. Soonest event from a
+    group not posted recently; else the soonest overall. Ties keep the
+    enqueue order (sorted() is stable)."""
+    # Events with no group (manual/submitted) are never "recent".
+    fresh = [c for c in candidates
+             if not c[1].get("group") or c[1]["group"] not in recent]
+    pool = fresh or candidates
+    return sorted(pool, key=lambda c: _event_sort_key(c[1]))[0]
 
 
 def _load_event(table, guid):
@@ -191,28 +231,34 @@ def _bump_attempts(table, queue_pk):
 
 
 def _process_one(table):
-    queue_item = _oldest_pending(table)
-    if not queue_item:
+    pending = _pending(table)
+    if not pending:
         return {"status": "empty"}
 
+    viable = []
+    first_skip = None
+    for queue_item in pending:
+        queue_pk = queue_item["PK"]
+        guid = str(queue_item.get("event_guid") or queue_pk.split("#", 1)[1])
+        event = _load_event(table, guid)
+        if not event:
+            reason = "event no longer exists"
+        elif event.get("location_type") == "virtual":
+            reason = "virtual event"
+        elif _is_past(event):
+            reason = "event date has passed"
+        else:
+            viable.append((queue_item, event))
+            continue
+        _resolve(table, queue_pk, "skipped")
+        first_skip = first_skip or {"status": "skipped", "pk": queue_pk,
+                                    "reason": reason}
+
+    if not viable:
+        return first_skip
+
+    queue_item, event = _choose(viable, _recent_groups(table))
     queue_pk = queue_item["PK"]
-    guid = str(queue_item.get("event_guid") or queue_pk.split("#", 1)[1])
-
-    event = _load_event(table, guid)
-    if not event:
-        _resolve(table, queue_pk, "skipped")
-        return {"status": "skipped", "pk": queue_pk,
-                "reason": "event no longer exists"}
-
-    if event.get("location_type") == "virtual":
-        _resolve(table, queue_pk, "skipped")
-        return {"status": "skipped", "pk": queue_pk,
-                "reason": "virtual event"}
-
-    if _is_past(event):
-        _resolve(table, queue_pk, "skipped")
-        return {"status": "skipped", "pk": queue_pk,
-                "reason": "event date has passed"}
 
     url = f"{SITE_BASE_URL}/events/{event_utils.event_slug(event)}/"
     texts = {
@@ -259,6 +305,7 @@ def _process_one(table):
                  "attempts": attempts}
 
     _resolve(table, queue_pk, "posted")
+    _remember_group(table, str(event.get("group") or ""))
     return {"status": "posted", "pk": queue_pk, "url": url}
 
 

@@ -225,19 +225,6 @@ def test_process_one_skips_a_past_event(monkeypatch):
     assert table.items[("SOCIALQUEUE#abc", "META")]["status"] == "skipped"
 
 
-def test_process_one_skips_a_virtual_event(monkeypatch):
-    monkeypatch.setattr(app, "_is_past", lambda event, now=None: False)
-    table = _FakeTable({
-        ("SOCIALQUEUE#abc", "META"): _queued("abc"),
-        ("EVENT#abc", "META"): {"PK": "EVENT#abc", "SK": "META",
-                                **_event(location_type="virtual")},
-    })
-    result = app._process_one(table)
-    assert result["status"] == "skipped"
-    assert result["reason"] == "virtual event"
-    assert table.items[("SOCIALQUEUE#abc", "META")]["status"] == "skipped"
-
-
 def test_process_one_posts_to_both_networks(monkeypatch):
     monkeypatch.setattr(app, "_is_past", lambda event, now=None: False)
     monkeypatch.setattr(app.networks, "mastodon_post",
@@ -299,3 +286,105 @@ def test_process_one_gives_up_after_max_attempts(monkeypatch):
     item = table.items[("SOCIALQUEUE#abc", "META")]
     assert item["status"] == "failed"
     assert "GSI1PK" not in item
+
+
+# ── fair ordering across groups ──────────────────────────────────────
+
+
+def _seed(*specs):
+    """specs: (guid, group, date, enqueued_at)."""
+    items = {}
+    for guid, group, date, enq in specs:
+        items[(f"SOCIALQUEUE#{guid}", "META")] = _queued(guid, GSI1SK=enq)
+        items[(f"EVENT#{guid}", "META")] = {
+            "PK": f"EVENT#{guid}", "SK": "META",
+            **_event(group=group, date=date, guid=guid)}
+    return items
+
+
+def _stub_posting(monkeypatch):
+    monkeypatch.setattr(app, "_is_past", lambda event, now=None: False)
+    monkeypatch.setattr(app.networks, "mastodon_post",
+                         lambda secret, text, idempotency_key=None:
+                         {"id": "1", "url": "https://m/1"})
+    monkeypatch.setattr(app.networks, "bluesky_post",
+                         lambda secret, text, **kw:
+                         {"uri": "at://x", "cid": "c", "url": "https://b/1"})
+    monkeypatch.setattr(app, "_secret", lambda name: {})
+
+
+def test_a_burst_from_one_group_does_not_starve_the_others(monkeypatch):
+    _stub_posting(monkeypatch)
+    table = _FakeTable(_seed(
+        ("a1", "AFCEA", "2026-10-01", "2026-09-01T00:00:00Z"),
+        ("a2", "AFCEA", "2026-10-02", "2026-09-01T00:00:00Z"),
+        ("a3", "AFCEA", "2026-10-03", "2026-09-01T00:00:00Z"),
+        ("b1", "HacDC", "2026-11-01", "2026-09-02T00:00:00Z"),
+        ("c1", "Refresh DC", "2026-11-02", "2026-09-02T00:00:00Z"),
+    ))
+    order = [app._process_one(table)["pk"] for _ in range(5)]
+    # AFCEA leads (soonest), but never twice in a row while others wait.
+    assert order[0] == "SOCIALQUEUE#a1"
+    assert set(order[1:3]) == {"SOCIALQUEUE#b1", "SOCIALQUEUE#c1"}
+    assert order[3:] == ["SOCIALQUEUE#a2", "SOCIALQUEUE#a3"]
+
+
+def test_the_soonest_event_goes_first_within_eligible_groups(monkeypatch):
+    _stub_posting(monkeypatch)
+    table = _FakeTable(_seed(
+        ("late", "HacDC", "2027-01-01", "2026-09-01T00:00:00Z"),
+        ("soon", "Refresh DC", "2026-10-01", "2026-09-02T00:00:00Z"),
+    ))
+    assert app._process_one(table)["pk"] == "SOCIALQUEUE#soon"
+
+
+def test_falls_back_to_soonest_when_every_group_is_recent(monkeypatch):
+    _stub_posting(monkeypatch)
+    table = _FakeTable(_seed(
+        ("a2", "AFCEA", "2026-10-02", "2026-09-01T00:00:00Z"),
+        ("a1", "AFCEA", "2026-10-01", "2026-09-01T00:00:00Z"),
+    ))
+    table.items[(app.STATE_PK, "META")] = {
+        "PK": app.STATE_PK, "SK": "META", "recent_groups": ["AFCEA"]}
+    assert app._process_one(table)["pk"] == "SOCIALQUEUE#a1"
+
+
+def test_groupless_events_are_never_held_back(monkeypatch):
+    _stub_posting(monkeypatch)
+    table = _FakeTable(_seed(
+        ("m1", None, "2026-10-01", "2026-09-01T00:00:00Z"),
+        ("m2", None, "2026-10-02", "2026-09-01T00:00:00Z"),
+    ))
+    assert app._process_one(table)["pk"] == "SOCIALQUEUE#m1"
+    assert app._process_one(table)["pk"] == "SOCIALQUEUE#m2"
+    assert (app.STATE_PK, "META") not in table.items
+
+
+def test_recent_groups_window_is_bounded(monkeypatch):
+    _stub_posting(monkeypatch)
+    table = _FakeTable()
+    for g in ["A", "B", "C", "D", "B"]:
+        app._remember_group(table, g)
+    state = table.items[(app.STATE_PK, "META")]
+    assert state["recent_groups"] == ["C", "D", "B"]
+
+
+def test_stale_candidates_are_resolved_while_looking_for_one_to_post(monkeypatch):
+    _stub_posting(monkeypatch)
+    monkeypatch.setattr(app, "_is_past",
+                         lambda event, now=None: event["guid"] == "old")
+    table = _FakeTable(_seed(
+        ("old", "AFCEA", "2026-01-01", "2026-09-01T00:00:00Z"),
+        ("new", "HacDC", "2026-10-01", "2026-09-02T00:00:00Z"),
+    ))
+    assert app._process_one(table)["pk"] == "SOCIALQUEUE#new"
+    assert table.items[("SOCIALQUEUE#old", "META")]["status"] == "skipped"
+
+
+def test_a_virtual_event_is_skipped_not_posted(monkeypatch):
+    _stub_posting(monkeypatch)
+    table = _FakeTable(_seed(("v1", "AFCEA", "2026-10-01", "2026-09-01T00:00:00Z"),
+                              ("p1", "HacDC", "2026-10-02", "2026-09-02T00:00:00Z")))
+    table.items[("EVENT#v1", "META")]["location_type"] = "virtual"
+    assert app._process_one(table)["pk"] == "SOCIALQUEUE#p1"
+    assert table.items[("SOCIALQUEUE#v1", "META")]["status"] == "skipped"
