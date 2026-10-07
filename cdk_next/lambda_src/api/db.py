@@ -689,6 +689,56 @@ def update_event(guid, data, overrides=None, *, expect_overrides_rev=_UNSET):
     table.update_item(**kwargs)
 
 
+# Direct record fields a moderator may patch on a manual/submitted event's own
+# row — not through the overlay system. `date`/`end_date` are structural
+# (they say what the event *is*, not how it presents) and are exactly what
+# OVERLAY_PROTECTED_FIELDS refuses for that reason; see this module's overlay
+# section and packages/calgen/src/calgen/overlay.py for the overlay side of
+# that boundary. This is the same "correct what the author got wrong" idea
+# mcp/server.py's update_single_event already offers agents, narrowed to just
+# end_date for the /edit UI's multi-day control.
+MANUAL_EVENT_DIRECT_FIELDS = ('end_date',)
+
+
+def update_manual_event_fields(guid, fields):
+    """Directly patch a manual/submitted event's own end_date (multi-day).
+
+    Refuses iCal events: the aggregator rewrites those rows from the feed
+    every few hours, so a direct edit here would report success and vanish.
+    Returns the updated event.
+    """
+    unknown = sorted(set(fields) - set(MANUAL_EVENT_DIRECT_FIELDS))
+    if unknown:
+        raise ValueError(
+            f'Not an editable field here: {unknown}. '
+            f'Editable: {sorted(MANUAL_EVENT_DIRECT_FIELDS)}'
+        )
+
+    event = get_event_from_config(guid)
+    if not event:
+        raise ValueError(f'No such event: {guid}')
+    if event.get('source') == 'ical':
+        raise ValueError(
+            f'{guid} is an iCal event — its record is rewritten from the '
+            f'feed every few hours. Direct edits are not offered for it.'
+        )
+
+    data = dict(fields)
+    if 'end_date' in data:
+        data['end_date'] = validate_event_date(data['end_date'], 'end_date')
+        start = event.get('date', '')
+        # An end_date before the event's own start date is not "multi-day",
+        # it is a calendar rendering backwards.
+        if data['end_date'] and start and data['end_date'] < start:
+            raise ValueError(
+                f"end_date ({data['end_date']}) cannot be before "
+                f"date ({start})"
+            )
+
+    update_event(guid, data)
+    return get_event_from_config(guid)
+
+
 def promote_draft_to_event(draft):
     """Promote an approved event draft to an EVENT entity in the config table.
 

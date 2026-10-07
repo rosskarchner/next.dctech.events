@@ -297,6 +297,33 @@ def put_overlay_json(event, jinja_env, guid):
     return _json(200, result)
 
 
+def put_fields_json(event, jinja_env, guid):
+    """PUT /api/admin/events/{guid}/fields — direct edit of a manual/submitted
+    event's own record. Not the overlay system: currently just end_date, for
+    the multi-day control. See db.update_manual_event_fields.
+    """
+    claims, err = _admin_check(event)
+    if err:
+        return err
+
+    data = _post_payload(event)
+    fields = data.get('fields')
+    if not isinstance(fields, dict) or not fields:
+        return _json(400, {'error': 'fields is required'})
+
+    try:
+        updated = db.update_manual_event_fields(guid, fields)
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith('No such event:'):
+            return _json(404, {'error': message})
+        if 'iCal event' in message:
+            return _json(422, {'error': message})
+        return _json(400, {'error': message})
+
+    return _json(200, {'guid': guid, 'end_date': updated.get('end_date', '')})
+
+
 def delete_overlay_json(event, jinja_env, guid):
     """DELETE /api/admin/events/{guid}/overlay — back to what the source says."""
     claims, err = _admin_check(event)

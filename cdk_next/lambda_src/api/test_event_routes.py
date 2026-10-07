@@ -67,7 +67,9 @@ def store(monkeypatch):
     }
 
     def _update(guid, data, overrides=None, *, expect_overrides_rev=db._UNSET):
-        events[guid]["overrides"] = overrides
+        events[guid].update(data)
+        if overrides is not None:
+            events[guid]["overrides"] = overrides
 
     def _set_status(guid, status):
         if guid not in events:
@@ -109,6 +111,7 @@ def test_every_event_route_checks_admin(store):
         ("/api/admin/events/ical1/overlay", "PUT", {"fields": {"title": "x"},
                                                     "comment": "c"}),
         ("/api/admin/events/ical1/overlay", "DELETE", None),
+        ("/api/admin/events/man1/fields", "PUT", {"fields": {"end_date": "2026-09-13"}}),
         ("/api/admin/events/ical1/review-status", "PUT",
          {"review_status": "approved"}),
         ("/api/admin/events/bulk", "POST", {"action": "hide",
@@ -414,6 +417,69 @@ def test_delete_honours_expected_rev_from_the_query_string(store):
     status, _ = call("/api/admin/events/ical1/overlay", "DELETE",
                      query={"expected_rev": "99"})
     assert status == 409
+
+
+# ── Direct field edits (end_date / multi-day) ───────────────────────
+# Not the overlay system — date/end_date are OVERLAY_PROTECTED_FIELDS on
+# purpose (test_overlay.py). This is the /edit UI's multi-day control.
+
+
+def test_setting_end_date_on_a_manual_event(store):
+    status, payload = call("/api/admin/events/man1/fields", "PUT",
+                           body={"fields": {"end_date": "2026-09-13"}})
+    assert status == 200
+    assert payload["end_date"] == "2026-09-13"
+    assert store["man1"]["end_date"] == "2026-09-13"
+
+
+def test_setting_end_date_on_a_submitted_event(store):
+    store["sub1"] = {"guid": "sub1", "title": "Submitted Event",
+                     "date": "2026-09-12", "time": "12:00",
+                     "source": "submitted"}
+    status, payload = call("/api/admin/events/sub1/fields", "PUT",
+                           body={"fields": {"end_date": "2026-09-14"}})
+    assert status == 200
+    assert payload["end_date"] == "2026-09-14"
+
+
+def test_clearing_end_date_reverts_to_single_day(store):
+    call("/api/admin/events/man1/fields", "PUT",
+        body={"fields": {"end_date": "2026-09-13"}})
+    status, payload = call("/api/admin/events/man1/fields", "PUT",
+                           body={"fields": {"end_date": ""}})
+    assert status == 200
+    assert payload["end_date"] == ""
+
+
+def test_ical_events_refuse_a_direct_end_date_edit(store):
+    status, payload = call("/api/admin/events/ical1/fields", "PUT",
+                           body={"fields": {"end_date": "2026-09-11"}})
+    assert status == 422
+    assert "iCal event" in payload["error"]
+
+
+def test_end_date_before_the_start_date_is_a_400(store):
+    status, payload = call("/api/admin/events/man1/fields", "PUT",
+                           body={"fields": {"end_date": "2026-09-01"}})
+    assert status == 400
+    assert "cannot be before" in payload["error"]
+
+
+def test_an_unknown_field_is_a_400(store):
+    status, payload = call("/api/admin/events/man1/fields", "PUT",
+                           body={"fields": {"title": "New title"}})
+    assert status == 400
+
+
+def test_fields_on_a_missing_event_is_a_404(store):
+    status, _ = call("/api/admin/events/nope/fields", "PUT",
+                     body={"fields": {"end_date": "2026-09-13"}})
+    assert status == 404
+
+
+def test_empty_fields_body_is_a_400(store):
+    status, _ = call("/api/admin/events/man1/fields", "PUT", body={"fields": {}})
+    assert status == 400
 
 
 # ── Review status ──────────────────────────────────────────────────

@@ -215,6 +215,7 @@ def lambda_handler(event, context):
             result = _dispatch_id_tail(path, '/api/admin/events/', {
                 ('overlay', 'PUT'): events.put_overlay_json,
                 ('overlay', 'DELETE'): events.delete_overlay_json,
+                ('fields', 'PUT'): events.put_fields_json,
                 ('review-status', 'PUT'): events.put_review_status_json,
                 ('', 'GET'): events.get_event_json,
             }, event, jinja_env, http_method)

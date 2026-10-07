@@ -262,6 +262,35 @@
     </div>`;
   }
 
+  // Not part of the overlay form below: end_date is a direct field edit
+  // (PUT .../fields, see saveEndDate), not an overlay — see db.py's
+  // OVERLAY_PROTECTED_FIELDS for why date/end_date are excluded from the
+  // overlay allowlist. iCal events keep the read-only row: the aggregator
+  // rewrites their record from the feed every few hours, so a direct edit
+  // would report success and vanish.
+  function endDateRow(event) {
+    if (event.source === 'ical') return readOnlyRow('End date', event.end_date);
+    return `
+      <div class="detail-row">
+        <span class="detail-label">End date</span>
+        <span class="detail-value" style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+          <input type="date" class="form-control" id="edit-end-date" style="width:auto;"
+                 value="${DctechUtil.escapeHtml(event.end_date || '')}"
+                 min="${DctechUtil.escapeHtml(event.date || '')}">
+          <button type="button" class="btn btn-sm btn-outline"
+                  data-action="update-end-date" data-guid="${DctechUtil.escapeHtml(event.guid)}">
+            ${event.end_date ? 'Update' : 'Make multi-day'}
+          </button>
+          ${event.end_date
+            ? `<button type="button" class="btn btn-sm btn-outline"
+                       data-action="clear-end-date" data-guid="${DctechUtil.escapeHtml(event.guid)}">
+                 Back to single day
+               </button>`
+            : ''}
+        </span>
+      </div>`;
+  }
+
   function renderEditRow(event) {
     const eff = event.effective || {};
     const overlay = event.overlay || {};
@@ -297,7 +326,7 @@
 
             <div class="draft-content">
               ${readOnlyRow('Date', event.date)}
-              ${readOnlyRow('End date', event.end_date)}
+              ${endDateRow(event)}
               ${readOnlyRow('Group', event.group)}
               ${readOnlyRow('Source', event.source)}
               ${readOnlyRow('Review status', event.review_status)}
@@ -476,6 +505,28 @@
     if (!box) return;
     box.innerHTML = `<div class="message message-${kind}"><p>${DctechUtil.escapeHtml(text)}</p></div>`;
     if (kind === 'success') setTimeout(() => { box.innerHTML = ''; }, 6000);
+  }
+
+  async function putFields(guid, fields) {
+    const response = await DctechAuth.authorizedFetch(
+      `/api/admin/events/${guid}/fields`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields }) });
+    if (!response.ok) throw new Error(await errorText(response));
+    return response.json();
+  }
+
+  async function saveEndDate(guid, value) {
+    const event = byGuid(guid);
+    if (value && event && value < event.date) {
+      showMessage("End date can't be before the event's own date.", 'error');
+      return;
+    }
+    await putFields(guid, { end_date: value });
+    showMessage(value ? 'End date set — now a multi-day event.'
+                       : 'Back to a single-day event.', 'success');
+    expandedGuid = null;
+    await loadEvents();
   }
 
   async function putOverlay(guid, body) {
@@ -762,6 +813,10 @@
         renderTable();
       } else if (action === 'save') {
         guard(saveEvent(guid));
+      } else if (action === 'update-end-date') {
+        guard(saveEndDate(guid, document.getElementById('edit-end-date')?.value || ''));
+      } else if (action === 'clear-end-date') {
+        guard(saveEndDate(guid, ''));
       } else if (action === 'hide') {
         guard(setVisibility(guid, true));
       } else if (action === 'unhide') {
