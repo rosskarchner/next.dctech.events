@@ -21,11 +21,13 @@ layout, not deleted here (that's a separate cleanup, out of scope for a
 pure reorganization): filter_events_by_location, VALID_US_STATES.
 """
 import calendar
+import copy
 import hashlib
 import io
 import json
 import os
 import yaml
+from calgen import yamlio
 import pytz
 from datetime import date, datetime, timedelta
 from email.utils import formatdate
@@ -103,17 +105,54 @@ def get_events(include_hidden=False):
         return []
 
 
+def _yaml_dir_signature(directory):
+    """What a directory of .yaml files looks like right now: enough to tell
+    whether any file was added, removed or rewritten since it was last read."""
+    entries = []
+    with os.scandir(directory) as it:
+        for entry in it:
+            if entry.name.endswith('.yaml'):
+                st = entry.stat()
+                entries.append((entry.name, st.st_mtime_ns, st.st_size))
+    entries.sort()
+    return (os.path.abspath(directory), tuple(entries))
+
+
+_yaml_dir_cache = {}
+
+
+def _load_yaml_dir_cached(key, directory, load):
+    """load() result for a directory, re-read only when its files change.
+
+    The frozen build asks for every group and category on most requests, and
+    parsing ~180 small YAML files each time dominated the build. Callers get a
+    deep copy, so they can mutate what they receive exactly as they could when
+    every call re-read the files.
+    """
+    signature = _yaml_dir_signature(directory)
+    hit = _yaml_dir_cache.get(key)
+    if hit is None or hit[0] != signature:
+        hit = (signature, load())
+        _yaml_dir_cache[key] = hit
+    return copy.deepcopy(hit[1])
+
+
 def get_approved_groups():
-    groups = []
     groups_dir = '_groups'
     if not os.path.exists(groups_dir):
-        return groups
+        return []
+    return _load_yaml_dir_cached('groups', groups_dir, _read_groups)
+
+
+def _read_groups():
+    groups = []
+    groups_dir = '_groups'
     for filename in os.listdir(groups_dir):
         if filename.endswith('.yaml'):
             slug = filename[:-5]
             try:
                 with open(os.path.join(groups_dir, filename), 'r') as f:
-                    group = yaml.safe_load(f)
+                    group = yamlio.safe_load(f)
                     group['id'] = slug
                     groups.append(group)
             except Exception as e:
@@ -123,16 +162,21 @@ def get_approved_groups():
 
 
 def get_categories():
-    categories = {}
     categories_dir = '_categories'
     if not os.path.exists(categories_dir):
-        return categories
+        return {}
+    return _load_yaml_dir_cached('categories', categories_dir, _read_categories)
+
+
+def _read_categories():
+    categories = {}
+    categories_dir = '_categories'
     for filename in os.listdir(categories_dir):
         if filename.endswith('.yaml'):
             slug = filename[:-5]
             try:
                 with open(os.path.join(categories_dir, filename), 'r') as f:
-                    cat = yaml.safe_load(f)
+                    cat = yamlio.safe_load(f)
                     cat['slug'] = slug
                     categories[slug] = cat
             except Exception as e:
@@ -357,7 +401,7 @@ def get_stats():
         return {}
     try:
         with open(stats_file, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f) or {}
+            return yamlio.safe_load(f) or {}
     except Exception as e:
         print(f"Error loading stats: {e}")
         return {}

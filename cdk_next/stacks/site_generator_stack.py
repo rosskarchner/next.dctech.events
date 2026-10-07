@@ -65,7 +65,13 @@ BUILDSPEC = {
                 # real `pip install` here on a real matching machine, not a
                 # local cross-platform `uv` install, so it has no trouble
                 # finding a prebuilt wheel.
-                'pip install --quiet "$(ls wheels/*.whl)[cards]" boto3',
+                # --only-binary=pyyaml: PyYAML's prebuilt wheels bundle libyaml
+                # (the C loader calgen's build path relies on for speed). Without
+                # it pip would silently compile from source, with no libyaml
+                # headers on this image, and calgen would fall back to the pure
+                # Python loader, ~10x slower. Fail the install instead.
+                # The build log prints "YAML loader: CSafeLoader" to confirm.
+                'pip install --quiet --only-binary=pyyaml "$(ls wheels/*.whl)[cards]" boto3',
             ],
         },
         "build": {

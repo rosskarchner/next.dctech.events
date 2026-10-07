@@ -35,6 +35,7 @@ from datetime import date, datetime
 
 import markdown
 import yaml
+from calgen import yamlio
 from bs4 import BeautifulSoup
 
 UPDATES_DIR = '_updates'
@@ -58,7 +59,7 @@ def _parse_date(value):
 def _load_post(path):
     try:
         with open(path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f) or {}
+            data = yamlio.safe_load(f) or {}
     except (OSError, yaml.YAMLError):
         return None
 
@@ -111,7 +112,7 @@ def _load_post(path):
 def _load_free_post(path):
     try:
         with open(path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f) or {}
+            data = yamlio.safe_load(f) or {}
     except (OSError, yaml.YAMLError):
         return None
 

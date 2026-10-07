@@ -24,6 +24,7 @@ archive holds the days already past, live data holds the rest.
 import os
 
 import yaml
+from calgen import yamlio
 
 ARCHIVE_DIR = '_archive'
 
@@ -31,7 +32,7 @@ ARCHIVE_DIR = '_archive'
 def _load_week(path):
     try:
         with open(path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f) or {}
+            data = yamlio.safe_load(f) or {}
     except (OSError, yaml.YAMLError):
         return None
     if not data.get('week_id'):

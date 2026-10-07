@@ -156,6 +156,11 @@ def main(site_dir=None, output_dir=None):
     if output_dir is None:
         output_dir = os.path.join(site_dir, 'build')
 
+    from calgen import yamlio
+    print(f"YAML loader: {yamlio.LOADER_NAME}"
+          + ("" if yamlio.LOADER_NAME == 'CSafeLoader'
+             else "  (pure Python: ~10x slower; PyYAML has no libyaml here)"))
+
     app = create_app(site_dir)
     app.config['FREEZER_DESTINATION'] = output_dir
     app.config['FREEZER_RELATIVE_URLS'] = True
