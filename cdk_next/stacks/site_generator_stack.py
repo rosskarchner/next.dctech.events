@@ -7,9 +7,12 @@ script, and a locally-built calgen wheel (from packages/calgen, calgen's only
 maintained copy) — one shared rendering implementation, only its data source
 changes.
 
-Triggers: DynamoDB-Streams-fed debounced Lambda (near-real-time rebuilds
-after admin approvals) + a fixed 4-hour schedule aligned with the iCal
-aggregator cadence + on-demand via POST /admin/rebuild / MCP trigger_rebuild.
+Triggers: a DynamoDB-Streams-fed Lambda that rings RENDER#site.dirtyAt and
+starts a build (near-real-time rebuilds after admin approvals and aggregator
+runs), a follow-up Lambda that starts one more build when a finished build left
+the site dirty, a nightly 05:05 UTC time-roll ring (past events drop off), a
+daily 09:00 UTC safety-net build, and on-demand via POST /admin/rebuild / MCP
+trigger_rebuild. See ideas/ripple.md (Phase 0) for why it is shaped this way.
 """
 import os
 
@@ -33,6 +36,21 @@ import config
 
 BUILD_DIR = os.path.join(os.path.dirname(__file__), "..", "build")
 
+# Stream records that can change a rendered page. Keep in sync with
+# RELEVANT_PREFIXES in lambda_src/site_generator/trigger/handler.py (a test
+# checks). Used as an event-source filter so records outside it (DRAFT#,
+# SUBSCRIBER#, and the RENDER# state item this very trigger writes) never invoke
+# the function at all; the handler re-checks, so the filter is an optimisation
+# and not the only guard.
+SITE_RELEVANT_PREFIXES = (
+    "EVENT#", "GROUP#", "CATEGORY#", "RECURRING#", "ICAL#",
+    "POST#", "UPDATE#", "ARCHIVE#",
+)
+
+# The one state item the trigger, the follow-up and the build share. IAM below is
+# scoped to this partition key so none of them can write anything else.
+RENDER_STATE_PK = "RENDER#site"
+
 BUILDSPEC = {
     "version": "0.2",
     "phases": {
@@ -53,7 +71,10 @@ BUILDSPEC = {
         "build": {
             "commands": [
                 "cd site",
-                "python ../export_dynamo_to_calgen.py --table $TABLE_NAME",
+                # --stamp-export records when this build reads the table
+                # (RENDER#site.exportAt) so the follow-up Lambda can tell which
+                # stream rings the build covered.
+                "python ../export_dynamo_to_calgen.py --table $TABLE_NAME --stamp-export",
                 # Deliberately no `calgen refresh` — the iCal Aggregator owns
                 # fetching; the export already materialized the cache files.
                 "calgen pipeline --site-dir .",
@@ -160,10 +181,11 @@ class NextSiteGeneratorStack(cdk.Stack):
             #
             # This does not do what its name suggests: a second StartBuild
             # *fails* with AccountLimitExceededException rather than being
-            # queued. So the stream-fed trigger raises on that error and lets
-            # its event source mapping re-drive the batch, and the Monday state
-            # machine's startBuild.sync steps allow for the wait
-            # (next_dctech_events-lux).
+            # queued. The stream-fed trigger therefore stamps
+            # RENDER#site.dirtyAt first and treats a refusal as success; the
+            # follow-up Lambda starts one more build when the running one
+            # finishes. The Monday state machine's startBuild.sync steps still
+            # retry through the wait themselves (next_dctech_events-lux).
             concurrent_build_limit=1,
             timeout=cdk.Duration.minutes(30),
         )
@@ -185,7 +207,21 @@ class NextSiteGeneratorStack(cdk.Stack):
             )
         )
 
-        # Streams-fed debounced trigger for near-real-time rebuilds
+        render_state_condition = {
+            "ForAllValues:StringEquals": {"dynamodb:LeadingKeys": [RENDER_STATE_PK]}
+        }
+        # The build stamps exportAt on the state item (and nothing else).
+        self.project.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:UpdateItem"],
+                resources=[table.table_arn],
+                conditions=render_state_condition,
+            )
+        )
+
+        # Streams-fed trigger for near-real-time rebuilds: rings dirtyAt, then
+        # tries to start a build. A refused start is not an error; the follow-up
+        # Lambda below re-drives it when the running build finishes.
         trigger_fn = lambda_.Function(
             self,
             "NextSiteBuildTrigger",
@@ -197,7 +233,10 @@ class NextSiteGeneratorStack(cdk.Stack):
                 os.path.join(BUILD_DIR, "site_generator_trigger")
             ),
             timeout=cdk.Duration.seconds(60),
-            environment={"CODEBUILD_PROJECT_NAME": self.project.project_name},
+            environment={
+                "CODEBUILD_PROJECT_NAME": self.project.project_name,
+                "TABLE_NAME": table.table_name,
+            },
             log_group=logs.LogGroup(
                 self,
                 "NextSiteBuildTriggerLogGroup",
@@ -212,17 +251,109 @@ class NextSiteGeneratorStack(cdk.Stack):
                 batch_size=1000,
                 max_batching_window=cdk.Duration.seconds(90),
                 retry_attempts=1,
+                # One pattern, not one per prefix: a mapping allows five
+                # filters and there are eight prefixes. Values in a field's
+                # array OR together.
+                filters=[
+                    lambda_.FilterCriteria.filter({
+                        "dynamodb": {"Keys": {"PK": {"S": [
+                            rule
+                            for prefix in SITE_RELEVANT_PREFIXES
+                            for rule in lambda_.FilterRule.begins_with(prefix)
+                        ]}}}
+                    })
+                ],
             )
         )
         trigger_fn.add_to_role_policy(
             iam.PolicyStatement(
-                actions=[
-                    "codebuild:StartBuild",
-                    "codebuild:ListBuildsForProject",
-                    "codebuild:BatchGetBuilds",
-                ],
+                actions=["codebuild:StartBuild"],
                 resources=[self.project.project_arn],
             )
+        )
+        trigger_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:UpdateItem"],
+                resources=[table.table_arn],
+                conditions=render_state_condition,
+            )
+        )
+
+        # When a build ends, start one more if the site went dirty after that
+        # build read the table. Same code asset as the trigger.
+        followup_fn = lambda_.Function(
+            self,
+            "NextSiteBuildFollowup",
+            function_name=f"{config.PREFIX}-site-build-followup",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            architecture=lambda_.Architecture.X86_64,
+            handler="followup.lambda_handler",
+            code=lambda_.Code.from_asset(
+                os.path.join(BUILD_DIR, "site_generator_trigger")
+            ),
+            timeout=cdk.Duration.seconds(60),
+            environment={
+                "CODEBUILD_PROJECT_NAME": self.project.project_name,
+                "TABLE_NAME": table.table_name,
+            },
+            log_group=logs.LogGroup(
+                self,
+                "NextSiteBuildFollowupLogGroup",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=cdk.RemovalPolicy.DESTROY,
+            ),
+        )
+        followup_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["codebuild:StartBuild", "codebuild:BatchGetBuilds"],
+                resources=[self.project.project_arn],
+            )
+        )
+        followup_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:GetItem"],
+                resources=[table.table_arn],
+                conditions=render_state_condition,
+            )
+        )
+        events.Rule(
+            self,
+            "NextSiteBuildFinished",
+            event_pattern=events.EventPattern(
+                source=["aws.codebuild"],
+                detail_type=["CodeBuild Build State Change"],
+                detail={
+                    "project-name": [self.project.project_name],
+                    "build-status": [
+                        "SUCCEEDED", "FAILED", "FAULT", "STOPPED", "TIMED_OUT",
+                    ],
+                },
+            ),
+            targets=[targets.LambdaFunction(followup_fn)],
+            description="Start a follow-up site build if the site went dirty during this one",
+        )
+
+        # Nightly time roll: nothing in the table changes at midnight, but
+        # "today" does, and past events have to drop off every page that lists
+        # them. Fixed 05:05 UTC rather than EventBridge Scheduler's
+        # timezone-aware cron (unused elsewhere in this codebase, see
+        # updates_stack.py): that is 00:05 EST and 01:05 EDT, so it always
+        # lands after Eastern midnight and only the margin drifts. It rings the
+        # same doorbell as a stream change, so it coalesces with a running
+        # build instead of colliding with it.
+        events.Rule(
+            self,
+            "NextSiteTimeRollSchedule",
+            schedule=events.Schedule.expression("cron(5 5 * * ? *)"),
+            targets=[
+                targets.LambdaFunction(
+                    trigger_fn,
+                    event=events.RuleTargetInput.from_object(
+                        {"reason": "time_roll"}
+                    ),
+                )
+            ],
+            description="Rebuild just after Eastern midnight so past events drop off",
         )
 
         # Daily safety-net rebuild at 4 AM EST (09:00 UTC; 5 AM during EDT).

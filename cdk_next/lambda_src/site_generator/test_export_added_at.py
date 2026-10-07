@@ -70,3 +70,41 @@ class TestTitleKey:
         for date_str, title in [('2026-09-01', 'Open Hack'),
                                 ('2026-11-14', '  District   Arcade ')]:
             assert export._title_key(date_str, title) == pub._title_key(date_str, title)
+
+
+class TestStampExport:
+    """The build records when it reads the table so trigger/followup.py can tell
+    which rings the build covered. The key must match handler.py's state item."""
+
+    def test_writes_exportat_to_the_render_state_item(self):
+        calls = []
+
+        class FakeTable:
+            def update_item(self, **kw):
+                calls.append(kw)
+
+        export._stamp_export(FakeTable())
+
+        (call,) = calls
+        assert call['Key'] == {'PK': 'RENDER#site', 'SK': 'STATE'}
+        assert call['UpdateExpression'] == 'SET exportAt = :t'
+        assert isinstance(call['ExpressionAttributeValues'][':t'], int)
+
+    def test_a_failed_stamp_does_not_fail_the_build(self, capsys):
+        class DeniedTable:
+            def update_item(self, **kw):
+                raise RuntimeError('AccessDeniedException')
+
+        export._stamp_export(DeniedTable())  # must not raise
+
+        assert 'could not stamp' in capsys.readouterr().err
+
+    def test_key_matches_the_trigger_and_followup(self):
+        sys.path.insert(0, os.path.join(HERE, 'trigger'))
+        os.environ.setdefault('CODEBUILD_PROJECT_NAME', 'x')
+        os.environ.setdefault('TABLE_NAME', 'y')
+        os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
+        import followup
+        import handler
+        assert handler.STATE_KEY == followup.STATE_KEY == {
+            'PK': 'RENDER#site', 'SK': 'STATE'}

@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from decimal import Decimal
 
 import boto3
@@ -75,14 +76,42 @@ def _reset_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
+def _stamp_export(table):
+    """Record when this build reads the table, for trigger/followup.py.
+
+    A stream ring stamped RENDER#site.dirtyAt at or before this moment is in the
+    build that is about to Scan; a later one is not and needs a follow-up build.
+    Stamped just *before* the Scan, so a ring landing in between is treated as
+    uncovered, which costs at most one redundant build and never loses a change.
+    Only the CodeBuild step passes --stamp-export; the newsletter Lambda reuses
+    this script and must not touch the state.
+
+    Best effort: a failed stamp must never fail the build. followup.py treats a
+    missing or stale exportAt as "use the build's start time", which costs at
+    most one redundant build.
+    """
+    try:
+        table.update_item(
+            Key={'PK': 'RENDER#site', 'SK': 'STATE'},
+            UpdateExpression='SET exportAt = :t',
+            ExpressionAttributeValues={':t': int(time.time() * 1000)},
+        )
+    except Exception as e:  # noqa: BLE001 - deliberately broad, see above
+        print(f'WARNING: could not stamp RENDER#site.exportAt: {e}', file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--table',
                         default=os.environ.get('DYNAMODB_TABLE_NAME',
                                                'dctech-events-next'))
+    parser.add_argument('--stamp-export', action='store_true',
+                        help='record the read time in RENDER#site.exportAt')
     args = parser.parse_args()
 
     table = boto3.resource('dynamodb').Table(args.table)
+    if args.stamp_export:
+        _stamp_export(table)
     # Everything real lives at SK='META', except a recurring series' own
     # per-occurrence corrections (RECURRING#{slug} / SK=OVERRIDE#{date}) —
     # without the second clause those rows are invisible to this scan
