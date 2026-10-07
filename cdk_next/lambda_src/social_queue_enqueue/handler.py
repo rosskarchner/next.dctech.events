@@ -45,7 +45,11 @@ def _events_from_stream(records):
         image = record.get("dynamodb", {}).get("NewImage")
         if not image:
             continue
-        items.append({k: _deserializer.deserialize(v) for k, v in image.items()})
+        item = {k: _deserializer.deserialize(v) for k, v in image.items()}
+        # Virtual events are never announced as new.
+        if item.get("location_type") == "virtual":
+            continue
+        items.append(item)
     return items
 
 

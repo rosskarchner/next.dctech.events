@@ -151,6 +151,8 @@ def _events_added_in_window(events, by_guid, by_title, start, end):
 
     selected = []
     for event in events:
+        if event.get("location_type") == "virtual":
+            continue
         added = _added_at(event, by_guid, by_title)
         if not added or not (lower <= added < upper):
             continue

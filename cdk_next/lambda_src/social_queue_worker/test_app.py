@@ -225,6 +225,19 @@ def test_process_one_skips_a_past_event(monkeypatch):
     assert table.items[("SOCIALQUEUE#abc", "META")]["status"] == "skipped"
 
 
+def test_process_one_skips_a_virtual_event(monkeypatch):
+    monkeypatch.setattr(app, "_is_past", lambda event, now=None: False)
+    table = _FakeTable({
+        ("SOCIALQUEUE#abc", "META"): _queued("abc"),
+        ("EVENT#abc", "META"): {"PK": "EVENT#abc", "SK": "META",
+                                **_event(location_type="virtual")},
+    })
+    result = app._process_one(table)
+    assert result["status"] == "skipped"
+    assert result["reason"] == "virtual event"
+    assert table.items[("SOCIALQUEUE#abc", "META")]["status"] == "skipped"
+
+
 def test_process_one_posts_to_both_networks(monkeypatch):
     monkeypatch.setattr(app, "_is_past", lambda event, now=None: False)
     monkeypatch.setattr(app.networks, "mastodon_post",

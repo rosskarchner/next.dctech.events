@@ -12,7 +12,9 @@ without posting:
 
 * the EVENT# item it points at has been deleted since it was queued, or
 * the event's date (and time, if it has one) is already in the past by the
-  time it reaches the front of the queue — never announce something over.
+  time it reaches the front of the queue — never announce something over, or
+* it is a virtual event (the enqueuer already drops these; this catches ones
+  queued before that, or reclassified since).
 
 Posting reuses the same Mastodon/Bluesky HTTP clients and Secrets Manager
 credentials as the /updates cross-poster (lambda_src/social_publisher/), and
@@ -201,6 +203,11 @@ def _process_one(table):
         _resolve(table, queue_pk, "skipped")
         return {"status": "skipped", "pk": queue_pk,
                 "reason": "event no longer exists"}
+
+    if event.get("location_type") == "virtual":
+        _resolve(table, queue_pk, "skipped")
+        return {"status": "skipped", "pk": queue_pk,
+                "reason": "virtual event"}
 
     if _is_past(event):
         _resolve(table, queue_pk, "skipped")

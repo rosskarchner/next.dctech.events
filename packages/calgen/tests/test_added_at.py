@@ -132,3 +132,17 @@ class TestGrouping:
         _write_index(site, {'a': '2026-08-10T09:00:00Z'})
         day = group_by_added_date([_event(guid='a')])[0]
         assert day['anchor'] == day['date'] == '2026-08-10'
+
+
+class TestVirtualEvents:
+    def test_virtual_events_are_not_grouped(self, site):
+        _write_index(site, {'g1': '2026-09-01T00:00:00Z', 'g2': '2026-09-01T00:00:00Z'})
+        online = dict(_event(guid='g1'), location_type='virtual')
+        in_person = dict(_event(title='Hack Night', guid='g2'), location_type='physical')
+        days = group_by_added_date([online, in_person])
+        assert [e['title'] for e in days[0]['events']] == ['Hack Night']
+        assert days[0]['count'] == 1
+
+    def test_a_day_of_only_virtual_events_disappears(self, site):
+        _write_index(site, {'g1': '2026-09-01T00:00:00Z'})
+        assert group_by_added_date([dict(_event(guid='g1'), location_type='virtual')]) == []

@@ -553,3 +553,12 @@ def test_put_post_reraises_anything_that_is_not_a_key_collision():
 
     with pytest.raises(app.ClientError):
         app._put_post(_Broken(), {"PK": "UPDATE#2026-08-31"})
+
+
+def test_virtual_events_are_left_out_of_the_roundup():
+    events = [
+        {"title": "Online", "date": "2026-09-02", "guid": "a", "location_type": "virtual"},
+        {"title": "In person", "date": "2026-09-02", "guid": "b", "location_type": "physical"},
+    ]
+    by_guid = {"a": "2026-08-06T00:00:00Z", "b": "2026-08-06T00:00:00Z"}
+    assert added(events, by_guid) == ["In person"]

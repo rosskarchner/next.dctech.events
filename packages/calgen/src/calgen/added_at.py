@@ -69,6 +69,10 @@ def group_by_added_date(events, limit_days=None):
 
     days = {}
     for event in events:
+        # Virtual events are not announced as "new" anywhere (this page, the
+        # homepage teaser, the /updates roundup, the social queue).
+        if event.get('location_type') == 'virtual':
+            continue
         day = added_on(event, by_guid, by_title)
         if not day:
             continue

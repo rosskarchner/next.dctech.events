@@ -74,3 +74,13 @@ def test_enqueue_is_idempotent_on_retry():
     assert handler._enqueue(table, event) == "queued"
     assert handler._enqueue(table, event) == "already_queued"
     assert len(table.items) == 1
+
+
+def test_virtual_events_are_not_queued():
+    records = [
+        _record("EVENT#online", extra={"location_type": {"S": "virtual"}}),
+        _record("EVENT#local", extra={"location_type": {"S": "physical"}}),
+        _record("EVENT#unknown"),
+    ]
+    got = [i["PK"] for i in handler._events_from_stream(records)]
+    assert got == ["EVENT#local", "EVENT#unknown"]
