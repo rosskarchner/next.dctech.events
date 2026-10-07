@@ -434,7 +434,7 @@ def get_week_identifier(target_date):
 
 def get_upcoming_weeks(num_weeks=12):
     weeks = set()
-    current_date = date.today()
+    current_date = datetime.now(local_tz).date()
     for i in range(num_weeks):
         weeks.add(get_week_identifier(current_date + timedelta(weeks=i)))
     for event in get_events():
