@@ -168,6 +168,9 @@ fi
 mkdir -p build/site_src/wheels
 cp -r ../site build/site_src/site
 cp lambda_src/site_generator/export_dynamo_to_calgen.py build/site_src/
+# Card fonts (~12 MB, mostly the color emoji font). Deliberately not inside the
+# calgen wheel: the Lambdas install that wheel and never draw cards.
+cp -r ../packages/calgen/og-fonts build/site_src/og-fonts
 uv build --quiet --no-cache --wheel "$CALGEN" --out-dir build/site_src/wheels
 
 echo "Lambda assets built under cdk_next/build/"

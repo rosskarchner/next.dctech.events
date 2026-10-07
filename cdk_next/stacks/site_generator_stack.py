@@ -81,7 +81,11 @@ BUILDSPEC = {
                 # Must run after pipeline (needs _data/all_events.json) and
                 # before build (Frozen-Flask copies static/ into the frozen
                 # output wholesale, so these need to already be there).
-                "calgen og-images --site-dir .",
+                # CALGEN_OG_FONT_DIR points at the card fonts (Noto Sans + Noto
+                # Color Emoji) shipped in the source zip next to site/. They stay
+                # out of the calgen wheel, which the Lambdas install too. An old
+                # wheel ignores the variable, so the order of deploys is safe.
+                "CALGEN_OG_FONT_DIR=../og-fonts calgen og-images --site-dir .",
                 "calgen build --site-dir .",
                 # Two passes, each independently --delete'd, so every object
                 # gets an explicit Cache-Control instead of S3's default (no
