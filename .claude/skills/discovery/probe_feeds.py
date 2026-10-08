@@ -15,6 +15,12 @@ dependency, so it is present wherever calgen's tests run). Read-only; makes only
 GET requests to the feeds you name.
 
 Reading the output:
+  [City, ST] OUT / CHECK
+                  the group's home city, read from its Meetup page. OUT is a
+                  state other than DC, VA or MD (a Georgia group listing
+                  online events is not a DC group); CHECK is a VA or MD town
+                  outside the DC metro list below, so look before proposing
+                  (Frederick, Columbia, Baltimore). Blank for non-Meetup feeds.
   up=0            nothing scheduled: put it on the watchlist, don't propose it
   ERR HTTP 403    private or invite-only group: its feed can't be aggregated
   identical titles+dates across several slugs
@@ -26,6 +32,7 @@ Reading the output:
 """
 import concurrent.futures as cf
 import datetime
+import re
 import sys
 import urllib.request
 
@@ -38,6 +45,43 @@ def feed_url(arg):
     if arg.startswith("http"):
         return arg
     return f"https://www.meetup.com/{arg}/events/ical/"
+
+
+# DC metro, as in calendar-qc's out-of-area rule: DC; Northern Virginia; the
+# Montgomery and Prince George's county suburbs.
+METRO = {
+    "washington", "arlington", "alexandria", "fairfax", "reston", "tysons",
+    "tysons corner", "mclean", "vienna", "herndon", "ashburn", "sterling",
+    "leesburg", "manassas", "falls church", "springfield", "chantilly",
+    "centreville", "burke", "woodbridge", "dulles", "mclean", "oakton",
+    "bethesda", "silver spring", "rockville", "gaithersburg", "germantown",
+    "potomac", "chevy chase", "takoma park", "college park", "greenbelt",
+    "hyattsville", "laurel", "bowie", "upper marlboro", "riverdale", "beltsville",
+    "national harbor", "oxon hill", "clinton", "kensington", "wheaton",
+}
+
+
+def home(arg):
+    """'City, ST' from a Meetup group page, with OUT / CHECK flags, or ''."""
+    if arg.startswith("http") and "meetup.com" not in arg:
+        return ""
+    slug = arg if not arg.startswith("http") else arg.split("meetup.com/")[1].split("/")[0]
+    try:
+        req = urllib.request.Request(f"https://www.meetup.com/{slug}/",
+                                     headers={"User-Agent": USER_AGENT})
+        page = urllib.request.urlopen(req, timeout=25).read().decode("utf8", "replace")
+    except Exception:  # noqa: BLE001 - the feed result matters more than this
+        return ""
+    m = re.search(r'"city":"([^"]+)","state":"([^"]*)"', page)
+    if not m:
+        return ""
+    city, state = m.group(1), m.group(2).upper()
+    flag = ""
+    if state not in ("DC", "VA", "MD"):
+        flag = " OUT"
+    elif state != "DC" and city.lower() not in METRO:
+        flag = " CHECK"
+    return f"[{city}, {state}]{flag}"
 
 
 def probe(arg):
@@ -54,7 +98,7 @@ def probe(arg):
         events.append((start, str(comp.get("SUMMARY", ""))[:60], str(comp.get("LOCATION", ""))[:60]))
     events.sort()
     upcoming = [e for e in events if e[0] >= today]
-    return arg, {"total": len(events), "upcoming": upcoming}
+    return arg, {"total": len(events), "upcoming": upcoming, "home": home(arg)}
 
 
 def main(argv):
@@ -70,7 +114,7 @@ def main(argv):
             print(f"{arg:60} ERR {r['error']}")
             continue
         nxt = " | ".join(f"{d} {t}" + (f" @ {loc}" if loc else "") for d, t, loc in r["upcoming"][:2])
-        print(f"{arg:60} up={len(r['upcoming']):<3} {nxt}")
+        print(f"{arg:60} {r['home']:28} up={len(r['upcoming']):<3} {nxt}")
         if r["upcoming"]:
             signatures.setdefault(tuple((d, t) for d, t, _ in r["upcoming"][:5]), []).append(arg)
     for sig, args in signatures.items():

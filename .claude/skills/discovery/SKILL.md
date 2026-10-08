@@ -91,7 +91,7 @@ whichever host serves a valid feed, and probe it before trusting it.
 
 ## Phase 1 — fixed listing sources
 
-Two sources, every run:
+Three sources, every run:
 
 - **`eventbrite.com/d/dc--washington/technology/`** — heavy client-side
   rendering; WebFetch comes back empty or partial. Use the browser tool:
@@ -108,7 +108,34 @@ Two sources, every run:
   then collect each group card's slug and description. Roughly half of the
   groups are already tracked.
 
-`technical.ly/dc/events/` was a third source in the original agent's list
+- **`actiac.org/upcoming-events`** — ACT-IAC (American Council for Technology
+  and Industry Advisory Council), the government-IT community in Reston and
+  DC. It publishes no iCal feed or API (looked for, none), and WebFetch and
+  the browser both get HTTP 403 on its *event* pages, so this source only works
+  through the browser tool, on the listing page. Navigate to it and read
+  `document.body.innerText` (the cards have no structured data and their link
+  text is empty). It lists about 20 events at once, in blocks of: day and month
+  (no year, they are the next ones in order), a category label, the title,
+  `In-Person Event` / `Virtual Event` or a city, and a blurb.
+
+  Keep the **Conference**, **Forum** and in-person **Federal Insights
+  Exchange** entries: those are real gatherings on cybersecurity, AI and
+  modernization, in the Reston/DC area. Skip **Community of Interest (COI)**
+  (virtual member meetings), **Professional Development** seminars,
+  **ACT-IAC Gives Back** (volunteering), **ACT-IAC Academy** and Webinars.
+  ACT-IAC has no feed, so each keeper goes in as `propose_event`, not
+  `propose_group`.
+
+  For the venue and times, navigate the browser to the entry's own
+  `actiac.org/act-iac-event/<slug>` link (the slugs are in the page's `a[href*="/act-iac-event/"]`
+  elements): it redirects to a Cvent registration page that states the exact
+  date, hours and venue, and that Cvent URL is the `url` to propose. Read that
+  page's text rather than a summary. Don't take a venue from aggregators:
+  `infosec-conferences.com` listed ACT-IAC's October summit as Arlington when
+  Cvent says Reston. Check each title against `get_events` first, since
+  ACT-IAC events are also re-listed by other calendars.
+
+`technical.ly/dc/events/` was a fourth source in the original agent's list
 but is gone as of this skill's first real run (2026-09-27): both WebFetch
 and Tavily's extractor returned a stale 2013 archive page, not a live
 listing — the site no longer serves a working DC events calendar at that
@@ -159,16 +186,38 @@ around 25 searches and every style gets its turn over three weeks:
 
 | `week % 3` | Style | Query | `allowed_domains` |
 |---|---|---|---|
-| 0 | Meetup | `{topic} meetup Washington DC` | `meetup.com` |
-| 1 | Luma | `{topic} events Washington DC` | `lu.ma`, `luma.com` |
-| 2 | Open web | `{topic} user group OR meetup Northern Virginia OR Maryland OR "Washington DC"` | none |
+| 0 | Meetup | `{topic} meetup {place}` | `meetup.com` |
+| 1 | Luma | `{topic} events {place}` | `lu.ma`, `luma.com` |
+| 2 | Open web | `{topic} user group {place}` | none |
 
-Rotate the place within a style too: DC proper, Northern Virginia (Arlington,
-Reston, Tysons, Alexandria), and the Maryland suburbs (Bethesda, Rockville,
-Silver Spring) turn up different groups. If a category's first query is all
-already-tracked groups, that category is saturated for now; don't spend a
-second query on it. If it returns an unfamiliar organizer, a second query
-naming them is worth it.
+**One place per query, never a list.** Name exactly one town in `{place}`. A
+query with `Washington DC OR Northern Virginia OR Maryland` made the engine
+return national directories and Baltimore, Frederick and Hampton Roads groups,
+because it does not honor the ORs and "Maryland" alone reaches Baltimore. A
+town name in the query is what keeps the results local. The pool, with
+Washington written as `"Washington, DC"` (quoted) so it doesn't match
+Washington State:
+
+> "Washington, DC"; Arlington VA; Alexandria VA; Reston VA; Tysons VA;
+> Fairfax VA; Ashburn VA; Herndon VA; Bethesda MD; Rockville MD;
+> Silver Spring MD; College Park MD
+
+Give each topic the place at index `(ISO week + topic's position in this run's
+list) % 12`, so over a few weeks every topic is asked about several towns
+and no town is neglected. Keep to a run's budget, and drop a place from the
+pool only if it has returned nothing new in several runs.
+
+**Read results by place, not by title.** Drop a hit at once if its snippet or
+URL names somewhere outside the metro: Baltimore, Frederick, Columbia,
+Annapolis, Richmond, Hampton Roads, Philadelphia, or any other state. The
+engine returns these even when the query named a town. Aggregator pages
+(`infosec-conferences.com`, `dev.events`, `luminik.io`) get city wrong too:
+one listed an event as Arlington that was in Reston. Treat them as a pointer to
+the event's own page, never as the source of a venue.
+
+**Saturation.** If a topic's first query is all already-tracked groups, that
+topic is saturated for now; don't spend a second query on it. If it returns an
+unfamiliar organizer, a second query naming them is worth it.
 
 **Budget.** Stop when the week's slice is done, around 25 searches, plus the
 follow-up reads for real candidates. More is not better: the review queue is
@@ -189,9 +238,18 @@ Each step is cheap; the later ones cost a fetch.
    a vendor webinar mill, or a general networking group stops here.
 4. **Find the feed**, then run
    `python3 .claude/skills/discovery/probe_feeds.py <slug-or-feed-url> ...`
-   (several at once is fine). It reports upcoming events per feed and flags the
-   patterns below. Then `verify_ical_feed` confirms the feed parses; `propose_group`
-   re-verifies it.
+   (several at once is fine). It reports each Meetup group's home city and the
+   upcoming events per feed, and flags the patterns below. Then
+   `verify_ical_feed` confirms the feed parses; `propose_group` re-verifies it.
+   - **`[City, ST] OUT`** — the group is based outside DC, VA and MD. Skip it
+     without reading anything further; its online events don't make it a DC
+     group (a Georgia robotics group ran weekly online sessions that looked
+     fine in the feed).
+   - **`[City, ST] CHECK`** — a VA or MD town outside the metro list
+     (Frederick, Columbia, Baltimore). Skip unless its events are in the metro.
+     A group's home city is not where an event happens: a group homed in
+     Washington listed a conference in Miami Beach, so for any single event
+     read the venue from the event page.
    - **`up=0`** — nothing scheduled. The feed is valid and empty. Don't propose;
      put it on the watchlist (see Report). It will turn up again when it has
      events.
