@@ -356,16 +356,19 @@ def update_draft_status(draft_id, new_status, reviewer_email=None, commit_url=No
 
 
 def _draft_item_to_dict(item):
-    """Convert a DynamoDB DRAFT item to a dict."""
+    """Convert a DynamoDB DRAFT item to a dict.
+
+    Returns every stored attribute except table keys and the submitter's
+    account id. This used to be a whitelist, and each field it forgot (end_date,
+    end_time, city, state, all_day, fallback_url) was silently dropped at
+    approval, because approval merges from this dict.
+    """
     draft_id = item['PK'].split('#', 1)[1]
     result = {'id': draft_id}
-    for field in ['draft_type', 'status', 'submitter_email', 'reviewer_email',
-                  'created_at', 'updated_at', 'title', 'date', 'time',
-                  'location', 'url', 'cost', 'description', 'group_name',
-                  'name', 'website', 'ical', 'ical_url', 'categories',
-                  'commit_url']:
-        if field in item:
-            result[field] = _to_plain(item[field])
+    for field, value in item.items():
+        if field in ('PK', 'SK', 'submitter_id') or field.startswith('GSI'):
+            continue
+        result[field] = _to_plain(value)
     return result
 
 
@@ -760,7 +763,7 @@ def promote_draft_to_event(draft):
     """
     guid = draft['id']
     data = {k: draft.get(k) for k in
-            ['title', 'url', 'date', 'time', 'end_date', 'cost', 'city',
+            ['title', 'url', 'date', 'time', 'end_date', 'end_time', 'cost', 'city',
              'state', 'all_day', 'categories', 'location', 'description']
             if draft.get(k) is not None}
     data['submitted_by'] = draft.get('submitter_email', '')
@@ -2234,6 +2237,27 @@ def list_trusted_submitters():
 
 def slugify(text):
     return re.sub(r'[^a-z0-9]+', '-', str(text or '').lower()).strip('-')
+
+
+def merge_draft_for_approval(draft, overrides=None):
+    """What a moderator's approval publishes: the draft, plus any overrides.
+
+    Shared by the admin routes and MCP so the two cannot disagree. `categories`
+    replaces the draft's only when the override carries that key (a form with
+    no category boxes ticked sends none), and is validated; every other
+    override applies when not None.
+    """
+    merged = {k: v for k, v in draft.items() if v is not None}
+    overrides = dict(overrides or {})
+    if 'categories' in overrides:
+        cats = overrides.pop('categories')
+        if isinstance(cats, str):
+            cats = [cats] if cats else []
+        if cats is not None:
+            validate_category_slugs(cats)
+            merged['categories'] = list(cats)
+    merged.update({k: v for k, v in overrides.items() if v is not None})
+    return merged
 
 
 def promote_draft(draft_id, draft_type, merged):

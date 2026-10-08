@@ -18,6 +18,7 @@ from auth import get_user_from_event, require_admin
 from constants import CONTACT_LIST_NAME, NEWSLETTER_TOPIC
 from routes.responses import html as _html_response, json as _json_response
 from db import (
+    merge_draft_for_approval,
     get_drafts_by_status, get_draft as db_get_draft, update_draft_status,
     promote_draft_to_event, put_group,
     get_all_categories,
@@ -140,19 +141,15 @@ def approve_draft(event, jinja_env, draft_id):
 
     data = _parse_body(event)
 
-    # Normalize categories
-    cats = data.get('categories', [])
-    if isinstance(cats, str):
-        cats = [cats] if cats else []
-    data['categories'] = cats
-
     draft = db_get_draft(draft_id)
     if not draft:
         return _html(404, 'Draft not found', event)
 
     draft_type = draft.get('draft_type', 'event')
-    merged = {k: v for k, v in draft.items() if v is not None}
-    merged.update({k: v for k, v in data.items() if v is not None})
+    try:
+        merged = merge_draft_for_approval(draft, data)
+    except ValueError as exc:
+        return _html(400, str(exc), event)
 
     _promote_approved_draft(draft_id, draft_type, merged)
     update_draft_status(draft_id, 'APPROVED', claims.get('email', ''))
@@ -203,18 +200,15 @@ def approve_draft_json(event, jinja_env, draft_id):
         return err
 
     data = _parse_body(event)
-    cats = data.get('categories', [])
-    if isinstance(cats, str):
-        cats = [cats] if cats else []
-    data['categories'] = cats
-
     draft = db_get_draft(draft_id)
     if not draft:
         return _json(404, {'error': 'Draft not found'})
 
     draft_type = draft.get('draft_type', 'event')
-    merged = {k: v for k, v in draft.items() if v is not None}
-    merged.update({k: v for k, v in data.items() if v is not None})
+    try:
+        merged = merge_draft_for_approval(draft, data)
+    except ValueError as exc:
+        return _json(400, {'error': str(exc)})
 
     promoted_id = _promote_approved_draft(draft_id, draft_type, merged)
     update_draft_status(draft_id, 'APPROVED', claims.get('email', ''))

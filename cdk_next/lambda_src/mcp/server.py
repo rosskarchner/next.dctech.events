@@ -628,10 +628,8 @@ def approve_submission(draft_id: str, categories: list | None = None,
             'only pending submissions can be approved'
         )
 
-    merged = {k: v for k, v in draft.items() if v is not None}
-    if categories is not None:
-        _check_categories(categories)
-        merged['categories'] = categories
+    overrides = {} if categories is None else {'categories': categories}
+    merged = db.merge_draft_for_approval(draft, overrides)
 
     draft_type = draft.get('draft_type', 'event')
     published_id = db.promote_draft(draft_id, draft_type, merged)
