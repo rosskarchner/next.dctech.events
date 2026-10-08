@@ -94,7 +94,7 @@ _POLISH_TOOLS = {'get_event', 'get_overlay', 'set_overlay', 'list_categories'}
 
 # Written by the polish pass. Kept next to the tool set so the digest and the
 # prompt cannot drift apart on what this agent is allowed to correct.
-_POLISH_FIELDS = ('title', 'location', 'categories')
+_POLISH_FIELDS = ('title', 'location', 'location_type', 'categories')
 
 _DRY_RUN_NOTE = """
 

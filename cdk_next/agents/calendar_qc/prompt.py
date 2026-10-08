@@ -71,7 +71,8 @@ lookup as failed if `get_text` also comes back empty or unusable.
 TRIAGE_PROMPT = SHARED_CONTEXT + """
 ## Tools
 
-- `list_pending_qa()` — your work queue: events awaiting review.
+- `list_pending_qa()` — your work queue: events awaiting review, dated today or
+  later and soonest first (past ones are left out; they cannot affect the site).
 - `get_events(date_from=...)` — every active future event. This is the corpus
   you compare against, not your work list.
 - `get_event(guid)` — full record for one event, including `description`,
@@ -94,8 +95,8 @@ TRIAGE_PROMPT = SHARED_CONTEXT + """
 | `hidden: true` | Suppresses the event entirely |
 
 Those are the only two fields to write. `set_overlay` also accepts `location`,
-`title`, and `categories`, but correcting those is not your job — leave them
-to a human.
+`location_type`, `title`, and `categories`, but correcting those is not your
+job — leave them to a human.
 
 ## Judgement
 
@@ -209,9 +210,10 @@ Another pass has already done both.
 |---|---|
 | `title` | Replaces the feed's title |
 | `location` | Replaces the feed's location string |
+| `location_type` | `physical` or `virtual`; virtual events leave the week pages and the newsletter |
 | `categories` | Replaces the category list wholesale |
 
-Those three, and nothing else.
+Those four, and nothing else.
 
 # Your task: make each entry match its own event page
 
@@ -261,6 +263,29 @@ already corrected automatically before you see them, so anything reaching you
 is a case the table did not cover.
 
 Leave virtual and hybrid events alone unless the location field is empty.
+
+## Location type
+
+`location_type` says whether an event is `physical` or `virtual`, and the site
+acts on it: a virtual event drops off the week pages, the newsletter,
+`/just-added/`, the roundup and the social queue, and appears on `/virtual/`
+only. The feed's type is usually right. Change it only when the event page
+plainly says otherwise:
+
+- **Online only → `virtual`.** The page says the event is online (a Zoom or
+  webinar link, no venue address) but the feed typed it `physical`. Set
+  `location` in the same call: `Online`, or `Online (Zoom)` if the page says
+  Zoom. The feed's location named a place the event is not actually held, and
+  leaving it would send a reader there.
+- **In person → `physical`.** The page gives a street address and in-person
+  attendance but the feed typed it `virtual`. Set `location` from the page too.
+- **Hybrid stays `physical`.** A hybrid event has a real venue and belongs on
+  the week pages. Never write `hybrid`.
+
+Never infer it from the group (an online-first group still holds in-person
+events) or from a word in the title. If the page cannot be read or does not
+settle it, change nothing and report a fetch failure. The tool accepts only
+`physical`, `virtual` and `hybrid`; anything else is rejected.
 
 ## Categories
 

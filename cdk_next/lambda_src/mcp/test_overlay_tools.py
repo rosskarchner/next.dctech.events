@@ -23,6 +23,11 @@ revert_qa_run = server.revert_qa_run
 list_pending_qa = server.list_pending_qa
 resolve_qa_review = server.resolve_qa_review
 
+# The fixture's "today". g1 (2026-06-23) is already past, g2 (2026-06-24) is today.
+TODAY = "2026-06-24"
+# What the tools asked db.get_events_by_review_status for, newest call last.
+QUEUE_CALLS = []
+
 
 def rendered(store, guid):
     """The overlay as calgen would see it — private bookkeeping stripped.
@@ -57,9 +62,16 @@ def store(monkeypatch):
 
     monkeypatch.setattr(server.db, "update_event", _update)
 
-    def _by_status(status, limit=None):
-        return [dict(e) for e in events.values()
+    QUEUE_CALLS.clear()
+    calls = QUEUE_CALLS
+
+    def _by_status(status, limit=None, include_past=True):
+        calls.append({"status": status, "limit": limit, "include_past": include_past})
+        rows = [dict(e) for e in events.values()
                 if e.get("review_status") == status]
+        if not include_past:
+            rows = [e for e in rows if e["date"] >= TODAY]
+        return rows
 
     def _set_status(guid, status):
         events[guid]["review_status"] = status
@@ -75,13 +87,42 @@ def test_list_pending_qa_returns_only_queued_events(store):
     store["g1"]["review_status"] = "pending_qa"
     store["g2"]["review_status"] = "approved"
 
-    assert [e["guid"] for e in list_pending_qa()] == ["g1"]
+    assert [e["guid"] for e in list_pending_qa(include_past=True)] == ["g1"]
+
+
+def test_list_pending_qa_leaves_out_past_events_by_default(store):
+    """The queue is ordered by date and iCal events only leave it through
+    resolve_qa_review, so past ones used to sit at the front of every batch
+    (13 of the first 15 on 2026-10-07)."""
+    store["g1"]["review_status"] = "pending_qa"   # 2026-06-23: before TODAY
+    store["g2"]["review_status"] = "pending_qa"   # 2026-06-24: TODAY
+
+    assert [e["guid"] for e in list_pending_qa()] == ["g2"]
+    assert QUEUE_CALLS[-1]["include_past"] is False
+
+
+def test_list_pending_qa_can_still_show_the_stale_tail(store):
+    store["g1"]["review_status"] = "pending_qa"
+    store["g2"]["review_status"] = "pending_qa"
+
+    got = list_pending_qa(include_past=True)
+
+    assert sorted(e["guid"] for e in got) == ["g1", "g2"]
+    assert QUEUE_CALLS[-1]["include_past"] is True
+
+
+def test_list_pending_qa_passes_the_limit_through(store):
+    store["g2"]["review_status"] = "pending_qa"
+
+    list_pending_qa(limit=15)
+
+    assert QUEUE_CALLS[-1]["limit"] == 15
 
 
 def test_list_pending_qa_returns_the_compact_projection(store):
     store["g1"]["review_status"] = "pending_qa"
     # description is deliberately absent — that's what get_event is for.
-    assert "description" not in list_pending_qa()[0]
+    assert "description" not in list_pending_qa(include_past=True)[0]
 
 
 def test_resolve_qa_review_clears_the_event_from_the_queue(store):
@@ -90,7 +131,7 @@ def test_resolve_qa_review_clears_the_event_from_the_queue(store):
     resolve_qa_review("g1", "approved")
 
     assert store["g1"]["review_status"] == "approved"
-    assert list_pending_qa() == []
+    assert list_pending_qa(include_past=True) == []
 
 
 def test_resolve_qa_review_can_flag_for_a_human(store):

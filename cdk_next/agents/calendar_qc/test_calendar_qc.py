@@ -189,6 +189,46 @@ def test_a_removal_and_a_correction_on_one_event_are_reported_separately():
     assert results['polished'][0]['fields'] == {'location': 'Boston, MA'}
 
 
+def test_a_location_type_correction_is_reported_as_polished_not_unexpected():
+    # next_dctech_events-e2u: an online event typed physical is corrected in the
+    # polish pass. Before location_type joined _POLISH_FIELDS, the same write
+    # landed in 'other' as a change nobody asked for.
+    rows = [{'guid': 'g9', 'title': 'Open House', 'comment': 'page says online',
+             'applied': {'location': 'Online', 'location_type': 'virtual'},
+             'restores_to': {}, 'removes': []}]
+    results = main.digest_from_overlays(rows)
+    assert results['other'] == []
+    assert results['polished'][0]['fields'] == \
+        {'location': 'Online', 'location_type': 'virtual'}
+
+
+def test_every_field_the_polish_pass_may_write_is_in_its_prompt():
+    # _POLISH_FIELDS drives the digest and the prompt is what the model reads.
+    # They are edited in different files; this is what keeps them in step.
+    import prompt
+    for field in main._POLISH_FIELDS:
+        assert f'`{field}`' in prompt.POLISH_PROMPT, field
+
+
+def test_the_polish_prompt_forbids_writing_hybrid_and_inferring_the_type():
+    import prompt
+    text = prompt.POLISH_PROMPT
+    assert 'Never write `hybrid`' in text
+    assert 'Never infer it from the group' in text
+
+
+def test_the_triage_prompt_still_leaves_location_type_to_the_polish_pass():
+    import prompt
+    assert '`location_type`' in prompt.TRIAGE_PROMPT
+    assert 'not your' in prompt.TRIAGE_PROMPT
+
+
+def test_the_agent_is_told_the_queue_excludes_past_events():
+    # next_dctech_events-7ak
+    import prompt
+    assert 'past ones are left out' in prompt.TRIAGE_PROMPT
+
+
 def test_digest_still_surfaces_a_field_outside_both_passes():
     # The bucket exists so a field neither pass is supposed to write cannot
     # land on the live site unmentioned.

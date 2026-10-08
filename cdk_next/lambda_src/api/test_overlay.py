@@ -554,6 +554,36 @@ def test_well_typed_values_still_pass(store):
                         "all_day": False, "categories": ["ai"]}
 
 
+# ── location_type values ───────────────────────────────────────────
+# is_virtual_event() tests `== 'virtual'`, so a typo would be stored and then
+# match neither case, leaving an online event looking physical.
+
+
+@pytest.mark.parametrize("value", ["physical", "virtual", "hybrid"])
+def test_the_known_location_types_are_accepted(store, value):
+    db.set_event_overlay("g1", {"location_type": value}, "why")
+    assert db.public_overlay(overlay_of(store, "g1")) == {"location_type": value}
+
+
+@pytest.mark.parametrize("value", ["online", "Virtual", "in-person", "remote", ""])
+def test_an_unknown_location_type_is_refused(store, value):
+    with pytest.raises(ValueError, match="location_type must be one of"):
+        db.set_event_overlay("g1", {"location_type": value}, "why")
+
+
+def test_a_refused_location_type_writes_nothing(store):
+    with pytest.raises(ValueError):
+        db.set_event_overlay("g1", {"location_type": "online",
+                                    "location": "Online"}, "why")
+    # The rejected call must not have half-applied its other field.
+    assert not db.public_overlay(overlay_of(store, "g1"))
+
+
+def test_location_type_none_is_still_allowed(store):
+    db.set_event_overlay("g1", {"location_type": None}, "back to the feed's own")
+    assert overlay_of(store, "g1")["location_type"] is None
+
+
 def test_every_editable_field_has_a_declared_type(store):
     # A field added to the allowlist without a type would silently accept
     # anything, which is the hole this closes.

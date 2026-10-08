@@ -373,6 +373,11 @@ def set_overlay(guid: str, fields: dict, comment: str,
     ignored at render, so the merge would look done and the event would keep
     showing.
 
+    `location_type` must be 'physical', 'virtual' or 'hybrid'. Only 'virtual'
+    changes where the event shows (it leaves the week pages, the newsletter and
+    the announcement queues and appears on /virtual/); anything else is rejected
+    rather than stored, because an unrecognised value would match neither case.
+
     `run_id` tags the write as part of a batch (the QA agent's weekly pass),
     recording each field's prior value so revert_qa_run can restore it. Pass
     it for automated writes; leave it unset for hand edits.
@@ -394,17 +399,24 @@ def get_event(guid: str) -> dict:
 
 
 @mcp.tool()
-def list_pending_qa(limit: int | None = 200) -> list:
+def list_pending_qa(limit: int | None = 200, include_past: bool = False) -> list:
     """
     Events awaiting quality-control review (review_status=pending_qa, GSI5) —
-    the QA agent's work queue.
+    the QA agent's work queue, soonest first.
+
+    Events dated before today (Eastern time) are left out unless
+    include_past=True. They can no longer affect the site, and because the queue
+    is ordered by date they would otherwise sit at the front of every batch:
+    iCal events enter the queue as pending_qa and only resolve_qa_review takes
+    them out, so the stale tail grows by a day every day.
 
     This is the list of events to make decisions *about*. It is not the set to
     compare against: duplicate detection needs the full corpus from get_events,
     because the other half of a duplicate pair was usually approved in an
     earlier run and has already left this queue.
     """
-    events = db.get_events_by_review_status('pending_qa', limit=limit)
+    events = db.get_events_by_review_status(
+        'pending_qa', limit=limit, include_past=include_past)
     return [{k: e.get(k) for k in _EVENT_FIELDS} for e in events]
 
 

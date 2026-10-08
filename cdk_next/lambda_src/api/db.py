@@ -16,6 +16,7 @@ import time
 import uuid
 from datetime import date as _date_type, datetime, timedelta, timezone as _tz
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
@@ -570,12 +571,24 @@ def _config_event_to_dict(item):
     return event
 
 
-def get_events_by_review_status(review_status, limit=None):
-    """Query GSI5 for events awaiting QA / discovery review."""
+def get_events_by_review_status(review_status, limit=None, include_past=True):
+    """Query GSI5 for events awaiting QA / discovery review.
+
+    include_past=False drops events dated before today (site timezone). GSI5's
+    sort key is '<date>#<time>', so that is a key condition on the query itself,
+    not a filter applied afterwards. It has to be: a FilterExpression runs after
+    DynamoDB has read the page, so with `limit` set the query would still page
+    through the whole stale tail just to throw it away, and a bounded read of
+    the live queue would not be bounded. Only meaningful for event items, whose
+    sort keys are dates; the default keeps every other caller's behaviour.
+    """
     table = _get_table()
+    condition = Key('GSI5PK').eq(f'REVIEW#{review_status}')
+    if not include_past:
+        condition = condition & Key('GSI5SK').gte(_local_today())
     kwargs = {
         'IndexName': 'GSI5',
-        'KeyConditionExpression': Key('GSI5PK').eq(f'REVIEW#{review_status}'),
+        'KeyConditionExpression': condition,
     }
     if limit:
         kwargs['Limit'] = limit
@@ -888,6 +901,18 @@ def _now_iso():
     return datetime.now(_tz.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
+# The site's own calendar. An event's date is the day it happens where it
+# happens, so "has it already passed" has to be asked in Eastern time: on a UTC
+# Lambda it is already tomorrow from 8 PM Eastern, and an event that is still
+# tonight would be treated as past. calgen keys off the same zone.
+SITE_TZ = ZoneInfo('America/New_York')
+
+
+def _local_today():
+    """Today's date in the site's timezone, as YYYY-MM-DD."""
+    return datetime.now(SITE_TZ).date().isoformat()
+
+
 # What each editable field is allowed to hold. The allowlist covers *names*;
 # this covers *values*, which is a separate failure. Two manual events were
 # found in production carrying {'title': True, 'hidden': True,
@@ -904,6 +929,12 @@ _OVERLAY_FIELD_TYPES = {
 }
 
 _TYPE_NAMES = {str: 'a string', bool: 'true or false', list: 'a list'}
+
+# is_virtual_event() (calgen routes/common.py) tests `== 'virtual'`, and the
+# week pages and newsletter key off that. A string that is not one of these (a
+# typo such as 'online', or 'Virtual') would be stored without complaint and
+# match neither branch, leaving the event looking physical.
+LOCATION_TYPES = ('physical', 'virtual', 'hybrid')
 
 
 def _check_overlay_types(fields):
@@ -922,6 +953,10 @@ def _check_overlay_types(fields):
                 f'got {type(value).__name__}')
         if expected is list and any(not isinstance(v, str) for v in value):
             raise ValueError(f'{key} must be a list of strings')
+        if key == 'location_type' and value not in LOCATION_TYPES:
+            raise ValueError(
+                f'location_type must be one of {list(LOCATION_TYPES)}, '
+                f'got {value!r}')
 
 
 def _validate_overlay_values(guid, fields):
