@@ -31,8 +31,10 @@ what `list_qa_run`/`revert_qa_run` key on if the run needs undoing later.
 ## Scope and batch size
 
 Only `source: "ical"` events dated today or later. Call
-`list_pending_qa(limit=15)` for the queue — not the default (200). If it
-returns 15, treat that as "more may be waiting": finish this batch, report
+`list_pending_qa(limit=15)` for the queue — not the default (200). The tool
+already leaves out events dated before today (Eastern time), soonest first, so
+a batch is real work; pass `include_past=True` only to inspect the stale tail.
+If it returns 15, treat that as "more may be waiting": finish this batch, report
 that the queue isn't empty, and re-run for another batch rather than raising
 the limit in one call. A queue that's grown far past 15 without being worked
 is itself worth a line in the report — it usually means a feed dumped a lot
@@ -110,8 +112,8 @@ It's still not license to rewrite: the test is whether the page contradicts
 the entry, not whether you'd have phrased it differently.
 
 **Overlay fields for this pass, and only these:** `title`, `location`,
-`categories`. You cannot hide an event or take one out of the review queue
-in this pass — pass 1 already handled both.
+`location_type`, `categories`. You cannot hide an event or take one out of
+the review queue in this pass — pass 1 already handled both.
 
 **Titles.** Fix only boilerplate ("Monthly Meetup", "Event"), unfilled
 templates ("{{topic}}", "TBD title"), or a title that's mostly the group
@@ -127,6 +129,20 @@ a street address you didn't read, never move an event between cities (pass
 "Arlington, DC" → "Arlington, VA", which is a label fix, not a move, and is
 squarely your job when you're certain. Leave virtual/hybrid alone unless the
 location field is empty.
+
+**Location type.** `location_type` decides where an event shows: `virtual`
+ones leave the week pages, the newsletter, `/just-added/`, the roundup and the
+social queue, and appear on `/virtual/` only. The feed's type is usually right;
+change it only when the page plainly says otherwise. Page says online-only (a
+Zoom/webinar link, no venue address) but the feed says `physical` → set
+`virtual`, and set `location` to `Online` (or `Online (Zoom)`) in the same
+call, since the feed's location names a place the event isn't held. Page gives
+a street address and in-person attendance but the feed says `virtual` → set
+`physical` and the location from the page. Leave hybrid as `physical` (it has
+a real venue that belongs on the week pages); never write `hybrid`. Never infer
+it from the group or a word in the title; if the page doesn't settle it,
+change nothing. The tool rejects any value other than `physical`, `virtual`
+and `hybrid`.
 
 **Categories.** Call `list_categories()` first; assign only from that list —
 go by each slug's `description`, not its plain-English reading. Add
