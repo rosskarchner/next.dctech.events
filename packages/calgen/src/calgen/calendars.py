@@ -99,6 +99,23 @@ JSON_LD_CACHE_DIR = os.path.join(CACHE_DIR, 'json-ld')
 HORIZON_DAYS = 180
 
 
+def event_link(component, group=None):
+    """The URL an iCal event links to on the site.
+
+    The feed's URL property ends up in an href, so anything but http(s) --
+    javascript: in particular -- is ignored in favor of the first link in
+    the description, then the group's website.
+    """
+    url_field = str(component.get('url') or '').strip()
+    if re.match(r'https?://', url_field, re.I):
+        return url_field
+    desc = str(component.get('description', ''))
+    url_match = re.search(r'https?://[^\s<>"]+|www\.[^\s<>"]+', desc)
+    if url_match:
+        return url_match.group(0)
+    return group.get('website', '') if group else ''
+
+
 def _ensure_dirs():
     os.makedirs(ICAL_CACHE_DIR, exist_ok=True)
     os.makedirs(JSON_LD_CACHE_DIR, exist_ok=True)
@@ -271,13 +288,7 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
             if title_says_cancelled(title):
                 print(f"  Skipping cancelled event (title): {title}")
                 return
-            url_field = event.get('url')
-            if url_field:
-                event_url = str(url_field)
-            else:
-                desc = str(event.get('description', ''))
-                url_match = re.search(r'https?://[^\s<>"]+|www\.[^\s<>"]+', desc)
-                event_url = url_match.group(0) if url_match else (group.get('website', '') if group else '')
+            event_url = event_link(event, group)
 
             is_virtual = False
             # Normalized here rather than downstream so the tidy value is what

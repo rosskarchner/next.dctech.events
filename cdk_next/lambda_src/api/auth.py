@@ -16,6 +16,7 @@ pool's JWKS, before giving up (next_dctech_events-1k7).
 """
 
 import os
+import re
 
 import jwt
 from jwt import PyJWKClient
@@ -109,13 +110,26 @@ def get_user_from_event(event):
         return None, {'statusCode': 401, 'body': 'Unauthorized'}
 
 
+def _group_names(raw):
+    """cognito:groups as a set of exact names.
+
+    A manually verified JWT carries a list, but API Gateway's REST Cognito
+    authorizer flattens it to a string ('admins', 'a,b' or '[a b]'), where
+    a bare `in` would be a substring test that 'notadmins' passes.
+    """
+    if not raw:
+        return set()
+    if isinstance(raw, (list, tuple, set)):
+        return {str(g) for g in raw}
+    return {g for g in re.split(r'[\s,\[\]]+', str(raw)) if g}
+
+
 def require_admin(claims):
     """
     Check if user has admin group membership.
 
     Returns error response dict if not admin, None if authorized.
     """
-    groups = claims.get('cognito:groups', [])
-    if 'admins' not in groups:
+    if 'admins' not in _group_names(claims.get('cognito:groups')):
         return {'statusCode': 403, 'body': 'Admin access required'}
     return None

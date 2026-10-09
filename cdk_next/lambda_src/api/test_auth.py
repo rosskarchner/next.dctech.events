@@ -189,3 +189,20 @@ def test_gateway_authorizer_claims_win_over_a_bearer_token_when_both_present(sig
     claims, err = auth.get_user_from_event(event)
     assert err is None
     assert claims['sub'] == 'gateway-user'
+
+
+@pytest.mark.parametrize('groups, is_admin', [
+    ('admins', True),
+    ('[admins editors]', True),
+    ('editors,admins', True),
+    (['admins'], True),
+    ('notadmins', False),
+    ('[sysadmins]', False),
+    (['administrators'], False),
+    ('', False),
+    (None, False),
+])
+def test_require_admin_matches_whole_group_names(groups, is_admin):
+    # The REST Cognito authorizer hands groups over as a string, where a
+    # plain `in` would be a substring test.
+    assert (auth.require_admin({'cognito:groups': groups}) is None) is is_admin

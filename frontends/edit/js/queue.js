@@ -39,11 +39,11 @@
 
   function renderEventDetails(draft) {
     const fields = [
-      draft.date ? { label: 'Date', value: draft.date } : null,
-      draft.time ? { label: 'Time', value: draft.time } : null,
-      draft.location ? { label: 'Location', value: draft.location } : null,
+      draft.date ? { label: 'Date', value: DctechUtil.escapeHtml(draft.date) } : null,
+      draft.time ? { label: 'Time', value: DctechUtil.escapeHtml(draft.time) } : null,
+      draft.location ? { label: 'Location', value: DctechUtil.escapeHtml(draft.location) } : null,
       draft.url ? { label: 'URL', value: `<a href="${DctechUtil.escapeHtml(draft.url)}" target="_blank" rel="noopener">${DctechUtil.escapeHtml(draft.url)}</a>` } : null,
-      draft.description ? { label: 'Description', value: draft.description } : null,
+      draft.description ? { label: 'Description', value: DctechUtil.escapeHtml(draft.description) } : null,
     ].filter(Boolean);
 
     return fields.length > 0
@@ -55,7 +55,7 @@
     const fields = [
       draft.website ? { label: 'Website', value: `<a href="${DctechUtil.escapeHtml(draft.website)}" target="_blank" rel="noopener">${DctechUtil.escapeHtml(draft.website)}</a>` } : null,
       draft.ical_url ? { label: 'iCal URL', value: `<a href="${DctechUtil.escapeHtml(draft.ical_url)}" target="_blank" rel="noopener">${DctechUtil.escapeHtml(draft.ical_url)}</a>` } : null,
-      draft.description ? { label: 'Description', value: draft.description } : null,
+      draft.description ? { label: 'Description', value: DctechUtil.escapeHtml(draft.description) } : null,
     ].filter(Boolean);
 
     return fields.length > 0

@@ -193,21 +193,42 @@ async function authorizedFetch(path, options = {}) {
 
 // ---- Login / Logout ----
 
-function getLoginUrl(returnPath) {
-  const state = returnPath || EDIT_CONFIG.appHomePath;
+// `state` is a random nonce (checked by auth/callback.html against the copy
+// kept here) rather than the return path itself: a guessable state let an
+// attacker complete a login with their own authorization code (login CSRF).
+// PKCE binds the code to this browser's verifier for the same reason.
+function _randomUrlSafe(byteLength) {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function _pkceChallenge(verifier) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function getLoginUrl(returnPath) {
+  const state = _randomUrlSafe(32);
+  const verifier = _randomUrlSafe(64);
   sessionStorage.setItem('oauth_state', state);
+  sessionStorage.setItem('oauth_pkce_verifier', verifier);
+  sessionStorage.setItem('oauth_return_path', returnPath || EDIT_CONFIG.appHomePath);
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: AUTH_CONFIG.userPoolClientId,
     redirect_uri: AUTH_CONFIG.redirectUri,
     scope: AUTH_CONFIG.scopes,
     state: state,
+    code_challenge: await _pkceChallenge(verifier),
+    code_challenge_method: 'S256',
   });
   return `${AUTH_CONFIG.cognitoDomain}/login?${params.toString()}`;
 }
 
-function login(returnPath) {
-  window.location.href = getLoginUrl(returnPath);
+async function login(returnPath) {
+  window.location.href = await getLoginUrl(returnPath);
 }
 
 function logout() {
@@ -227,7 +248,9 @@ async function exchangeCodeForTokens(code) {
     client_id: AUTH_CONFIG.userPoolClientId,
     code: code,
     redirect_uri: AUTH_CONFIG.redirectUri,
+    code_verifier: sessionStorage.getItem('oauth_pkce_verifier') || '',
   });
+  sessionStorage.removeItem('oauth_pkce_verifier');
 
   const response = await fetch(`${AUTH_CONFIG.cognitoDomain}/oauth2/token`, {
     method: 'POST',
@@ -306,7 +329,7 @@ function requireAuth() {
     <div class="card" style="text-align:center; padding: 2rem;">
       <h2>Sign in required</h2>
       <p>You need to sign in to access this page.</p>
-      <a href="${getLoginUrl(window.location.pathname)}" class="btn btn-primary">Sign In</a>
+      <a href="#" onclick="DctechAuth.login(window.location.pathname); return false;" class="btn btn-primary">Sign In</a>
     </div>`;
   return false;
 }

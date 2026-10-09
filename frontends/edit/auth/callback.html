@@ -53,20 +53,24 @@
           return;
         }
 
+        // state is a random nonce from DctechAuth.login; anything else means
+        // this callback was not started by this browser (login CSRF).
         const savedState = sessionStorage.getItem('oauth_state');
-        // If state starts with '/', it's a redirect path.
-        // We can be flexible here if it matches exactly OR if it's the saved path.
-        if (!state) {
-          showError('No session state received.');
+        sessionStorage.removeItem('oauth_state');
+        if (!state || !savedState || state !== savedState) {
+          showError('Sign-in session did not match. Please try again.');
           return;
         }
-        
-        // Exchange code for tokens
+
         await DctechAuth.exchangeCodeForTokens(code);
 
-        // Redirect to original path or home
-        const redirectPath = (state && state.startsWith('/')) ? state : '/';
-        window.location.href = redirectPath;
+        // Same-origin paths only: '//evil.com' and '/\\evil.com' both start
+        // with '/' but navigate off-site.
+        const returnPath = sessionStorage.getItem('oauth_return_path') || '/';
+        sessionStorage.removeItem('oauth_return_path');
+        const isLocalPath = returnPath.startsWith('/')
+          && !returnPath.startsWith('//') && !returnPath.startsWith('/\\');
+        window.location.href = isLocalPath ? returnPath : '/';
 
       } catch (err) {
         console.error('Callback error:', err);

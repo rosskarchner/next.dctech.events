@@ -7,6 +7,7 @@ still work, so admins and already-signed-in users are unaffected — see
 `_resolve_submitter`, which accepts either.
 """
 
+from html import escape as html_escape
 import json
 import os
 import re
@@ -484,7 +485,7 @@ def _notify_admin(draft_id, draft_type, draft_data, submitter, published):
         ]
         html_rows = ''.join(
             f'<tr><td style="padding:2px 12px 2px 0;color:#666">{k}</td>'
-            f'<td style="padding:2px 0">{v}</td></tr>'
+            f'<td style="padding:2px 0">{html_escape(str(v))}</td></tr>'
             for k, v in rows
         )
         text_rows = '\n'.join(f'{k}: {v}' for k, v in rows)
@@ -497,7 +498,7 @@ def _notify_admin(draft_id, draft_type, draft_data, submitter, published):
                 'Subject': {'Data': subject[:200]},
                 'Body': {
                     'Html': {'Data': (
-                        f'<p><strong>{state}</strong></p>'
+                        f'<p><strong>{html_escape(state)}</strong></p>'
                         f'<table>{html_rows}</table>'
                         f'<p><a href="{QUEUE_URL}">Open the moderation queue</a></p>'
                     )},
