@@ -1,5 +1,11 @@
 # QA + discovery, as a nightly Claude Scheduled Task
 
+> **Status (2026-10-12): not running.** No Scheduled Task is set up. QC runs
+> only in interactive sessions via the `calendar-qc` skill
+> (`.claude/skills/calendar-qc/SKILL.md`), which is the source of truth for
+> the rules. This document is the setup reference for if one is set up later.
+> Start its prompt from the skill, since the copy below may have drifted.
+
 Replaces the AgentCore-based `dctechEventsCalendarQc` agent (`cdk_next/agents/calendar_qc/`,
 `NextQaAgentStack`, retired 2026-09-19) and takes over the intake the deleted
 discovery agent used to feed. Runs nightly, outside AWS, against the
@@ -302,11 +308,9 @@ At the end, report as a JSON object:
 
 ## Open questions worth revisiting after a few weeks
 
-- **Re-check cadence**: Pass 3 covers about 300 upcoming events every 14 days at
-  40 per run. That works if the task really runs nightly, but at a couple of
-  runs a week it falls short (about 4 runs per window, so about 75 events per
-  run needed). Watch `recheck_backlog`. If it keeps growing, raise the limit
-  or the cadence, not the 14 days.
+- **Re-check cadence**: if this is ever scheduled, Pass 3 covers about 300
+  upcoming events every 14 days at 40 per run. That works nightly but falls
+  short at a couple of runs a week. Watch `recheck_backlog`.
 
 - **Cost**: this now runs on your Claude usage instead of a metered AWS
   bill, so the existing $20 AWS Budget alarm won't see it. Watch your Claude

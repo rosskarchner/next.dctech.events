@@ -5,14 +5,14 @@ description: Run a calendar QC pass over dctech.events' pending event review que
 
 # Calendar QC
 
-This is the same judgement the nightly Scheduled Task applies against the
-bearer-token `/mcp-agent` route (see `NEXT_MCP_AGENT_MIGRATION.md`), run
-instead from an interactive session against the full `dctech-events` MCP
-server. That means every tool below is available, including `list_qa_run`
-and `revert_qa_run` — the automated route can't reach either — so unlike the
-nightly run, a mistake here can be inspected and undone. Still write overlays
-deliberately: the rules exist because they were tuned against months of real
-DC-area feeds, not because a strong model needs guardrails.
+QC runs from interactive sessions against the full `dctech-events` MCP
+server; there is currently no unattended run. (`NEXT_MCP_AGENT_MIGRATION.md`
+describes a Scheduled Task against the bearer-token `/mcp-agent` route, with a
+one-batch-per-run variant of these rules, but none is running.) Every tool
+below is available, including `list_qa_run` and `revert_qa_run`, so a mistake
+can be inspected and undone. Still write overlays deliberately: the rules
+exist because they were tuned against months of real DC-area feeds, not
+because a strong model needs guardrails.
 
 Tools used: `list_groups`, `list_categories`, `get_events`, `get_event`,
 `get_overlay`, `set_overlay`, `list_pending_qa`, `resolve_qa_review`,
@@ -169,8 +169,7 @@ after that: an in-person meetup goes online, a venue moves, a talk is
 cancelled or renamed. This pass is the standing loop that catches those
 changes. Run it after the pending_qa passes, on whatever time is left.
 
-Work the queue in batches until it's caught up. The nightly Scheduled Task
-stops after one batch to bound its cost; this session keeps going.
+Work the queue in batches until it's caught up.
 
 1. Call `list_events_due_for_check(limit=40)`. Never raise the limit; pull
    another batch instead. It returns upcoming events (every source) not checked
