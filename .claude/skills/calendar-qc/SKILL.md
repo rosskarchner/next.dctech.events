@@ -169,11 +169,13 @@ after that: an in-person meetup goes online, a venue moves, a talk is
 cancelled or renamed. This pass is the standing loop that catches those
 changes. Run it after the pending_qa passes, on whatever time is left.
 
-1. Call `list_events_due_for_check(limit=40)` and never ask for more. It returns
-   upcoming events (every source) not checked in 14 days, soonest first, plus
-   `due_total`. If `due_total` is over 40, say so in the report. The next run
-   picks up the rest.
-2. Call `check_event_source(guid)` for each event. It reads the page's
+Work the queue in batches until it's caught up. The nightly Scheduled Task
+stops after one batch to bound its cost; this session keeps going.
+
+1. Call `list_events_due_for_check(limit=40)`. Never raise the limit; pull
+   another batch instead. It returns upcoming events (every source) not checked
+   in 14 days, soonest first, plus `due_total`, the size of the whole queue.
+2. Call `check_event_source(guid)` for each event in the batch. It reads the page's
    schema.org JSON-LD server-side, which is the structured data WebFetch strips,
    and returns `diffs` against the listing as shown (overlays applied; title
    compared against the feed's own title). Then decide:
@@ -200,10 +202,19 @@ changes. Run it after the pending_qa passes, on whatever time is left.
    The Pass 1 bar applies to `hidden` here as well. A cancellation needs the
    page's own `cancelled` status or explicit text saying so. A failed fetch or a
    missing page is not a cancellation.
-3. Finish with one `mark_events_checked([...])` call covering **every** event you
-   looked at, fetch failures included (`{guid, result, note}`, with the note
-   short and factual). An event left unstamped stays at the front of the queue.
-   The stamps don't trigger a site rebuild.
+3. Close the batch with one `mark_events_checked([...])` call covering **every**
+   event in it, fetch failures included (`{guid, result, note}`, with the note
+   short and factual). Stamp *before* pulling the next batch. The queue is
+   "not checked in 14 days", so an unstamped event comes straight back as the
+   head of the next batch. The stamps don't trigger a site rebuild.
+4. Post a one-line progress note (batch number, checked so far, `due_total`
+   remaining), then go back to step 1. Stop when `due_total` is 0.
+   Also stop early, and say why in the report, if any of these happen:
+   - `due_total` fails to shrink between batches. Something isn't stamping, and
+     looping further would just re-check the same events.
+   - Most of a batch comes back `fetch_failed`. The site is probably blocking us
+     right now, and the rest can wait for a later run.
+   - The user asked for a bounded run.
 
 ## Discovery: candidate groups and events
 
@@ -241,6 +252,7 @@ At the end, report as a JSON object:
   "recheck_refreshed": [{"guid": "...", "title": "...", "diffs": [...]}],
   "recheck_fixed": [{"guid": "...", "title": "...", "fields": {...}, "reason": "..."}],
   "recheck_flagged": [{"guid": "...", "title": "...", "reason": "..."}],
-  "recheck_backlog": <due_total minus the events checked this run>
+  "recheck_batches": <count>,
+  "recheck_backlog": <due_total from the last list_events_due_for_check call; 0 when caught up>
 }
 ```
