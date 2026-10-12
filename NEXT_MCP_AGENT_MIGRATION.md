@@ -103,7 +103,8 @@ technology events in and around Washington, DC. You have access to its MCP
 server's tools (`list_groups`, `list_categories`, `get_events`, `get_event`,
 `get_overlay`, `list_pending_qa`, `resolve_qa_review`, `set_overlay`,
 `propose_event`, `propose_group`, `list_discovery_proposals`,
-`verify_ical_feed`) plus WebFetch/WebSearch.
+`verify_ical_feed`, `list_events_due_for_check`, `check_event_source`,
+`mark_events_checked`) plus WebFetch/WebSearch.
 
 Use run id `nightly-<today's date, YYYY-MM-DD>` for every `set_overlay` call
 tonight.
@@ -221,6 +222,49 @@ carrying every field you're changing.
 resolved-by-search. These carry very different risk and a reviewer skimming
 your report can't tell them apart without your saying so explicitly.
 
+### Pass 3: Re-check (every upcoming event, every 14 days)
+
+Passes 1 and 2 only see an event once, when it first appears. Pages change
+after that: an in-person meetup goes online, a venue moves, a talk is
+cancelled or renamed. This pass is the standing loop that catches those
+changes. Run it after the pending_qa passes, on whatever time is left.
+
+1. Call `list_events_due_for_check(limit=40)` and never ask for more. It returns
+   upcoming events (every source) not checked in 14 days, soonest first, plus
+   `due_total`. If `due_total` is over 40, say so in the report. The next run
+   picks up the rest.
+2. Call `check_event_source(guid)` for each event. It reads the page's
+   schema.org JSON-LD server-side, which is the structured data WebFetch strips,
+   and returns `diffs` against the listing as shown (overlays applied; title
+   compared against the feed's own title). Then decide:
+   - **No diffs:** result `ok`.
+   - **`source: "ical"` with `cache_refreshed: true`, and every diff is
+     `location_type`, `title` or `cancelled`:** **don't write an overlay.** The
+     refresh corrected the aggregator's cache, so its next run (within 4 hours)
+     fixes the event at the source, or drops it if cancelled. An overlay would
+     mask the next real change. Result `refreshed`.
+   - **Any other source (manual, submitted, recurring),** where nothing re-reads
+     the page for us: confirm on the page (WebFetch/WebSearch per "Reading event
+     pages"), then `set_overlay` under the run id. Use `location_type` for a
+     change of format, and `hidden: true` with a comment naming the evidence for
+     a cancellation. Result `fixed`.
+   - **`date` or `time` diff, `event_status` postponed/rescheduled, or
+     `page_gone`:** `date` can't be overlaid and a moved event needs a human.
+     Use `resolve_qa_review(guid, "flagged")`, result `flagged`, and add it to
+     `flagged` in the report. (iCal feeds normally carry reschedules themselves,
+     so a date diff on an iCal event is worth a line even if it's just feed lag.)
+   - **`error` set, a non-200 other than 404/410, or `page: null`** (blocked, or
+     no JSON-LD): result `fetch_failed`, and add it to `fetch_failures`. It comes
+     back in 14 days. Don't retry, and don't guess.
+
+   The Pass 1 bar applies to `hidden` here as well. A cancellation needs the
+   page's own `cancelled` status or explicit text saying so. A failed fetch or a
+   missing page is not a cancellation.
+3. Finish with one `mark_events_checked([...])` call covering **every** event you
+   looked at, fetch failures included (`{guid, result, note}`, with the note
+   short and factual). An event left unstamped stays at the front of the queue.
+   The stamps don't trigger a site rebuild.
+
 ### Discovery: candidate groups and events
 
 If you come across a DC-area tech group or event that isn't in the system
@@ -245,13 +289,24 @@ At the end, report as a JSON object:
   "proposed_groups": [...],
   "proposed_events": [...],
   "reviewed": <count>,
-  "queue_remaining": <true if list_pending_qa returned the full 15, i.e. more may be waiting>
+  "queue_remaining": <true if list_pending_qa returned the full 15, i.e. more may be waiting>,
+  "rechecked": <count>,
+  "recheck_refreshed": [{"guid": "...", "title": "...", "diffs": [...]}],
+  "recheck_fixed": [{"guid": "...", "title": "...", "fields": {...}, "reason": "..."}],
+  "recheck_flagged": [{"guid": "...", "title": "...", "reason": "..."}],
+  "recheck_backlog": <due_total minus the events checked this run>
 }
 ```
 
 ---
 
 ## Open questions worth revisiting after a few weeks
+
+- **Re-check cadence**: Pass 3 covers about 300 upcoming events every 14 days at
+  40 per run. That works if the task really runs nightly, but at a couple of
+  runs a week it falls short (about 4 runs per window, so about 75 events per
+  run needed). Watch `recheck_backlog`. If it keeps growing, raise the limit
+  or the cadence, not the 14 days.
 
 - **Cost**: this now runs on your Claude usage instead of a metered AWS
   bill, so the existing $20 AWS Budget alarm won't see it. Watch your Claude

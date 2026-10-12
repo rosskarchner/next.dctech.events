@@ -30,10 +30,14 @@ _SECURITY = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 # token should still not be able to publish, delete, or grant trust on its
 # own. Rebuilds already happen on their own via the DynamoDB stream trigger
 # once set_overlay writes land, so this route has no need of trigger_rebuild.
+# The re-check tools are safe here: check_event_source writes only a JSON-LD
+# cache entry (the same read the aggregator would make), mark_events_checked
+# only bookkeeping stamps.
 SCHEDULED_AGENT_TOOLS = frozenset({
     "list_groups", "list_categories",
     "get_events", "get_event", "get_overlay",
     "list_pending_qa", "resolve_qa_review", "set_overlay",
+    "list_events_due_for_check", "check_event_source", "mark_events_checked",
     "propose_event", "propose_group", "list_discovery_proposals",
     "verify_ical_feed",
 })

@@ -87,6 +87,7 @@ def test_unrelated_ld_types_are_still_ignored(monkeypatch):
         'name': 'Meetup',
     }))
     result = fetch_json_ld_data('https://www.meetup.com/some-group/events/3/')
+    assert result.pop('fetched_at')
     assert result == {'title': None, 'is_virtual': False, 'location': None, 'cancelled': False}
 
 

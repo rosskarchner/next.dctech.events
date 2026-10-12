@@ -1,6 +1,6 @@
 ---
 name: calendar-qc
-description: Run a calendar QC pass over dctech.events' pending event review queue — triage duplicates and out-of-area listings, polish titles/locations/categories, and file discovery proposals for groups or events found along the way. Use when asked to run QA, review the QA queue, triage the calendar, do a QC pass, or catch up pending events, or when list_pending_qa has a backlog someone wants worked through by hand.
+description: Run a calendar QC pass over dctech.events' pending event review queue — triage duplicates and out-of-area listings, polish titles/locations/categories, re-check upcoming events against their source pages every two weeks (format changes, cancellations, reschedules), and file discovery proposals for groups or events found along the way. Use when asked to run QA, review the QA queue, triage the calendar, do a QC pass, or catch up pending events, re-check events for changes or cancellations, or when list_pending_qa has a backlog someone wants worked through by hand.
 ---
 
 # Calendar QC
@@ -17,7 +17,8 @@ DC-area feeds, not because a strong model needs guardrails.
 Tools used: `list_groups`, `list_categories`, `get_events`, `get_event`,
 `get_overlay`, `set_overlay`, `list_pending_qa`, `resolve_qa_review`,
 `list_qa_run`, `revert_qa_run`, `verify_ical_feed`, `propose_event`,
-`propose_group`, `list_discovery_proposals`, plus WebFetch/WebSearch for
+`propose_group`, `list_discovery_proposals`, `list_events_due_for_check`,
+`check_event_source`, `mark_events_checked`, plus WebFetch/WebSearch for
 reading event pages. All are namespaced `mcp__dctech-events__*`; if they
 aren't available, check `.mcp.json` and `aws sts get-caller-identity` per
 the project's AWS guidance.
@@ -161,6 +162,49 @@ One `set_overlay` call per event, carrying every field you're changing.
 resolved-by-search. These carry very different risk and a reviewer skimming
 your report can't tell them apart without your saying so explicitly.
 
+## Pass 3: Re-check (every upcoming event, every 14 days)
+
+Passes 1 and 2 only see an event once, when it first appears. Pages change
+after that: an in-person meetup goes online, a venue moves, a talk is
+cancelled or renamed. This pass is the standing loop that catches those
+changes. Run it after the pending_qa passes, on whatever time is left.
+
+1. Call `list_events_due_for_check(limit=40)` and never ask for more. It returns
+   upcoming events (every source) not checked in 14 days, soonest first, plus
+   `due_total`. If `due_total` is over 40, say so in the report. The next run
+   picks up the rest.
+2. Call `check_event_source(guid)` for each event. It reads the page's
+   schema.org JSON-LD server-side, which is the structured data WebFetch strips,
+   and returns `diffs` against the listing as shown (overlays applied; title
+   compared against the feed's own title). Then decide:
+   - **No diffs:** result `ok`.
+   - **`source: "ical"` with `cache_refreshed: true`, and every diff is
+     `location_type`, `title` or `cancelled`:** **don't write an overlay.** The
+     refresh corrected the aggregator's cache, so its next run (within 4 hours)
+     fixes the event at the source, or drops it if cancelled. An overlay would
+     mask the next real change. Result `refreshed`.
+   - **Any other source (manual, submitted, recurring),** where nothing re-reads
+     the page for us: confirm on the page (WebFetch/WebSearch per "Reading event
+     pages"), then `set_overlay` under the run id. Use `location_type` for a
+     change of format, and `hidden: true` with a comment naming the evidence for
+     a cancellation. Result `fixed`.
+   - **`date` or `time` diff, `event_status` postponed/rescheduled, or
+     `page_gone`:** `date` can't be overlaid and a moved event needs a human.
+     Use `resolve_qa_review(guid, "flagged")`, result `flagged`, and add it to
+     `flagged` in the report. (iCal feeds normally carry reschedules themselves,
+     so a date diff on an iCal event is worth a line even if it's just feed lag.)
+   - **`error` set, a non-200 other than 404/410, or `page: null`** (blocked, or
+     no JSON-LD): result `fetch_failed`, and add it to `fetch_failures`. It comes
+     back in 14 days. Don't retry, and don't guess.
+
+   The Pass 1 bar applies to `hidden` here as well. A cancellation needs the
+   page's own `cancelled` status or explicit text saying so. A failed fetch or a
+   missing page is not a cancellation.
+3. Finish with one `mark_events_checked([...])` call covering **every** event you
+   looked at, fetch failures included (`{guid, result, note}`, with the note
+   short and factual). An event left unstamped stays at the front of the queue.
+   The stamps don't trigger a site rebuild.
+
 ## Discovery: candidate groups and events
 
 If you come across a DC-area tech group or event that isn't in the system
@@ -192,6 +236,11 @@ At the end, report as a JSON object:
   "proposed_groups": [...],
   "proposed_events": [...],
   "reviewed": <count>,
-  "queue_remaining": <true if list_pending_qa returned the full 15, i.e. more may be waiting>
+  "queue_remaining": <true if list_pending_qa returned the full 15, i.e. more may be waiting>,
+  "rechecked": <count>,
+  "recheck_refreshed": [{"guid": "...", "title": "...", "diffs": [...]}],
+  "recheck_fixed": [{"guid": "...", "title": "...", "fields": {...}, "reason": "..."}],
+  "recheck_flagged": [{"guid": "...", "title": "...", "reason": "..."}],
+  "recheck_backlog": <due_total minus the events checked this run>
 }
 ```

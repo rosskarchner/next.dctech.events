@@ -31,9 +31,13 @@ uv pip install "${UV_ARGS[@]}" --target build/api jinja2 pytz "pyjwt[crypto]"
 mkdir -p build/mcp
 cp -r lambda_src/mcp/. build/mcp/
 cp lambda_src/api/db.py lambda_src/api/event_utils.py build/mcp/
+# check_event_source parses pages with calgen's own JSON-LD rules and fetches
+# through its SSRF guard. Both are bs4/requests/stdlib only, so they are copied
+# rather than installing calgen and its Flask stack (conftest.py mirrors this).
+cp ../packages/calgen/src/calgen/json_ld.py ../packages/calgen/src/calgen/ssrf_guard.py build/mcp/
 # Tests live next to the server; they have no business in the bundle.
-rm -rf build/mcp/test_*.py build/mcp/__pycache__
-uv pip install "${UV_ARGS[@]}" --target build/mcp "mcp>=1.9,<2" mangum requests
+rm -rf build/mcp/test_*.py build/mcp/conftest.py build/mcp/__pycache__
+uv pip install "${UV_ARGS[@]}" --target build/mcp "mcp>=1.9,<2" mangum requests beautifulsoup4
 
 # ── mcp_agent_authorizer (bearer-token check for /mcp-agent; boto3 only) ──
 if [ -e lambda_src/mcp_agent_authorizer/handler.py ]; then
@@ -47,6 +51,7 @@ if [ -d lambda_src/ical_aggregator ] && [ -e lambda_src/ical_aggregator/handler.
   mkdir -p build/ical_aggregator
   cp -r lambda_src/ical_aggregator/. build/ical_aggregator/
   cp lambda_src/api/db.py lambda_src/api/event_utils.py build/ical_aggregator/
+  rm -rf build/ical_aggregator/test_*.py build/ical_aggregator/__pycache__
   # calgen imported directly from packages/calgen (not re-implemented) + deps
   uv pip install "${UV_ARGS[@]}" --target build/ical_aggregator \
     "${CALGEN_FRESH[@]}" "$CALGEN" requests icalendar pytz recurring-ical-events \

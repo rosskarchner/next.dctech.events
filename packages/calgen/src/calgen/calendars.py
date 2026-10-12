@@ -20,6 +20,9 @@ from calgen.site_config import get_config
 from calgen.event_utils import _normalize_title
 from calgen.location_utils import normalize_location
 from calgen.ssrf_guard import UnsafeURLError, safe_get
+from calgen.json_ld import (
+    is_json_ld_host, parse_event_json_ld, cache_entry as json_ld_cache_entry,
+)
 
 # Cancellation markers organisers put in a title when their platform has no
 # STATUS field to set, or when they want it visible in a listing. Deliberately
@@ -38,35 +41,6 @@ def title_says_cancelled(title):
     """Whether a title carries a decorated cancellation marker."""
     text = str(title or '')
     return any(pattern.search(text) for pattern in _CANCELLED_IN_TITLE)
-
-
-# Meetup emits a more specific schema.org subtype instead of plain "Event"
-# depending on how the organizer categorized it (e.g. "The Art of the Chart",
-# a workshop, came back as ScreeningEvent — next_dctech_events online-flag
-# miss). These are schema.org's documented subtypes of Event.
-_SCHEMA_ORG_EVENT_TYPES = frozenset({
-    'Event',
-    'BusinessEvent',
-    'ChildrensEvent',
-    'ComedyEvent',
-    'CourseInstance',
-    'DanceEvent',
-    'DeliveryEvent',
-    'EducationEvent',
-    'ExhibitionEvent',
-    'Festival',
-    'FoodEvent',
-    'Hackathon',
-    'LiteraryEvent',
-    'MusicEvent',
-    'PublicationEvent',
-    'SaleEvent',
-    'ScreeningEvent',
-    'SocialEvent',
-    'SportsEvent',
-    'TheaterEvent',
-    'VisualArtsEvent',
-})
 
 
 def ical_says_cancelled(component):
@@ -143,7 +117,7 @@ def fetch_json_ld_data(url):
     function's existing parsing works unchanged once the domain is allowed
     through.
     """
-    if not any(host in url for host in ('meetup.com', 'luma.com', 'lu.ma')):
+    if not is_json_ld_host(url):
         return {'title': None, 'is_virtual': False, 'location': None}
 
     url_hash = hashlib.md5(url.encode('utf-8'), usedforsecurity=False).hexdigest()
@@ -155,48 +129,20 @@ def fetch_json_ld_data(url):
         if 'cancelled' in cached:
             return cached
 
-    result = {'title': None, 'is_virtual': False, 'location': None, 'cancelled': False}
+    # A failed or Event-less fetch is cached too (as the defaults), so a page
+    # that blocks us is not re-fetched every run. fetched_at is what lets the
+    # MCP server's check_event_source replace an entry with a newer read —
+    # and _persist_jsonld_cache keep that newer read — without one, cached
+    # entries were effectively permanent (next_dctech_events-ba5).
+    parsed = None
     try:
-        from bs4 import BeautifulSoup
         resp = safe_get(url, headers={'User-Agent': USER_AGENT}, timeout=10)
         if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            for script in soup.find_all('script', type='application/ld+json'):
-                try:
-                    ld_data = json.loads(script.string)
-                    items = ld_data if isinstance(ld_data, list) else [ld_data]
-                    for item in items:
-                        if item.get('@type') in _SCHEMA_ORG_EVENT_TYPES:
-                            if 'name' in item:
-                                result['title'] = item['name']
-                            if 'EventCancelled' in item.get('eventStatus', ''):
-                                result['cancelled'] = True
-                            attendance_mode = item.get('eventAttendanceMode', '')
-                            if 'OnlineEventAttendanceMode' in attendance_mode or 'Online' in attendance_mode:
-                                result['is_virtual'] = True
-                            location = item.get('location')
-                            if not location:
-                                result['is_virtual'] = True
-                            elif isinstance(location, dict):
-                                addr = location.get('address', {})
-                                if isinstance(addr, dict):
-                                    parts = [
-                                        location.get('name', ''),
-                                        addr.get('streetAddress', ''),
-                                        addr.get('addressLocality', ''),
-                                        addr.get('addressRegion', ''),
-                                    ]
-                                    result['location'] = ', '.join(p for p in parts if p)
-                                elif isinstance(addr, str) and addr:
-                                    result['location'] = addr
-                            with open(cache_file, 'w') as f:
-                                json.dump(result, f)
-                            return result
-                except json.JSONDecodeError:
-                    continue
+            parsed = parse_event_json_ld(resp.text)
     except Exception as e:
         print(f"Error fetching JSON-LD for {url}: {e}")
 
+    result = json_ld_cache_entry(parsed)
     with open(cache_file, 'w') as f:
         json.dump(result, f)
     return result

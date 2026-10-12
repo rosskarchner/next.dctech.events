@@ -46,8 +46,12 @@ RELEVANT_PREFIXES = ('EVENT#', 'GROUP#', 'CATEGORY#', 'RECURRING#', 'ICAL#',
 # Attributes whose changes never alter a rendered page. They differ on an
 # otherwise identical rewrite: the iCal cache stamps updated_at/ttl and its fetch
 # meta (etag, last_fetch) on every put. Add to this list only after checking
-# the site really does not read the attribute.
-NON_SEMANTIC_ATTRS = frozenset({'updated_at', 'ttl', 'meta'})
+# the site really does not read the attribute. The last_check* trio is the QC
+# agent's re-check bookkeeping on EVENT# items, stamped on ~40 events a run.
+NON_SEMANTIC_ATTRS = frozenset({
+    'updated_at', 'ttl', 'meta',
+    'last_checked', 'last_check_result', 'last_check_note',
+})
 
 codebuild = boto3.client('codebuild')
 dynamodb = boto3.client('dynamodb')

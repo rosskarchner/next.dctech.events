@@ -445,7 +445,8 @@ EVENT_FIELDS = ['title', 'date', 'time', 'end_date', 'end_time', 'location',
                 'url', 'cost', 'description', 'group', 'group_id',
                 'group_website', 'categories', 'city', 'state', 'all_day',
                 'location_type', 'slug', 'submitted_by', 'source', 'hidden',
-                'duplicate_of', 'overrides', 'review_status', 'createdAt']
+                'duplicate_of', 'overrides', 'review_status', 'createdAt',
+                'last_checked', 'last_check_result', 'last_check_note']
 
 
 def put_event(guid, data, source='manual', review_status='approved', created_at=None):
@@ -568,7 +569,8 @@ def _config_event_to_dict(item):
                   'location', 'cost', 'source', 'group', 'group_website',
                   'group_id', 'categories', 'city', 'state', 'all_day',
                   'hidden', 'duplicate_of', 'createdAt', 'review_status',
-                  'overrides', 'description', 'location_type', 'slug']:
+                  'overrides', 'description', 'location_type', 'slug',
+                  'last_checked', 'last_check_result']:
         if field in item:
             event[field] = _to_plain(item[field])
     return event
@@ -624,6 +626,39 @@ def set_event_review_status(guid, review_status):
         },
     )
     return guid
+
+
+# What the QC agent's two-week re-check recorded about an event's source page.
+# These are bookkeeping, not content: the site-build trigger ignores them
+# (NON_SEMANTIC_ATTRS) and the iCal aggregator carries them across refreshes.
+CHECK_RESULTS = ('ok', 'refreshed', 'fixed', 'flagged', 'fetch_failed')
+
+
+def mark_event_checked(guid, result, note=None, checked_at=None):
+    """Stamp last_checked/last_check_result on an event. Returns False if the
+    event does not exist (it may have been pruned since it was listed)."""
+    if result not in CHECK_RESULTS:
+        raise ValueError(f'result must be one of {list(CHECK_RESULTS)}, got: {result!r}')
+    checked_at = checked_at or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    values = {':at': checked_at, ':r': result}
+    update = 'SET last_checked = :at, last_check_result = :r'
+    if note:
+        update += ', last_check_note = :n'
+        values[':n'] = str(note)[:500]
+    else:
+        update += ' REMOVE last_check_note'
+    try:
+        _get_table().update_item(
+            Key={'PK': f'EVENT#{guid}', 'SK': 'META'},
+            UpdateExpression=update,
+            ConditionExpression='attribute_exists(PK)',
+            ExpressionAttributeValues=values,
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return False
+        raise
+    return True
 
 
 def get_materialized_event(guid):
@@ -1862,6 +1897,47 @@ def get_ical_cache(group_id):
         'meta': _to_plain(item.get('meta', {})),
         'updated_at': item.get('updated_at'),
     }
+
+
+# ─── JSON-LD page cache ───────────────────────────────────────────
+# One item holding every cached event-page read, keyed by md5(url). The iCal
+# aggregator materializes it into calgen's _cache/json-ld files and writes it
+# back after each run; check_event_source replaces single entries with a fresh
+# read, which the aggregator keeps because its fetched_at is newer.
+
+JSONLD_CACHE_KEY = {'PK': 'CACHE#jsonld', 'SK': 'META'}
+JSONLD_CACHE_TTL_DAYS = 7
+
+
+def put_jsonld_cache_entry(url_hash, entry):
+    """Set one entry of the JSON-LD cache, creating the item if it is missing."""
+    table = _get_table()
+    try:
+        table.update_item(
+            Key=JSONLD_CACHE_KEY,
+            UpdateExpression='SET entries.#h = :v',
+            ConditionExpression='attribute_exists(entries)',
+            ExpressionAttributeNames={'#h': url_hash},
+            ExpressionAttributeValues={':v': _from_plain(entry)},
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] != 'ConditionalCheckFailedException':
+            raise
+        # No cache item yet (never aggregated, or it expired). Create it only
+        # if it is still missing, so a concurrent aggregator write is not lost.
+        try:
+            table.put_item(
+                Item={
+                    **JSONLD_CACHE_KEY,
+                    'entries': _from_plain({url_hash: entry}),
+                    'ttl': int(time.time()) + JSONLD_CACHE_TTL_DAYS * 86400,
+                },
+                ConditionExpression='attribute_not_exists(PK)',
+            )
+        except ClientError as e2:
+            if e2.response['Error']['Code'] != 'ConditionalCheckFailedException':
+                raise
+            put_jsonld_cache_entry(url_hash, entry)
 
 
 def get_all_ical_caches():

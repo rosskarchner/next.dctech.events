@@ -10,15 +10,22 @@ write_regions, refresh_and_run_pipeline. Added: trigger_rebuild (CodeBuild).
 Served over streamable HTTP behind API Gateway with an AWS_IAM authorizer —
 trusted agents/Lambdas only, not end users.
 """
+import hashlib
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 import db
+# Both copied from packages/calgen by build_lambdas.sh (conftest.py does the
+# same for tests), so the re-check parses pages exactly as the aggregator does.
+import json_ld
+from ssrf_guard import safe_get
 
 USER_AGENT = 'dctech-events/1.0 (+https://dctech.events)'
 CODEBUILD_PROJECT_NAME = os.environ.get('CODEBUILD_PROJECT_NAME', '')
@@ -434,6 +441,194 @@ def resolve_qa_review(guid: str, status: str) -> dict:
     _get_or_404(db.get_event_from_config, guid, 'event')
     db.set_event_review_status(guid, status)
     return {'guid': guid, 'review_status': status}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Two-week re-check
+#
+# pending_qa looks at an event once, when it first appears. Pages change after
+# that — an in-person meetup goes online, a venue moves, a talk is cancelled —
+# and nothing re-read them: the aggregator's JSON-LD cache kept its first read
+# forever (next_dctech_events-ba5). These three tools are the QC agent's loop
+# over every upcoming event: list what is due, check each against its page,
+# stamp what was checked.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SITE_TZ = ZoneInfo('America/New_York')
+_CHECK_FIELDS = _EVENT_FIELDS + ['time', 'last_checked', 'last_check_result']
+
+
+def _is_suppressed(event):
+    overlay = event.get('overrides') or {}
+    return bool(event.get('hidden') or overlay.get('hidden')
+                or event.get('duplicate_of') or overlay.get('duplicate_of'))
+
+
+@mcp.tool()
+def list_events_due_for_check(older_than_days: int = 14, limit: int | None = 40,
+                              source: str | None = None) -> dict:
+    """
+    Upcoming events whose source page has not been re-checked in
+    `older_than_days` days (never-checked events are always due), soonest
+    event first — the QC agent's re-check queue.
+
+    Hidden and duplicate events are left out (nothing a page says changes
+    them), as are events with no url (there is no page to check). `source`
+    narrows to 'ical' | 'manual' | 'submitted' | 'recurring'.
+
+    Returns {events, due_total}; due_total counts every due event, not just the
+    `limit` returned, so a growing backlog is visible.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)
+              ).strftime('%Y-%m-%dT%H:%M:%SZ')
+    due = [
+        e for e in db.get_all_events()
+        if e.get('url') and not _is_suppressed(e)
+        and (not source or e.get('source') == source)
+        and (e.get('last_checked') or '') < cutoff
+    ]
+    events = [{k: e.get(k) for k in _CHECK_FIELDS} for e in due]
+    if limit is not None:
+        events = events[:limit]
+    return {'events': events, 'due_total': len(due)}
+
+
+def _norm_title(title):
+    return ' '.join(str(title or '').split()).casefold()
+
+
+def _page_start(start_date):
+    """('YYYY-MM-DD', 'HH:MM' or None) in site time, from a schema.org startDate."""
+    if not start_date:
+        return None, None
+    try:
+        dt = datetime.fromisoformat(str(start_date).replace('Z', '+00:00'))
+    except ValueError:
+        return None, None
+    if dt.tzinfo is None:
+        return dt.date().isoformat(), dt.strftime('%H:%M')
+    local = dt.astimezone(_SITE_TZ)
+    return local.date().isoformat(), local.strftime('%H:%M')
+
+
+def _source_diffs(raw, shown, http_status, page):
+    """What the page says that the listing does not. Deliberately coarse —
+    the agent decides what each one means."""
+    diffs = []
+    if http_status in (404, 410):
+        diffs.append({'field': 'page_gone', 'stored': None, 'page': http_status})
+    if not page:
+        return diffs
+    if page['cancelled']:
+        diffs.append({'field': 'cancelled', 'stored': False, 'page': True})
+    elif page.get('event_status') in ('EventPostponed', 'EventRescheduled', 'EventMovedOnline'):
+        diffs.append({'field': 'event_status', 'stored': None, 'page': page['event_status']})
+    shown_virtual = shown.get('location_type') == 'virtual'
+    if page['is_virtual'] != shown_virtual:
+        diffs.append({'field': 'location_type', 'stored': shown.get('location_type'),
+                      'page': 'virtual' if page['is_virtual'] else 'physical'})
+    # Title against the *source* title: QC polish overlays retitle on purpose,
+    # and those should not read as the page having changed.
+    if page.get('title') and _norm_title(page['title']) != _norm_title(raw.get('title')):
+        diffs.append({'field': 'title', 'stored': raw.get('title'), 'page': page['title']})
+    page_date, page_time = _page_start(page.get('start_date'))
+    if page_date and page_date != shown.get('date'):
+        diffs.append({'field': 'date', 'stored': shown.get('date'), 'page': page_date})
+    if page_time and shown.get('time') and not shown.get('all_day') \
+            and page_time != str(shown.get('time'))[:5]:
+        diffs.append({'field': 'time', 'stored': shown.get('time'), 'page': page_time})
+    return diffs
+
+
+@mcp.tool()
+def check_event_source(guid: str) -> dict:
+    """
+    Re-read one event's page and report how it differs from the listing.
+
+    Fetches the url server-side and parses its schema.org Event JSON-LD — the
+    structured data WebFetch drops when it converts a page to markdown, and the
+    same data the iCal aggregator reads. Compares against the event as the site
+    shows it (overlay applied), except `title`, which is compared against the
+    source title so a deliberate polish overlay is not reported as a change.
+
+    Returns {guid, source, url, http_status, final_url, error, page, stored,
+    diffs, cache_refreshed}. `page` is null when the page had no Event JSON-LD
+    (common for blocked or interstitial responses). Each diff is
+    {field, stored, page}; fields are page_gone, cancelled, event_status,
+    location_type, title, date, time.
+
+    For iCal events on Meetup/Luma, a successful read also replaces that url's
+    entry in the aggregator's JSON-LD cache (cache_refreshed=true), so the next
+    aggregator run — every 4 hours — corrects location_type/title or drops a
+    cancelled event at the source. Writes nothing else: no overlay, no stamp.
+    """
+    raw = _get_or_404(db.get_event_from_config, guid, 'event')
+    shown = dict(raw)
+    for key, value in (raw.get('overrides') or {}).items():
+        if not key.startswith('_') and key not in db.OVERLAY_PROTECTED_FIELDS:
+            shown[key] = value
+    url = shown.get('url') or raw.get('url')
+    result = {
+        'guid': guid, 'source': raw.get('source'), 'url': url,
+        'http_status': None, 'final_url': None, 'error': None, 'page': None,
+        'stored': {k: shown.get(k) for k in
+                   ('title', 'date', 'time', 'location', 'location_type')},
+        'diffs': [], 'cache_refreshed': False,
+    }
+    if not url:
+        result['error'] = 'event has no url'
+        return result
+    try:
+        resp = safe_get(url, headers={'User-Agent': USER_AGENT}, timeout=10)
+    except Exception as e:
+        result['error'] = f'{type(e).__name__}: {e}'
+        return result
+    result['http_status'] = resp.status_code
+    result['final_url'] = getattr(resp, 'url', None)
+    page = json_ld.parse_event_json_ld(resp.text) if resp.status_code == 200 else None
+    result['page'] = page
+    result['diffs'] = _source_diffs(raw, shown, resp.status_code, page)
+
+    # Only entries the aggregator actually reads: its own url, on a host it
+    # fetches JSON-LD for. Anything else would just grow a 400KB-capped item.
+    if (page is not None and raw.get('source') == 'ical'
+            and url == raw.get('url') and json_ld.is_json_ld_host(url)):
+        url_hash = hashlib.md5(url.encode('utf-8'), usedforsecurity=False).hexdigest()
+        db.put_jsonld_cache_entry(url_hash, json_ld.cache_entry(page))
+        result['cache_refreshed'] = True
+    return result
+
+
+@mcp.tool()
+def mark_events_checked(results: list) -> dict:
+    """
+    Stamp last_checked on events the re-check has looked at, taking them off
+    list_events_due_for_check for the next 14 days. Call once at the end of a
+    pass with every event looked at — including fetch failures, or a page that
+    always blocks us would sit at the front of the queue forever.
+
+    Each entry is {guid, result, note?}; result is one of:
+      ok            page matches the listing
+      refreshed     iCal event whose cache check_event_source refreshed; the
+                    aggregator will apply the change itself
+      fixed         an overlay was written
+      flagged       left for a human (resolve_qa_review 'flagged')
+      fetch_failed  page could not be read
+
+    Does not trigger a site rebuild. Returns {marked, missing} — missing lists
+    guids that no longer exist (pruned since they were listed).
+    """
+    for entry in results:
+        if not isinstance(entry, dict) or not entry.get('guid'):
+            raise ValueError(f'each result needs a guid: {entry!r}')
+        if entry.get('result') not in db.CHECK_RESULTS:
+            raise ValueError(f"result must be one of {list(db.CHECK_RESULTS)}, "
+                             f"got: {entry.get('result')!r} for {entry['guid']}")
+    marked, missing = [], []
+    for entry in results:
+        ok = db.mark_event_checked(entry['guid'], entry['result'], entry.get('note'))
+        (marked if ok else missing).append(entry['guid'])
+    return {'marked': marked, 'missing': missing}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

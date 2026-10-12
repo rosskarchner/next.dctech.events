@@ -160,6 +160,22 @@ def test_an_identical_rewrite_is_ignored(monkeypatch, rings):
     assert rings == []
 
 
+def test_a_recheck_stamp_is_ignored(monkeypatch, rings):
+    monkeypatch.setattr(handler.codebuild, "start_build",
+                        lambda **kw: pytest.fail("a re-check stamp must not build"))
+    old = {"title": {"S": "Python DC"}}
+    new = {"title": {"S": "Python DC"},
+           "last_checked": {"S": "2026-10-12T12:00:00Z"},
+           "last_check_result": {"S": "ok"},
+           "last_check_note": {"S": "page unchanged"}}
+
+    result = handler.lambda_handler(
+        {"Records": [_modify("EVENT#x", old, new)]}, None)
+
+    assert result["started"] is False
+    assert rings == []
+
+
 def test_an_ical_cache_that_differs_only_in_fetch_bookkeeping_is_ignored(monkeypatch):
     monkeypatch.setattr(handler.codebuild, "start_build",
                         lambda **kw: pytest.fail("bookkeeping must not build"))

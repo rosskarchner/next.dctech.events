@@ -36,7 +36,7 @@ import db  # noqa: E402
 ICAL_CACHE_DIR = os.path.join(SITE_DIR, '_cache', 'ical')
 JSON_LD_CACHE_DIR = os.path.join(SITE_DIR, '_cache', 'json-ld')
 
-JSONLD_CACHE_KEY = {'PK': 'CACHE#jsonld', 'SK': 'META'}
+JSONLD_CACHE_KEY = db.JSONLD_CACHE_KEY
 
 
 def _seed_caches(groups):
@@ -73,7 +73,17 @@ def _persist_jsonld_cache():
     import time as _time
     table = db._get_table()
     current = table.get_item(Key=JSONLD_CACHE_KEY).get('Item')
-    if current and db._to_plain(current.get('entries', {})) == entries:
+    current_entries = db._to_plain(current.get('entries', {})) if current else {}
+    # The MCP server's check_event_source may have replaced an entry with a
+    # fresh page read while this run was working from the copy seeded at its
+    # start. Keep whichever read is newer, or the run would write the stale
+    # entry back and it would stick (next_dctech_events-ba5). Entries written
+    # before fetched_at existed sort as oldest.
+    for url_hash, theirs in current_entries.items():
+        ours = entries.get(url_hash)
+        if ours is None or (theirs.get('fetched_at') or '') > (ours.get('fetched_at') or ''):
+            entries[url_hash] = theirs
+    if current and current_entries == entries:
         return  # unchanged — skip the (large) rewrite
     table.put_item(Item={
         **JSONLD_CACHE_KEY,
@@ -126,7 +136,10 @@ def _persist_group(group, events):
         data['categories'] = list(group.get('categories', []))
         if existing:
             # Preserve moderation/overlay state on refresh
-            for keep in ('overrides', 'hidden', 'duplicate_of', 'review_status'):
+            # ...and the re-check stamps, which put_event's full replace would
+            # otherwise wipe on every feed change, making the event due again.
+            for keep in ('overrides', 'hidden', 'duplicate_of', 'review_status',
+                         'last_checked', 'last_check_result', 'last_check_note'):
                 if existing.get(keep) is not None:
                     data.setdefault(keep, existing[keep])
             if (existing.get('source') == 'ical'
