@@ -76,8 +76,13 @@ def store(monkeypatch):
     def _set_status(guid, status):
         events[guid]["review_status"] = status
 
+    def _mark_checked(guid, result, note=None, checked_at=None):
+        events[guid].update(last_checked="now", last_check_result=result)
+        return True
+
     monkeypatch.setattr(server.db, "get_events_by_review_status", _by_status)
     monkeypatch.setattr(server.db, "set_event_review_status", _set_status)
+    monkeypatch.setattr(server.db, "mark_event_checked", _mark_checked)
     return events
 
 
@@ -132,6 +137,19 @@ def test_resolve_qa_review_clears_the_event_from_the_queue(store):
 
     assert store["g1"]["review_status"] == "approved"
     assert list_pending_qa(include_past=True) == []
+
+
+def test_resolve_qa_review_stamps_the_recheck_clock(store):
+    # Otherwise every event a run just reviewed is the head of the re-check
+    # queue in the same run.
+    store["g1"]["review_status"] = "pending_qa"
+    store["g2"]["review_status"] = "pending_qa"
+
+    resolve_qa_review("g1", "approved")
+    resolve_qa_review("g2", "flagged")
+
+    assert store["g1"]["last_check_result"] == "ok"
+    assert store["g2"]["last_check_result"] == "flagged"
 
 
 def test_resolve_qa_review_can_flag_for_a_human(store):

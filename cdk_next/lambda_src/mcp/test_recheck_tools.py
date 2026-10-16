@@ -118,6 +118,18 @@ def test_quantum_meetup_reads_as_virtual_and_refreshes_cache(monkeypatch, cache_
     assert entry["is_virtual"] is True and entry["fetched_at"]
 
 
+def test_page_silent_on_format_is_not_a_location_type_diff(monkeypatch, cache_writes):
+    # AFCEA Bethesda's summit pages: a name-only Event block, no location or
+    # attendance mode, for an event held in a hotel ballroom
+    # (next_dctech_events-ahp).
+    _serve(monkeypatch, QUANTUM, _Resp(_page({"@type": "Event", "name": QUANTUM["title"]})))
+
+    result = check("40f4")
+
+    assert result["page"]["is_virtual"] is False
+    assert result["diffs"] == []
+
+
 def test_overlay_already_fixing_it_is_not_a_diff(monkeypatch, cache_writes):
     event = {**QUANTUM, "overrides": {"location_type": "virtual",
                                       "title": "Seedless Extractors (polished)",

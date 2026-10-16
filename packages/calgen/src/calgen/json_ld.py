@@ -81,12 +81,19 @@ def parse_event_json_ld(html):
                 'start_date': item.get('startDate'),
                 'end_date': item.get('endDate'),
             }
-            if 'OnlineEventAttendanceMode' in attendance_mode or 'Online' in attendance_mode:
-                result['is_virtual'] = True
             location = item.get('location')
-            if not location:
+            # Virtual only on the page's say-so: an online attendance mode, or
+            # a VirtualLocation and nothing else. A missing location says
+            # nothing — AFCEA's chapter pages carry name-only Event blocks for
+            # in-person summits (next_dctech_events-ahp).
+            places = location if isinstance(location, list) else [location]
+            place_types = {p.get('@type') for p in places if isinstance(p, dict)}
+            if 'Online' in attendance_mode or place_types == {'VirtualLocation'}:
                 result['is_virtual'] = True
-            elif isinstance(location, dict):
+            if isinstance(location, list):
+                location = next((p for p in location if isinstance(p, dict)
+                                 and p.get('@type') != 'VirtualLocation'), None)
+            if isinstance(location, dict):
                 addr = location.get('address', {})
                 if isinstance(addr, dict):
                     parts = [

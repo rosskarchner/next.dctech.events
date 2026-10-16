@@ -52,6 +52,31 @@ def test_in_person_event_location():
     assert parsed['location'] == 'MLK Library, 901 G St NW, Washington, DC'
 
 
+def test_missing_location_is_not_virtual():
+    # A name-only Event block says nothing about format (next_dctech_events-ahp).
+    parsed = parse_event_json_ld(_page({'@type': 'Event', 'name': 'Health IT Summit'}))
+    assert parsed['is_virtual'] is False
+    assert parsed['location'] is None
+
+
+def test_virtual_location_without_attendance_mode():
+    parsed = parse_event_json_ld(_page({
+        '@type': 'Event', 'name': 'x',
+        'location': {'@type': 'VirtualLocation', 'url': 'https://zoom.us/j/1'}}))
+    assert parsed['is_virtual'] is True
+
+
+def test_hybrid_location_list_is_physical():
+    parsed = parse_event_json_ld(_page({
+        '@type': 'Event', 'name': 'x',
+        'eventAttendanceMode': 'https://schema.org/MixedEventAttendanceMode',
+        'location': [{'@type': 'VirtualLocation', 'url': 'https://zoom.us/j/1'},
+                     {'@type': 'Place', 'name': 'MLK Library',
+                      'address': {'@type': 'PostalAddress', 'addressLocality': 'Washington'}}]}))
+    assert parsed['is_virtual'] is False
+    assert parsed['location'] == 'MLK Library, Washington'
+
+
 def test_cancelled_and_postponed_status():
     cancelled = parse_event_json_ld(_page({
         **MEETUP_ONLINE, 'eventStatus': 'https://schema.org/EventCancelled'}))

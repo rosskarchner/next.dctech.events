@@ -435,11 +435,17 @@ def resolve_qa_review(guid: str, status: str) -> dict:
 
     Overlay fixes are recorded separately via set_overlay — an approved event
     may well carry overlays; approval means "reviewed", not "unchanged".
+
+    Also stamps last_checked, since reviewing a newly-arrived event is as
+    fresh a look as the two-week re-check — otherwise every event a run
+    approves comes straight back as the head of list_events_due_for_check.
     """
     if status not in ('approved', 'flagged'):
         raise ValueError(f"status must be 'approved' or 'flagged', got: {status!r}")
     _get_or_404(db.get_event_from_config, guid, 'event')
     db.set_event_review_status(guid, status)
+    db.mark_event_checked(guid, 'ok' if status == 'approved' else 'flagged',
+                          'initial QA review')
     return {'guid': guid, 'review_status': status}
 
 
@@ -524,7 +530,11 @@ def _source_diffs(raw, shown, http_status, page):
     elif page.get('event_status') in ('EventPostponed', 'EventRescheduled', 'EventMovedOnline'):
         diffs.append({'field': 'event_status', 'stored': None, 'page': page['event_status']})
     shown_virtual = shown.get('location_type') == 'virtual'
-    if page['is_virtual'] != shown_virtual:
+    # A page with neither a location nor an attendance mode says nothing about
+    # format, so it can't contradict the listing either way.
+    page_states_format = (page['is_virtual'] or page.get('location')
+                          or page.get('attendance_mode'))
+    if page_states_format and page['is_virtual'] != shown_virtual:
         diffs.append({'field': 'location_type', 'stored': shown.get('location_type'),
                       'page': 'virtual' if page['is_virtual'] else 'physical'})
     # Title against the *source* title: QC polish overlays retitle on purpose,
