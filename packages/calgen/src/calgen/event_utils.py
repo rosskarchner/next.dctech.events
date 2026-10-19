@@ -33,6 +33,25 @@ def has_specific_time(raw):
     return bool(raw) and isinstance(raw, str) and ':' in raw and raw.strip() != '00:00'
 
 
+def matches_skip_phrases(event, skip_phrases):
+    """True if a group's `skip_phrases` exclude this feed event.
+
+    Case-insensitive substring match against the (normalized) title and any
+    feed keywords. Shared by pipeline.process_events, which drops matches at
+    render, and the iCal aggregator, which never materializes them as EVENT#
+    rows — the two must agree, or an event the site hides still lands in the
+    QA and re-check queues.
+    """
+    if not isinstance(skip_phrases, list):
+        return False  # unset, or a YAML-era bare true/false
+    phrases = [p.lower() for p in skip_phrases if isinstance(p, str) and p.strip()]
+    if not phrases:
+        return False
+    title = _normalize_title(event.get('title', '') or '').lower()
+    keywords = ' '.join(str(k) for k in (event.get('keywords') or [])).lower()
+    return any(p in title or p in keywords for p in phrases)
+
+
 def calculate_event_hash(date, time, title, url=None):
     uid_parts = [date, time, title]
     if url:

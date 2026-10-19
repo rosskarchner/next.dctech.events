@@ -17,7 +17,7 @@ import requests
 from dateutil import rrule
 
 from calgen.site_config import get_config
-from calgen.event_utils import calculate_event_hash, _normalize_title
+from calgen.event_utils import calculate_event_hash, matches_skip_phrases, _normalize_title
 from calgen.overlay import apply_overlay
 from calgen.regions import EventRejected, load_region_plugin
 
@@ -343,20 +343,12 @@ def process_events(groups, categories, single_events, ical_events, recurring_eve
         suppress_urls = group.get('suppress_urls') or []
         if suppress_urls is True or suppress_urls is False:
             suppress_urls = []
-        skip_phrases = group.get('skip_phrases') or []
-        if skip_phrases is True or skip_phrases is False:
-            skip_phrases = []
-        skip_phrases_lower = [p.lower() for p in skip_phrases if isinstance(p, str)]
+        skip_phrases = group.get('skip_phrases')
         for event in ical_events.get(group_id, []):
             if event.get('url', '') in suppress_urls:
                 continue
-            if skip_phrases_lower:
-                title_lower = _normalize_title(event.get('title', '') or '').lower()
-                keywords = event.get('keywords') or []
-                keywords_lower = ' '.join(str(k) for k in keywords).lower()
-                if any(phrase in title_lower or phrase in keywords_lower
-                       for phrase in skip_phrases_lower):
-                    continue
+            if matches_skip_phrases(event, skip_phrases):
+                continue
             try:
                 event_date = datetime.strptime(event['date'], '%Y-%m-%d').date()
             except (KeyError, ValueError):

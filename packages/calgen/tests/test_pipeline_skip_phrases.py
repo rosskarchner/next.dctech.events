@@ -116,3 +116,12 @@ def test_skip_phrases_only_applies_to_owning_group():
     # group1 event skipped, group2 event kept
     assert len(result) == 1
     assert result[0]['group'] == 'Group 2'
+
+
+def test_matches_skip_phrases_ignores_blank_and_non_list():
+    from calgen.event_utils import matches_skip_phrases
+    ev = {'title': 'Members Only Roundtable'}
+    assert matches_skip_phrases(ev, ['members only'])
+    assert not matches_skip_phrases(ev, ['', '  '])
+    assert not matches_skip_phrases(ev, True)
+    assert not matches_skip_phrases(ev, None)

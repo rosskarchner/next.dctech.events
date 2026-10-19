@@ -29,7 +29,7 @@ os.environ['CALGEN_SITE_DIR'] = SITE_DIR
 os.chdir(SITE_DIR)
 
 from calgen.calendars import fetch_ical_and_extract_events  # noqa: E402
-from calgen.event_utils import calculate_event_hash  # noqa: E402
+from calgen.event_utils import calculate_event_hash, matches_skip_phrases  # noqa: E402
 
 import db  # noqa: E402
 
@@ -124,6 +124,10 @@ def _persist_group(group, events):
         if not ev.get('date') or ev['date'] < today:
             continue
         if ev.get('url', '') in suppress:
+            continue
+        # Same rule the site build applies; skipping here also lets
+        # _prune_stale_ical_events delete rows written before the phrase was added.
+        if matches_skip_phrases(ev, group.get('skip_phrases')):
             continue
         guid = calculate_event_hash(ev.get('date', ''), ev.get('time', ''),
                                     ev.get('title', ''), ev.get('url'))

@@ -107,3 +107,16 @@ def test_jsonld_persist_prefers_our_newer_read(monkeypatch, tmp_path):
     handler._persist_jsonld_cache()
 
     assert handler.db._to_plain(table.put["entries"])["q"]["cancelled"] is True
+
+
+def test_skip_phrases_keep_matching_events_out(fake_db, monkeypatch):
+    monkeypatch.setattr(handler.db, "put_ical_cache", lambda *a: None)
+    members = {**EVENT, "title": "STATION DC Mafia (Members Only)",
+               "url": "https://luma.com/x"}
+    group = {**GROUP, "skip_phrases": ["members only"]}
+
+    fresh, _ = handler._persist_group(group, [EVENT, members])
+
+    assert [p["title"] for p in fake_db["puts"]] == ["Talk"]
+    # Not in fresh, so _prune_stale_ical_events deletes a row written earlier.
+    assert len(fresh) == 1

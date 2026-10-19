@@ -25,10 +25,10 @@ from server import mcp
 _SECURITY = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
 # Deliberately excludes anything destructive or trust-changing (delete_*,
-# add_group, set_group_active, trigger_rebuild, submission/correction
-# moderation, trust/untrust_submitter, revert_qa_run) — a leaked long-lived
-# token should still not be able to publish, delete, or grant trust on its
-# own. Rebuilds already happen on their own via the DynamoDB stream trigger
+# add_group, set_group_active, set_group_skip_phrases, trigger_rebuild,
+# submission/correction moderation, trust/untrust_submitter, revert_qa_run) —
+# a leaked long-lived token should still not be able to publish, delete, or
+# grant trust on its own. Rebuilds already happen on their own via the DynamoDB stream trigger
 # once set_overlay writes land, so this route has no need of trigger_rebuild.
 # The re-check tools are safe here: check_event_source writes only a JSON-LD
 # cache entry (the same read the aggregator would make), mark_events_checked

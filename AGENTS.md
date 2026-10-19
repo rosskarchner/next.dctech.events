@@ -134,7 +134,7 @@ bd prime                # Refresh Beads context
 Use the MCP server (`dctech-events` in `.mcp.json`) rather than hand-written
 `aws dynamodb` calls. Its tools validate category slugs, verify iCal feeds, and
 set the GSI keys that list views depend on — all easy to get subtly wrong by
-hand. Tools include `list_groups`, `add_group`, `set_group_active`,
+hand. Tools include `list_groups`, `add_group`, `set_group_active`, `set_group_skip_phrases`,
 `verify_ical_feed`, `add_single_event`, `add_recurring_event`, `set_overlay`,
 and `trigger_rebuild`.
 

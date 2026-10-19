@@ -79,7 +79,8 @@ def _get_or_404(fetch_fn, id_, label):
 
 @mcp.tool()
 def list_groups() -> list:
-    """List all meetup groups: slug, name, website, ical feed, categories, active."""
+    """List all meetup groups: slug, name, website, ical feed, categories,
+    active, skip_phrases."""
     return [
         {
             'slug': g['id'],
@@ -88,6 +89,7 @@ def list_groups() -> list:
             'ical': g.get('ical', ''),
             'categories': g.get('categories', []),
             'active': g.get('active', True),
+            'skip_phrases': g.get('skip_phrases', []),
         }
         for g in db.get_all_groups()
     ]
@@ -145,6 +147,27 @@ def set_group_active(slug: str, active: bool, reason: str | None = None) -> dict
         data['status_reason'] = reason
     db.put_group(slug, data)
     return {'slug': slug, 'active': active}
+
+
+@mcp.tool()
+def set_group_skip_phrases(slug: str, phrases: list) -> dict:
+    """
+    Drop a group's feed events whose title contains any of `phrases`
+    (case-insensitive substring), e.g. ["members only"] to keep a space's
+    private events off the site. Replaces the whole list; pass [] to clear.
+
+    The site build honors it on the next rebuild. The iCal aggregator stops
+    materializing matches on its next run (every 4 hours) and deletes the
+    ones it already wrote, so they also leave the QA and re-check queues.
+    """
+    group = _get_or_404(db.get_group, slug, 'group')
+    if not all(isinstance(p, str) for p in phrases):
+        raise ValueError('phrases must be strings')
+    cleaned = [p.strip() for p in phrases if p.strip()]
+    data = {k: v for k, v in group.items() if k != 'id'}
+    data['skip_phrases'] = cleaned
+    db.put_group(slug, data)
+    return {'slug': slug, 'skip_phrases': cleaned}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
