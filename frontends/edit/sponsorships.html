@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sponsorships - DC Tech Events Admin</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+  <link rel="stylesheet" href="/static/kenney-mini/kenney-mini.css">
+  <script src="/edit/js/config.js"></script>
+  <script src="/edit/js/auth.js"></script>
+  <style>
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    .toolbar select, .toolbar input {
+      padding: 0.4rem; border: 1px solid var(--color-border, #ddd); border-radius: 0.25rem; font: inherit;
+    }
+    table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    table.data th, table.data td {
+      text-align: left; vertical-align: top; padding: 0.5rem; border-bottom: 1px solid var(--color-border, #ddd);
+    }
+    table.data input {
+      width: 100%; box-sizing: border-box; padding: 0.3rem; font: inherit;
+      border: 1px solid var(--color-border, #ddd); border-radius: 0.25rem; margin-bottom: 0.25rem;
+    }
+    .badge { display: inline-block; font-size: 0.75em; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 0.25rem; }
+    .badge-paid { background: #fef3c7; color: #92400e; }
+    .badge-approved { background: #dcfce7; color: #166534; }
+    .badge-held, .badge-payment_pending { background: #e0e7ff; color: #3730a3; }
+    .badge-rejected, .badge-refunded, .badge-cancelled { background: #f3f4f6; color: #6b7280; }
+    .row-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .muted { color: var(--color-text-muted, #666); font-size: 0.85em; }
+    .message { padding: 0.75rem 1rem; border-radius: 0.25rem; margin-bottom: 1rem; }
+    .message p { margin: 0; }
+    .message-success { background: #dcfce7; color: #166534; }
+    .message-error { background: #fee2e2; color: #991b1b; }
+    code.coupon { font-size: 1rem; letter-spacing: 0.08em; }
+    section.card { margin-bottom: 2rem; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px;">
+      <div style="display:flex; align-items: center; gap: 2rem;">
+        <a href="index.html" class="nav-brand" id="nav-brand">DC Tech Events</a>
+        <ul class="nav-links" data-auth="admin" style="display:flex; list-style: none; gap: 1rem; margin: 0; padding: 0;">
+          <li><a href="queue.html">Queue</a></li>
+          <li><a href="events.html">Events</a></li>
+          <li><a href="corrections.html">Corrections</a></li>
+          <li><a href="posts.html">Posts</a></li>
+          <li><a href="sponsorships.html" style="font-weight: bold;">Sponsors</a></li>
+          <li><a href="subscribers.html">Subscribers</a></li>
+        </ul>
+      </div>
+      <div class="nav-right">
+        <span data-auth="logged-in" class="hidden">
+          <span data-user="name"></span>
+          <button class="btn-sign-out" onclick="DctechAuth.logout()">Sign Out</button>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container" style="max-width: 1100px;">
+    <div class="page-header">
+      <h1>Sponsorships</h1>
+      <p>
+        Bookings show up here as <strong>paid</strong> once PayPal confirms the payment or a coupon is used.
+        Approving one puts it on the site after the next rebuild, which takes a few minutes.
+        If you reject a PayPal booking, refund it in PayPal yourself. Public page: <a href="/sponsor/" target="_blank" rel="noopener">/sponsor/</a>.
+      </p>
+    </div>
+
+    <div id="sp-message"></div>
+
+    <section class="card">
+      <div class="toolbar">
+        <label for="status-filter">Show</label>
+        <select id="status-filter">
+          <option value="">All</option>
+          <option value="paid" selected>Waiting for review (paid)</option>
+          <option value="approved">Approved</option>
+          <option value="held">Held (awaiting payment)</option>
+          <option value="payment_pending">Payment pending</option>
+          <option value="rejected">Rejected</option>
+          <option value="refunded">Refunded</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <span class="muted" id="price-label"></span>
+      </div>
+      <table class="data">
+        <thead><tr><th>Week</th><th>Copy</th><th>Booker</th><th>Status</th><th></th></tr></thead>
+        <tbody id="booking-rows"><tr><td colspan="5"><span class="spinner"></span> Loading…</td></tr></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2 style="margin-top: 0;">Book a week directly</h2>
+      <p class="muted">Use this for a comp or a sponsor who paid outside PayPal. It is approved immediately, and it can't take a week someone already holds.</p>
+      <form id="manual-form" class="toolbar">
+        <input name="week_id" placeholder="2026-W45" required pattern="\d{4}-W\d{2}" size="9">
+        <input name="name" placeholder="Sponsor name" maxlength="60" required>
+        <input name="message" placeholder="Message" maxlength="140" required size="40">
+        <input name="url" type="url" placeholder="https://…" required>
+        <input name="contact_email" type="email" placeholder="contact (optional)">
+        <button class="btn btn-primary" type="submit">Book</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2 style="margin-top: 0;">Coupon codes</h2>
+      <p class="muted">Each code is good for one free week and can be used once. A coupon booking still waits for your review. If you reject that booking, the code becomes usable again.</p>
+      <form id="mint-form" class="toolbar">
+        <label>Count <input name="count" type="number" min="1" max="50" value="1" style="width: 4rem;"></label>
+        <input name="note" placeholder="Note (who it's for)" size="30">
+        <label>Expires <input name="expires_on" type="date"></label>
+        <button class="btn btn-primary" type="submit">Mint</button>
+      </form>
+      <table class="data">
+        <thead><tr><th>Code</th><th>Note</th><th>Created</th><th>Expires</th><th>Used for</th><th></th></tr></thead>
+        <tbody id="coupon-rows"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/edit/js/util.js"></script>
+  <script src="/edit/js/sponsorships.js"></script>
+</body>
+</html>

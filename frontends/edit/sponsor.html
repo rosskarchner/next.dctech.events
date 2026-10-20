@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book a Sponsorship - DC Tech Events</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+  <link rel="stylesheet" href="/static/kenney-mini/kenney-mini.css">
+  <script src="/edit/js/config.js"></script>
+  <style>
+    .container { max-width: 760px; }
+    .field { margin-bottom: 1rem; }
+    .field label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+    .field input, .field select {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid var(--color-border, #ddd);
+      border-radius: 0.25rem;
+      font: inherit;
+      box-sizing: border-box;
+    }
+    .field .hint { font-size: 0.85em; color: var(--color-text-muted, #666); margin-top: 0.25rem; }
+    .counter { float: right; font-weight: normal; font-size: 0.85em; color: var(--color-text-muted, #666); }
+    .counter.over { color: #dc2626; }
+    .preview {
+      border: 1px dashed var(--color-border, #ccc);
+      border-radius: 0.25rem;
+      padding: 0.75rem 1rem;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+      color: #6b7280;
+    }
+    .preview strong { color: #222323; }
+    .preview-label { text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; }
+    details { margin: 1rem 0; }
+    .message { padding: 0.75rem 1rem; border-radius: 0.25rem; margin-bottom: 1rem; }
+    .message p { margin: 0; }
+    .message-success { background: #dcfce7; color: #166534; }
+    .message-error { background: #fee2e2; color: #991b1b; }
+    .message-warning, .message-info { background: #fef3c7; color: #92400e; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px;">
+      <a href="/" class="nav-brand">DC Tech Events</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div class="page-header">
+      <h1>Book a sponsorship week</h1>
+      <p>
+        Your message runs beside the logo on every page, at the top of the
+        Monday newsletter, and in our Monday and Thursday posts.
+        <a href="/sponsor/">More about sponsoring</a>.
+      </p>
+    </div>
+
+    <div id="sponsor-message"></div>
+
+    <form id="sponsor-form" class="card">
+      <div class="field">
+        <label for="week">Week</label>
+        <select id="week" name="week_id" required>
+          <option value="">Loading available weeks…</option>
+        </select>
+        <p class="hint">Weeks run Monday through Sunday. Booking for a week closes at the end of the Thursday before it.</p>
+      </div>
+
+      <div class="field">
+        <label for="name">Sponsor name <span class="counter" data-for="name" data-max="60"></span></label>
+        <input type="text" id="name" name="name" maxlength="60" required placeholder="Acme Corp">
+      </div>
+
+      <div class="field">
+        <label for="message">Message <span class="counter" data-for="message" data-max="140"></span></label>
+        <input type="text" id="message" name="message" maxlength="140" required
+               placeholder="We're hiring Python developers in Arlington.">
+        <p class="hint">Plain text, one line.</p>
+      </div>
+
+      <div class="field">
+        <label for="url">Link</label>
+        <input type="url" id="url" name="url" required placeholder="https://example.com/jobs">
+      </div>
+
+      <div class="field">
+        <label for="email">Your email</label>
+        <input type="email" id="email" name="contact_email" required>
+        <p class="hint">We'll use it to confirm your booking and nothing else.</p>
+      </div>
+
+      <div class="preview" aria-live="polite">
+        <span class="preview-label">Sponsor:</span>
+        <strong id="preview-name">Acme Corp</strong> — <span id="preview-message">your message</span>&nbsp;&rarr;
+      </div>
+
+      <details id="coupon-details">
+        <summary>Have a coupon code?</summary>
+        <div class="field" style="margin-top: 0.75rem;">
+          <label for="coupon">Coupon code</label>
+          <input type="text" id="coupon" name="coupon_code" autocomplete="off"
+                 style="text-transform: uppercase;">
+          <p class="hint">A coupon covers the whole week, so you won't need to pay.</p>
+        </div>
+      </details>
+
+      <p class="hint" id="price-note"></p>
+      <button type="submit" class="btn btn-primary" id="submit-button">Continue to PayPal</button>
+      <p class="hint">Every sponsorship is reviewed before it runs. If we can't run yours, we'll refund you in full.</p>
+    </form>
+
+    <noscript>
+      <div class="message message-warning"><p>JavaScript is required to book a sponsorship.</p></div>
+    </noscript>
+  </main>
+
+  <script src="/edit/js/util.js"></script>
+  <script src="/edit/js/sponsor.js"></script>
+</body>
+</html>

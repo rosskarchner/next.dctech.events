@@ -12,7 +12,7 @@ import traceback
 
 from jinja2 import Environment, FileSystemLoader
 
-from routes import public, submit, admin, events, corrections, preferences
+from routes import public, submit, admin, events, corrections, preferences, sponsorships
 
 # Set up Jinja2 template environment
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -256,6 +256,37 @@ def lambda_handler(event, context):
             return add_cors(
                 admin.untrust_submitter_json(event, jinja_env, trusted_email))
 
+        # Sponsorships and their coupons
+        if path == '/api/admin/sponsorships' and http_method == 'GET':
+            return add_cors(sponsorships.list_json(event, jinja_env))
+
+        if path == '/api/admin/sponsorships' and http_method == 'POST':
+            return add_cors(sponsorships.create_json(event, jinja_env))
+
+        if path.startswith('/api/admin/sponsorships/'):
+            result = _dispatch_id_tail(path, '/api/admin/sponsorships/', {
+                ('approve', 'POST'): sponsorships.approve_json,
+                ('reject', 'POST'): sponsorships.reject_json,
+                ('cancel', 'POST'): sponsorships.cancel_json,
+                ('', 'PUT'): sponsorships.update_json,
+                ('', 'GET'): sponsorships.get_json,
+            }, event, jinja_env, http_method)
+            if result is not None:
+                return add_cors(result)
+
+        if path == '/api/admin/coupons' and http_method == 'GET':
+            return add_cors(sponsorships.list_coupons_json(event, jinja_env))
+
+        if path == '/api/admin/coupons' and http_method == 'POST':
+            return add_cors(sponsorships.mint_coupons_json(event, jinja_env))
+
+        if path.startswith('/api/admin/coupons/'):
+            result = _dispatch_id_tail(path, '/api/admin/coupons/', {
+                ('', 'DELETE'): sponsorships.revoke_coupon_json,
+            }, event, jinja_env, http_method)
+            if result is not None:
+                return add_cors(result)
+
         # Free-form /updates posts
         if path == '/api/admin/posts' and http_method == 'GET':
             return add_cors(admin.list_posts_json(event, jinja_env))
@@ -271,6 +302,19 @@ def lambda_handler(event, context):
                 return add_cors(admin.update_post_json(event, jinja_env, slug))
             if http_method == 'DELETE':
                 return add_cors(admin.delete_post_json(event, jinja_env, slug))
+
+        # Sponsorships: booking is public (the hold is the only thing a
+        # stranger can create, and it lapses in 30 minutes); the IPN listener
+        # is public because PayPal is the caller, and it trusts nothing until
+        # PayPal has verified the message.
+        if path == '/api/sponsorships/availability' and http_method == 'GET':
+            return add_cors(sponsorships.availability_json(event, jinja_env))
+
+        if path == '/api/sponsorships' and http_method == 'POST':
+            return add_cors(sponsorships.book_json(event, jinja_env))
+
+        if path == '/api/paypal/ipn' and http_method == 'POST':
+            return sponsorships.ipn(event, jinja_env)
 
         # Submission routes (authenticated)
         if path == '/submit' and http_method == 'GET':

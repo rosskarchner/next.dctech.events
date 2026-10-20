@@ -22,6 +22,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 import db
+import sponsorships
 # Both copied from packages/calgen by build_lambdas.sh (conftest.py does the
 # same for tests), so the re-check parses pages exactly as the aggregator does.
 import json_ld
@@ -1110,3 +1111,115 @@ def list_discovery_proposals(limit: int | None = 200) -> list:
              ('id', 'draft_type', 'status', 'title', 'name', 'url',
               'website', 'ical_url', 'created_at')}
             for d in drafts[:limit]]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Weekly sponsorships
+#
+# Thin wrappers over sponsorships.py (copied from lambda_src/api by
+# build_lambdas.sh), the same rules the /edit admin page and the public
+# booking form use. None of these are in handler.SCHEDULED_AGENT_TOOLS: they
+# publish paid copy, email sponsors, and mint free weeks.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _sponsor_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except sponsorships.SponsorshipError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+@mcp.tool()
+def list_sponsorships(status: str | None = None) -> list:
+    """
+    Every weekly sponsorship booking, soonest week first. Filter by status:
+    held, payment_pending, paid (waiting for review), approved (live),
+    rejected, refunded, cancelled.
+    """
+    return sponsorships.list_sponsorships(status)
+
+
+@mcp.tool()
+def get_sponsorship(week_id: str) -> dict:
+    """One week's booking, e.g. week_id='2026-W45'."""
+    booking = sponsorships.get_sponsorship(week_id)
+    if not booking:
+        raise ValueError(f'No booking for {week_id}')
+    return booking
+
+
+@mcp.tool()
+def approve_sponsorship(week_id: str, name: str | None = None,
+                        message: str | None = None,
+                        url: str | None = None) -> dict:
+    """
+    Approve a paid booking so it appears on the site, newsletter, and posts.
+    Optionally fix the copy in the same call. Emails the sponsor a
+    confirmation. The site rebuilds on its own from the table stream.
+    """
+    edits = {k: v for k, v in (('name', name), ('message', message),
+                               ('url', url)) if v is not None}
+    return _sponsor_call(sponsorships.approve, week_id, MCP_REVIEWER, edits)
+
+
+@mcp.tool()
+def reject_sponsorship(week_id: str, reason: str | None = None) -> dict:
+    """
+    Turn a booking down and free the week. Emails the sponsor (with `reason`)
+    and returns any coupon it used. A PayPal refund must be issued by hand.
+    """
+    return _sponsor_call(sponsorships.reject, week_id, MCP_REVIEWER,
+                         reason or '')
+
+
+@mcp.tool()
+def update_sponsorship_copy(week_id: str, name: str | None = None,
+                            message: str | None = None,
+                            url: str | None = None,
+                            contact_email: str | None = None) -> dict:
+    """Edit a booking's name (<=60 chars), message (<=140), https url, or contact."""
+    fields = {k: v for k, v in (('name', name), ('message', message),
+                                ('url', url), ('contact_email', contact_email))
+              if v is not None}
+    return _sponsor_call(sponsorships.update_copy, week_id, fields)
+
+
+@mcp.tool()
+def book_sponsorship(week_id: str, name: str, message: str, url: str,
+                     contact_email: str | None = None,
+                     approve: bool = True) -> dict:
+    """
+    Book a week directly: a comp, or a sponsor who paid outside PayPal.
+    Ignores the public booking window but never takes a week someone else
+    holds. Approved immediately unless approve=False.
+    """
+    return _sponsor_call(
+        sponsorships.manual_booking, week_id,
+        {'name': name, 'message': message, 'url': url,
+         'contact_email': contact_email or ''},
+        MCP_REVIEWER, approve=approve)
+
+
+@mcp.tool()
+def mint_sponsor_coupons(count: int = 1, note: str | None = None,
+                         expires_on: str | None = None) -> list:
+    """
+    Mint single-use coupon codes, each worth one free sponsorship week,
+    redeemable on the public booking form. A coupon booking still waits for
+    review. `expires_on` is YYYY-MM-DD (last day it can be used).
+    """
+    return _sponsor_call(sponsorships.mint_coupons, count, note or '',
+                         expires_on, MCP_REVIEWER)
+
+
+@mcp.tool()
+def list_sponsor_coupons() -> list:
+    """Every coupon: code, note, expiry, and the week it was redeemed for."""
+    return sponsorships.list_coupons()
+
+
+@mcp.tool()
+def revoke_sponsor_coupon(code: str) -> dict:
+    """Make an unredeemed coupon unusable. Does not affect a booking it already paid for."""
+    return _sponsor_call(sponsorships.revoke_coupon, code)

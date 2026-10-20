@@ -92,6 +92,10 @@ class NextApiStack(cdk.Stack):
             # as an MCP error result that run_qc never inspects — the rebuild
             # happened anyway via the DynamoDB stream trigger.
             "CODEBUILD_PROJECT_NAME": f"{config.PREFIX}-site-generator",
+            # Weekly sponsorships (lambda_src/api/sponsorships.py)
+            "SPONSOR_WEEK_PRICE_USD": config.SPONSOR_WEEK_PRICE_USD,
+            "PAYPAL_RECEIVER_EMAIL": config.PAYPAL_RECEIVER_EMAIL,
+            "PAYPAL_SANDBOX": "1" if config.PAYPAL_SANDBOX else "0",
         }
 
         self.api_function = lambda_.Function(
@@ -287,6 +291,16 @@ class NextApiStack(cdk.Stack):
         preferences_res = api_res.add_resource("preferences")
         preferences_res.add_method("GET", integration)
         preferences_res.add_method("POST", integration)
+
+        # Sponsorships: booking needs no account (a hold lapses on its own
+        # in 30 minutes, and attempts are rate-limited per IP), and the IPN
+        # listener's caller is PayPal, which the Lambda verifies by echoing
+        # each message back to PayPal (sponsorships.handle_ipn).
+        sponsorships_res = api_res.add_resource("sponsorships")
+        sponsorships_res.add_method("POST", integration)
+        sponsorships_res.add_resource("availability").add_method("GET", integration)
+        api_res.add_resource("paypal").add_resource("ipn").add_method(
+            "POST", integration)
 
         public_res = api_res.add_resource("public")
         public_res.add_resource("events").add_resource("{guid}").add_method(

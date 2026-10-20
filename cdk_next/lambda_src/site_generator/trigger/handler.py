@@ -39,9 +39,12 @@ STATE_KEY = {'PK': 'RENDER#site', 'SK': 'STATE'}
 # into /updates, so publishing either has to rebuild the site — without them
 # a new post sits invisible until the daily safety-net build. ARCHIVE# holds the
 # frozen past weeks that the export turns into _archive/ and calgen renders on
-# archived week pages. RENDER# is deliberately absent: this function writes it.
+# archived week pages. SPONSOR# is the week's sponsorship: approving one has to
+# reach the header and /sponsor/ without waiting for the daily build. COUPON# is
+# absent — coupons never render. RENDER# is deliberately absent: this function
+# writes it.
 RELEVANT_PREFIXES = ('EVENT#', 'GROUP#', 'CATEGORY#', 'RECURRING#', 'ICAL#',
-                     'POST#', 'UPDATE#', 'ARCHIVE#')
+                     'POST#', 'UPDATE#', 'ARCHIVE#', 'SPONSOR#')
 
 # Attributes whose changes never alter a rendered page. They differ on an
 # otherwise identical rewrite: the iCal cache stamps updated_at/ttl and its fetch

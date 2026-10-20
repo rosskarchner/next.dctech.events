@@ -156,6 +156,85 @@ a:focus {
     outline-offset: 2px;
 }
 
+/* Logo with this week's sponsor beside it (stacked on phones). The
+   explicit color/margin reset beats `header > div > div` above, which is
+   meant for the tagline. */
+header > div > .header-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--spacing-xs) var(--spacing-lg);
+    color: inherit;
+    font-size: inherit;
+    margin-bottom: 0;
+}
+
+.header-sponsor {
+    margin: 0 0 var(--spacing-sm) 0;
+    max-width: 32rem;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    color: var(--color-text-light);
+}
+
+@media (min-width: 768px) {
+    header > div > .header-top {
+        flex-wrap: nowrap;
+        align-items: center;
+    }
+    .header-top .logo {
+        flex: none;
+        white-space: nowrap;
+    }
+    .header-sponsor {
+        flex: 0 1 20rem;
+        margin: 0;
+        text-align: right;
+    }
+}
+
+.header-sponsor-label {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+}
+
+.header-sponsor a {
+    color: var(--color-text);
+    text-decoration: none;
+}
+
+.header-sponsor a:hover {
+    color: var(--color-primary);
+    text-decoration: underline;
+}
+
+.header-sponsor-open a {
+    color: var(--color-text-light);
+}
+
+.week-sponsor {
+    margin: var(--spacing-sm) 0 0 0;
+    font-size: 0.95rem;
+    color: var(--color-text-light);
+}
+
+/* /sponsor/ */
+.sponsor-list {
+    list-style: none;
+    padding: 0;
+}
+
+.sponsor-list li {
+    margin-bottom: var(--spacing-sm);
+}
+
+.sponsor-list .sponsor-week {
+    color: var(--color-text-light);
+    font-size: 0.9rem;
+}
+
 /* Header call to action — replaced the old header nav (its links moved into
    the sidebar's Browse section; site.css .sidebar-list carries their
    styling now). */

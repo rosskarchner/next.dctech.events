@@ -367,6 +367,7 @@ def _clean_post(data, existing=None):
         'status': status,
         'published_on': published_on,
         'summary': str(data.get('summary') or existing.get('summary') or '').strip(),
+        'link_url': str(data.get('link_url') or existing.get('link_url') or '').strip(),
         'created_at': existing.get('created_at') or now,
         'updated_at': now,
     }, None

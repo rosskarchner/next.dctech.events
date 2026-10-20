@@ -63,6 +63,10 @@ def create_freezer(app):
         yield {}
 
     @freezer.register_generator
+    def sponsor_page():
+        yield {}
+
+    @freezer.register_generator
     def virtual_events_page():
         yield {}
 

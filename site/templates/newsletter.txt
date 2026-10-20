@@ -1,6 +1,9 @@
 {{ site_name }} - Upcoming Events
 ===============================
-
+{% if current_sponsor %}
+This week's sponsor: {{ current_sponsor.name }} — {{ current_sponsor.message }}
+{{ current_sponsor.url }}
+{% endif %}
 {% if days %}
 {% for day in days %}
 {% if day.has_events %}

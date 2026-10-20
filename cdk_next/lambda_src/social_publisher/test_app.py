@@ -331,3 +331,18 @@ def test_link_post_composes_title_summary_and_target():
     assert text.splitlines()[0] == \
         "DC Tech Events for the week of August 31, 2026"
     assert text.endswith("https://dctech.events/week/2026-W36/")
+
+
+# ── sponsor posts ────────────────────────────────────────────────────
+
+
+def test_post_with_link_url_syndicates_the_link():
+    # Sponsor intro/thank-you posts: the sponsor's URL is what they paid for.
+    post = _post(link_url="https://acme.example/jobs")
+    assert app._describe(post)["url"] == "https://acme.example/jobs"
+
+
+def test_post_link_url_must_be_absolute():
+    post = _post(link_url="javascript:alert(1)")
+    assert app._describe(post)["url"] == \
+        "https://dctech.events/updates/new-newsletter/"

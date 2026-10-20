@@ -44,7 +44,7 @@ BUILD_DIR = os.path.join(os.path.dirname(__file__), "..", "build")
 # and not the only guard.
 SITE_RELEVANT_PREFIXES = (
     "EVENT#", "GROUP#", "CATEGORY#", "RECURRING#", "ICAL#",
-    "POST#", "UPDATE#", "ARCHIVE#",
+    "POST#", "UPDATE#", "ARCHIVE#", "SPONSOR#",
 )
 
 # The one state item the trigger, the follow-up and the build share. IAM below is

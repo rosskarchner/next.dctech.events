@@ -562,3 +562,80 @@ def test_virtual_events_are_left_out_of_the_roundup():
     ]
     by_guid = {"a": "2026-08-06T00:00:00Z", "b": "2026-08-06T00:00:00Z"}
     assert added(events, by_guid) == ["In person"]
+
+
+# ── sponsor posts ────────────────────────────────────────────────────
+
+
+class _SponsorTable:
+    def __init__(self, sponsor=None):
+        self.sponsor = sponsor
+        self.puts = []
+
+    def get_item(self, Key):
+        if self.sponsor and Key["PK"] == f"SPONSOR#{self.sponsor['week_id']}":
+            return {"Item": dict(self.sponsor)}
+        return {}
+
+    def put_item(self, Item, **kwargs):
+        self.puts.append(Item)
+
+
+SPONSOR = {"week_id": "2026-W36", "status": "approved", "name": "Acme [Corp]",
+           "message": "Hiring <devs> *now*", "url": "https://acme.example/jobs"}
+THURSDAY = date(2026, 9, 3)  # 2026-W36
+
+
+@pytest.fixture
+def sponsor_table(monkeypatch):
+    def make(sponsor=SPONSOR):
+        table = _SponsorTable(sponsor)
+        monkeypatch.setattr(app._dynamodb, "Table", lambda name: table)
+        return table
+    return make
+
+
+def test_thanks_post_for_approved_sponsor(sponsor_table):
+    table = sponsor_table()
+    result = app.lambda_handler({"mode": "sponsor_thanks",
+                                 "published_on": THURSDAY.isoformat()}, None)
+    assert result["status"] == "published"
+    (item,) = table.puts
+    assert item["PK"] == "POST#sponsor-thanks-2026-w36"
+    assert item["status"] == "published"
+    assert item["link_url"] == "https://acme.example/jobs"
+    assert item["title"] == ("Thanks to Acme [Corp] for sponsoring DC Tech "
+                             "Events this week")
+
+
+def test_sponsor_copy_cannot_inject_markup(sponsor_table):
+    table = sponsor_table()
+    app.lambda_handler({"mode": "sponsor_thanks",
+                        "published_on": THURSDAY.isoformat()}, None)
+    body = table.puts[0]["body"]
+    assert "<devs>" not in body
+    assert "&lt;devs&gt;" in body
+    assert r"\*now\*" in body
+    assert r"Acme \[Corp\]" in body
+
+
+def test_no_post_without_approved_sponsor(sponsor_table):
+    table = sponsor_table({**SPONSOR, "status": "paid"})
+    result = app.lambda_handler({"mode": "sponsor_thanks",
+                                 "published_on": THURSDAY.isoformat()}, None)
+    assert result["status"] == "no_sponsor"
+    assert table.puts == []
+
+
+def test_intro_post_is_keyed_by_week(sponsor_table):
+    table = sponsor_table()
+    app._publish_sponsor_post({}, date(2026, 8, 31), "intro")
+    assert table.puts[0]["PK"] == "POST#sponsor-2026-w36"
+    assert table.puts[0]["title"] == "This week's sponsor: Acme [Corp]"
+
+
+def test_intro_failure_never_blocks_week_ahead(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("table down")
+    monkeypatch.setattr(app, "_publish_sponsor_post", boom)
+    assert app._sponsor_intro_safely({}, date(2026, 8, 31))["status"] == "error"

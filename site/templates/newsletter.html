@@ -11,6 +11,13 @@
 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
     <h1 style="color: #333;">{{ site_name }} - Upcoming Events</h1>
 
+    {% if current_sponsor %}
+    <p style="margin: 0 0 20px 0; padding: 10px 12px; background: #f0f6f0; border-left: 3px solid #296b6b; font-size: 14px; color: #444;">
+        <span style="text-transform: uppercase; font-size: 11px; letter-spacing: 1px; color: #666;">This week's sponsor</span><br>
+        <a href="{{ current_sponsor.url }}" rel="sponsored" style="color: #0066cc; text-decoration: none;"><strong>{{ current_sponsor.name }}</strong></a> — {{ current_sponsor.message }}
+    </p>
+    {% endif %}
+
     {% if days %}
         {% for day in days %}
             {% if day.has_events %}

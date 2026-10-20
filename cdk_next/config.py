@@ -37,3 +37,14 @@ TAGS = {
     "environment": "next",
     "managedBy": "CDK",
 }
+
+# Weekly sponsorships (lambda_src/api/sponsorships.py). Price is a string of
+# whole or decimal USD; "0" means not on sale — the booking form refuses
+# PayPal holds (coupons and admin bookings still work). Keep it equal to
+# `sponsorship_price_usd` in site/config.yaml, which the /sponsor/ page shows;
+# test_sponsorships.py fails if the two drift.
+SPONSOR_WEEK_PRICE_USD = "50"
+PAYPAL_RECEIVER_EMAIL = "ross@karchner.com"
+# True points the Buy Now form and IPN verification at PayPal's sandbox; set
+# PAYPAL_RECEIVER_EMAIL to the sandbox business account while it is on.
+PAYPAL_SANDBOX = False

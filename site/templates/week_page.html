@@ -32,6 +32,11 @@
 <div class="week-container">
     <header class="week-header">
         <h1>Events for Week of {{ week_start_formatted }}</h1>
+        {% set week_sponsor = sponsor_for_week(week_id) %}
+        {% if week_sponsor %}
+        <p class="week-sponsor">{{ 'Sponsored' if is_past else 'This week is sponsored' }} by
+            <a href="{{ week_sponsor.url }}" rel="sponsored noopener"><strong>{{ week_sponsor.name }}</strong></a> — {{ week_sponsor.message }}</p>
+        {% endif %}
     </header>
 
     <section class="events-section">

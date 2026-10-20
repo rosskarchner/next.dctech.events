@@ -2112,8 +2112,10 @@ def retire_category(slug, subscribers_move_to=None, actor=None):
 
 # ─── POST operations (free-form /updates posts) ───────────────────
 
+# link_url: where the social cross-post points instead of the permalink
+# (sponsor posts link the sponsor, not their own /updates/ page).
 POST_FIELDS = ['title', 'slug', 'body', 'published_on', 'status', 'summary',
-               'author', 'created_at', 'updated_at']
+               'author', 'created_at', 'updated_at', 'link_url']
 
 
 def get_all_posts():

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Sponsor {{ site_name }}{% endblock %}
+
+{% block description %}Sponsor {{ site_name }} for a week: your one-line message at the top of every page, the Monday newsletter, and our weekly posts.{% endblock %}
+
+{% block og_title %}Sponsor {{ site_name }}{% endblock %}
+{% block og_description %}One sponsor per week, at the top of every page and the Monday newsletter.{% endblock %}
+
+{% block twitter_title %}Sponsor {{ site_name }}{% endblock %}
+{% block twitter_description %}One sponsor per week, at the top of every page and the Monday newsletter.{% endblock %}
+
+{% block content %}
+<h1>Sponsor {{ site_name }}</h1>
+
+<p>{{ site_name }} has one sponsor a week. For that week, Monday through Sunday, your sponsorship gets:</p>
+<ul>
+    <li>A line with your name, a short message, and a link, beside the logo at the top of every page.</li>
+    <li>The same line at the top of the Monday newsletter.</li>
+    <li>A mention on that week's page.</li>
+    <li>A post introducing you on Monday and a thank-you post on Thursday. Both go to our updates feed, <a href="https://dmv.community/@techevents">Mastodon</a>, and <a href="https://bsky.app/profile/dctechevents.bsky.social">Bluesky</a>, and both link straight to you.</li>
+</ul>
+
+<p>Everything is text: your name (up to 60 characters), a message (up to 140 characters), and a link.
+    There are no images and no tracking, and every sponsorship is reviewed before it runs.
+    {% if price %}A week costs <strong>${{ price }}</strong>, paid through PayPal.{% endif %}</p>
+
+<p><a class="button" href="/edit/sponsor.html"><strong>Book a week &rarr;</strong></a></p>
+<p>You can book up to six months ahead. Booking for a week closes at the end of the Thursday before it.
+    Questions? <a href="mailto:ross@karchner.com">Email Ross</a>.</p>
+
+{% if upcoming_sponsors %}
+<h2>Upcoming sponsors</h2>
+<ul class="sponsor-list">
+    {% for s in upcoming_sponsors %}
+    <li><span class="sponsor-week">{{ 'This week' if s.week_id == this_week else 'Week ' ~ s.week_id }}</span><br>
+        <a href="{{ s.url }}" rel="sponsored noopener"><strong>{{ s.name }}</strong></a> — {{ s.message }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% if past_sponsors %}
+<h2>Thanks to our past sponsors</h2>
+<ul class="sponsor-list">
+    {% for s in past_sponsors %}
+    <li><a href="{{ s.url }}" rel="sponsored noopener"><strong>{{ s.name }}</strong></a> <span class="sponsor-week">({{ s.week_id }})</span></li>
+    {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

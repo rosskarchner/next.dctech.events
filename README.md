@@ -124,6 +124,67 @@ the queue. Use `submit_event` for anything found rather than vetted — a
 scraped calendar, a third-party listing — and `add_single_event` only when you
 mean to publish immediately.
 
+Sponsorships: `list_sponsorships`, `get_sponsorship`, `approve_sponsorship`,
+`reject_sponsorship`, `update_sponsorship_copy`, `book_sponsorship` (comps and
+off-PayPal payments), `mint_sponsor_coupons`, `list_sponsor_coupons`,
+`revoke_sponsor_coupon`. None of them are on the `/mcp-agent` route. See
+[Weekly sponsorships](#weekly-sponsorships).
+
+## Weekly sponsorships
+
+One sponsor per ISO week, in the style of Daring Fireball. During its week, the
+sponsor's name, a one-line message and a link appear in these places:
+
+- beside the logo on every page
+- at the top of the Monday newsletter
+- on `/week/<id>/`
+- in a Monday intro post and a Thursday thank-you post, which go to `/updates/`, the feed, Mastodon and Bluesky, and link straight to the sponsor
+
+`/sponsor/` explains the offer, and `/edit/sponsor.html` is where people book.
+The logic lives in `cdk_next/lambda_src/api/sponsorships.py`. The API and the
+MCP server share that file.
+
+**Booking.** `POST /api/sponsorships` holds a week for 30 minutes with a
+conditional put on `SPONSOR#<week>/META`, so a week can only be held once. It
+returns the fields for a PayPal Payments Standard "Buy Now" form, which the
+page submits. The money goes to `PAYPAL_RECEIVER_EMAIL`, and no PayPal API
+keys are involved. `custom` carries `<week>|<booking_id>`.
+
+**Payment.** PayPal POSTs an IPN to `/api/paypal/ipn`. The Lambda then:
+
+1. Echoes the message back to PayPal and accepts it only if the answer is `VERIFIED`.
+2. Records it once as `SPONSOR#<week>/PAYMENT#<txn>#<status>`.
+3. Checks the receiver, the currency and the amount.
+4. Moves the booking to `paid`.
+
+If the hold lapsed and someone else took the week, Ross gets a "CONFLICT" email
+to refund the payer. Refunds and reversals mark the booking `refunded`. Refunds
+are always issued by hand in PayPal.
+
+**Review.** Paid bookings wait for approval. The surfaces for that are
+`/edit/sponsorships.html`, the MCP tools, and an email to `ADMIN_EMAIL`.
+Approving emails the sponsor. `SPONSOR#` is a rebuild-trigger prefix, and the
+export writes approved copy only to `_data/sponsors.json`.
+
+**Coupons.** `COUPON#<CODE>` is a single-use free week, minted in `/edit` or
+over MCP. Redeeming one is a single transaction: it claims the coupon and takes
+the week together. If the booking is rejected or cancelled, the coupon becomes
+usable again.
+
+**Window and price.** People can book up to 26 weeks ahead. A week's bookings
+close at the end of the Thursday before it, US/Eastern. The price is
+`SPONSOR_WEEK_PRICE_USD` in `cdk_next/config.py`, and it must equal
+`sponsorship_price_usd` in `site/config.yaml`; a test enforces this. `"0"` turns
+PayPal booking off, while coupons and admin bookings keep working. Set
+`PAYPAL_SANDBOX = True`, with a sandbox receiver email, to rehearse the flow.
+
+Preview the Thursday post with:
+
+```bash
+aws lambda invoke --function-name dctech-events-next-updates-publisher \
+  --payload '{"mode":"sponsor_thanks","dry_run":true}' /dev/stdout
+```
+
 ## Monday: one state machine, not four alarm clocks
 
 `dctech-events-next-monday` (`cdk_next/stacks/orchestration_stack.py`) runs the

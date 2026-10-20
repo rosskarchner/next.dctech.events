@@ -111,6 +111,22 @@ class NextUpdatesStack(cdk.Stack):
             description="Publish the Wednesday dctech.events /updates roundup",
         )
 
+        # Thursday 15:00 UTC (10/11 AM Eastern): thank the week's sponsor,
+        # late enough in the week to be a second mention rather than a repeat
+        # of Monday's intro. No-op in a week without an approved sponsor.
+        events.Rule(
+            self,
+            "NextSponsorThanksSchedule",
+            schedule=events.Schedule.expression("cron(0 15 ? * THU *)"),
+            targets=[targets.LambdaFunction(
+                self.publisher_function,
+                event=events.RuleTargetInput.from_object(
+                    {"mode": "sponsor_thanks"}),
+            )],
+            description="Post the Thursday thank-you to this week's sponsor",
+        )
+
+        # The Monday sponsor intro is written by the week_ahead run below.
         # The Monday "week ahead" link post has no rule of its own: it is a
         # step in NextOrchestrationStack's Monday state machine, which invokes
         # this same function with {"mode": "week_ahead"}. It has to run *after*

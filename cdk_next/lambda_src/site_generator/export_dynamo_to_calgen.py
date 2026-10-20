@@ -285,6 +285,20 @@ def main():
         _write_yaml(os.path.join('_posts', f'{slug}.yaml'), _clean(item))
     counts['posts'] = len(by_prefix.get('POST', []))
 
+    # ── _data/sponsors.json ─────────────────────────────────────────
+    # Weekly sponsorships, approved ones only, and only the copy: bookers'
+    # emails, payment ids and unreviewed copy never leave DynamoDB. calgen's
+    # context processor picks this week's entry for the header and newsletter
+    # (and each week page picks its own), so the whole list is exported.
+    sponsors = sorted(
+        ({k: str(item.get(k, '')) for k in ('week_id', 'name', 'message', 'url')}
+         for item in by_prefix.get('SPONSOR', [])
+         if item.get('SK') == 'META' and item.get('status') == 'approved'),
+        key=lambda s: s['week_id'])
+    with open(os.path.join('_data', 'sponsors.json'), 'w', encoding='utf-8') as f:
+        json.dump(sponsors, f, indent=1)
+    counts['sponsors'] = len(sponsors)
+
     # ── _cache/ical/ ────────────────────────────────────────────────
     _reset_dir(os.path.join('_cache', 'ical'))
     for item in by_prefix.get('ICAL', []):

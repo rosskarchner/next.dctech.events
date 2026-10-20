@@ -30,7 +30,7 @@ uv pip install "${UV_ARGS[@]}" --target build/api jinja2 pytz "pyjwt[crypto]"
 # ── mcp ──────────────────────────────────────────────────────────────
 mkdir -p build/mcp
 cp -r lambda_src/mcp/. build/mcp/
-cp lambda_src/api/db.py lambda_src/api/event_utils.py build/mcp/
+cp lambda_src/api/db.py lambda_src/api/event_utils.py lambda_src/api/sponsorships.py build/mcp/
 # check_event_source parses pages with calgen's own JSON-LD rules and fetches
 # through its SSRF guard. Both are bs4/requests/stdlib only, so they are copied
 # rather than installing calgen and its Flask stack (conftest.py mirrors this).

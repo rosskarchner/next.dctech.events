@@ -98,6 +98,13 @@ address you pass is who the event is credited to and not evidence that they
 asked to be listed. `add_single_event` skips review entirely — use it only
 when you mean to publish.
 
+Weekly sponsorships have tools too: `list_sponsorships`,
+`approve_sponsorship`, `reject_sponsorship`, `update_sponsorship_copy`,
+`book_sponsorship`, `mint_sponsor_coupons`, `list_sponsor_coupons`,
+`revoke_sponsor_coupon`. Approving one emails the sponsor and publishes the
+copy, so confirm with Ross before you approve. PayPal refunds are never
+automatic.
+
 It is served behind an AWS_IAM authorizer, so `scripts/mcp_sigv4_bridge.py`
 signs requests with your AWS credentials. If tools are unavailable, check
 `aws sts get-caller-identity` first.

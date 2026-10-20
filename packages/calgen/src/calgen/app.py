@@ -20,6 +20,7 @@ from flask import Flask, render_template, send_from_directory
 from jinja2 import FileSystemLoader
 import json
 import os
+from datetime import datetime
 
 from calgen.site_config import get_config
 from calgen.regions import load_region_plugin  # noqa: E402
@@ -27,6 +28,7 @@ from calgen.regions import load_region_plugin  # noqa: E402
 from calgen.routes.common import (
     get_events, get_event_by_slug, get_categories,
     filter_events_to_upcoming_days, prepare_events_by_day, local_tz,
+    get_week_identifier,
 )
 from calgen.routes.listings import filter_in_person_events, get_recently_added_count
 
@@ -38,6 +40,7 @@ from calgen.routes import feeds as _feeds_routes
 from calgen.routes import posts as _posts_routes
 from calgen.routes import newsletter as _newsletter_routes
 from calgen.routes import listings as _listings_routes
+from calgen.routes import sponsors as _sponsors_routes
 
 
 def create_app(site_dir=None):
@@ -72,6 +75,7 @@ def create_app(site_dir=None):
     _posts_routes.register_routes(app)
     _newsletter_routes.register_routes(app)
     _listings_routes.register_routes(app)
+    _sponsors_routes.register_routes(app)
     return app
 
 
@@ -87,6 +91,7 @@ def _register_routes(app):
             [{'state': r['slug'], 'name': r['name']} for r in plugin.list_regions()]
             if plugin else []
         )
+        sponsors = _load_sponsors()
         return {
             'site_name': cfg.get('site_name', 'Tech Events'),
             'tagline': cfg.get('tagline', 'Technology conferences and meetups'),
@@ -96,7 +101,12 @@ def _register_routes(app):
             'newsletter_signup_link': cfg.get('newsletter_signup_link', ''),
             'edit_home_link': cfg.get('edit_home_link', ''),
             'newsletter_preferences_link': cfg.get('newsletter_preferences_link', ''),
-            'sponsors': _load_sponsors(),
+            'sponsors': sponsors,
+            # This week's sponsor for the header and newsletter, chosen in the
+            # site's timezone so the Monday-morning build flips it on time.
+            'current_sponsor': sponsor_for_week(
+                get_week_identifier(datetime.now(local_tz).date()), sponsors),
+            'sponsor_for_week': lambda week_id: sponsor_for_week(week_id, sponsors),
             'categories': get_categories(),
             'nav_locations': nav_locations,
             'category_icon_slugs': app.category_icon_slugs,
@@ -125,6 +135,20 @@ def _load_category_icon_slugs(static_dir):
         for fname in os.listdir(icons_dir)
         if fname.lower().endswith('.png')
     }
+
+
+def sponsor_for_week(week_id, sponsors=None):
+    """The sponsorship for ISO week `week_id` ('2026-W45'), or None.
+
+    `_data/sponsors.json` holds approved sponsorships only — the export
+    filters out anything unreviewed — so presence here means "show it".
+    """
+    if sponsors is None:
+        sponsors = _load_sponsors()
+    for sponsor in sponsors:
+        if sponsor.get('week_id') == week_id:
+            return sponsor
+    return None
 
 
 def _load_sponsors():

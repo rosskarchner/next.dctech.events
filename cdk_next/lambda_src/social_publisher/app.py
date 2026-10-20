@@ -171,12 +171,17 @@ def _describe(item):
         if str(item.get("status", "draft")).lower() != "published":
             return None
         slug = str(item.get("slug") or pk.split("#", 1)[1])
+        link_url = str(item.get("link_url") or "").strip()
         return {
             "pk": pk,
             "title": str(item.get("title") or slug),
             "summary": str(item.get("summary") or "").strip()
                        or _first_paragraph(item.get("body")),
-            "url": f"{SITE_BASE_URL}/updates/{slug}/",
+            # Sponsor posts carry the sponsor's own URL: that link is what
+            # the sponsorship paid for, so it goes out instead of the
+            # permalink. Only absolute http(s) URLs; anything else falls back.
+            "url": (link_url if link_url.startswith(("https://", "http://"))
+                    else f"{SITE_BASE_URL}/updates/{slug}/"),
         }
 
     return None

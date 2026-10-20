@@ -22,10 +22,10 @@ max_distance_miles: 50
 github_client_id: ""  # Set via GITHUB_CLIENT_ID environment variable
 oauth_callback_endpoint: "https://add.dctech.events/oauth/callback"
 
-# GitHub Sponsors Configuration
-# Token is set via GITHUB_SPONSORS_TOKEN environment variable
-# Used for sponsor verification during build
-github_sponsors_token: ""  # Set via GITHUB_SPONSORS_TOKEN environment variable
+# Weekly sponsorship price in USD, shown on /sponsor/. Must equal
+# SPONSOR_WEEK_PRICE_USD in cdk_next/config.py, which is what the booking API
+# actually charges (a test checks). "0" hides the price.
+sponsorship_price_usd: "50"
 
 # DynamoDB Configuration
 # Table name for storing event tracking data
