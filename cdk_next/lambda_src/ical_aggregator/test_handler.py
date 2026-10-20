@@ -120,3 +120,13 @@ def test_skip_phrases_keep_matching_events_out(fake_db, monkeypatch):
     assert [p["title"] for p in fake_db["puts"]] == ["Talk"]
     # Not in fresh, so _prune_stale_ical_events deletes a row written earlier.
     assert len(fresh) == 1
+
+
+def test_category_rules_set_stored_categories(fake_db, monkeypatch):
+    monkeypatch.setattr(handler.db, "put_ical_cache", lambda *a: None)
+    anime = {**EVENT, "title": "Anime Night", "url": "https://www.meetup.com/g/events/2/"}
+    group = {**GROUP, "category_rules": [{"phrase": "anime", "categories": ["social"]}]}
+
+    handler._persist_group(group, [EVENT, anime])
+
+    assert [p["categories"] for p in fake_db["puts"]] == [["quantum"], ["social"]]

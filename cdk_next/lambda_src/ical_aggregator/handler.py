@@ -29,7 +29,8 @@ os.environ['CALGEN_SITE_DIR'] = SITE_DIR
 os.chdir(SITE_DIR)
 
 from calgen.calendars import fetch_ical_and_extract_events  # noqa: E402
-from calgen.event_utils import calculate_event_hash, matches_skip_phrases  # noqa: E402
+from calgen.event_utils import (calculate_event_hash, event_categories,  # noqa: E402
+                                matches_skip_phrases)
 
 import db  # noqa: E402
 
@@ -137,7 +138,7 @@ def _persist_group(group, events):
         data['group'] = group.get('name', gid)
         data['group_id'] = gid
         data['group_website'] = group.get('website', '')
-        data['categories'] = list(group.get('categories', []))
+        data['categories'] = event_categories(ev, group)
         if existing:
             # Preserve moderation/overlay state on refresh
             # ...and the re-check stamps, which put_event's full replace would

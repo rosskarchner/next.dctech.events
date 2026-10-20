@@ -17,7 +17,8 @@ import requests
 from dateutil import rrule
 
 from calgen.site_config import get_config
-from calgen.event_utils import calculate_event_hash, matches_skip_phrases, _normalize_title
+from calgen.event_utils import (calculate_event_hash, event_categories,
+                                matches_skip_phrases, _normalize_title)
 from calgen.overlay import apply_overlay
 from calgen.regions import EventRejected, load_region_plugin
 
@@ -359,7 +360,7 @@ def process_events(groups, categories, single_events, ical_events, recurring_eve
             processed['group'] = group.get('name', group_id)
             processed['group_website'] = group.get('website', '')
             processed['source'] = 'ical'
-            processed['categories'] = list(group.get('categories', []))
+            processed['categories'] = event_categories(event, group)
             processed['guid'] = calculate_event_hash(
                 event.get('date', ''), event.get('time', ''),
                 event.get('title', ''), event.get('url'),

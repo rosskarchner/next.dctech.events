@@ -10,7 +10,7 @@ def _normalize_title(s: str) -> str:
     in titles; two titles differing only by those should compare equal.
 
     Applied at ingest (calendars.py) so everything downstream — guid hashing,
-    skip_phrases matching, duplicate detection, display — sees a clean title.
+    skip_phrases and category_rules matching, duplicate detection, display — sees a clean title.
     calculate_event_hash below is left untouched: it hashes whatever title it
     is handed, which is already normalized for feed-sourced events.
     """
@@ -33,23 +33,49 @@ def has_specific_time(raw):
     return bool(raw) and isinstance(raw, str) and ':' in raw and raw.strip() != '00:00'
 
 
-def matches_skip_phrases(event, skip_phrases):
-    """True if a group's `skip_phrases` exclude this feed event.
-
-    Case-insensitive substring match against the (normalized) title and any
-    feed keywords. Shared by pipeline.process_events, which drops matches at
-    render, and the iCal aggregator, which never materializes them as EVENT#
-    rows — the two must agree, or an event the site hides still lands in the
-    QA and re-check queues.
-    """
-    if not isinstance(skip_phrases, list):
-        return False  # unset, or a YAML-era bare true/false
-    phrases = [p.lower() for p in skip_phrases if isinstance(p, str) and p.strip()]
+def _matches_any_phrase(event, phrases):
+    """Case-insensitive substring match of any phrase against the
+    (normalized) title and any feed keywords."""
+    phrases = [p.lower() for p in phrases if isinstance(p, str) and p.strip()]
     if not phrases:
         return False
     title = _normalize_title(event.get('title', '') or '').lower()
     keywords = ' '.join(str(k) for k in (event.get('keywords') or [])).lower()
     return any(p in title or p in keywords for p in phrases)
+
+
+def matches_skip_phrases(event, skip_phrases):
+    """True if a group's `skip_phrases` exclude this feed event.
+
+    Shared by pipeline.process_events, which drops matches at render, and the
+    iCal aggregator, which never materializes them as EVENT# rows — the two
+    must agree, or an event the site hides still lands in the QA and re-check
+    queues.
+    """
+    if not isinstance(skip_phrases, list):
+        return False  # unset, or a YAML-era bare true/false
+    return _matches_any_phrase(event, skip_phrases)
+
+
+def event_categories(event, group):
+    """Categories for one of a group's feed events.
+
+    The group's `categories`, unless any of its `category_rules` match — then
+    the matching rules' categories (in rule order, deduped) replace them, so
+    HacDC's anime nights can be social while the rest of its feed stays
+    hardware. A rule is {'phrase': 'anime night', 'categories': ['social']},
+    matched the same way as skip_phrases. Like matches_skip_phrases, shared by
+    the pipeline and the aggregator so the site and the QA queue agree; an
+    event overlay's categories still win over both.
+    """
+    matched = []
+    rules = group.get('category_rules')
+    for rule in rules if isinstance(rules, list) else []:
+        if isinstance(rule, dict) and _matches_any_phrase(event, [rule.get('phrase')]):
+            for slug in rule.get('categories') or []:
+                if slug not in matched:
+                    matched.append(slug)
+    return matched or list(group.get('categories', []))
 
 
 def calculate_event_hash(date, time, title, url=None):

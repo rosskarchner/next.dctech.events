@@ -433,7 +433,7 @@ def _group_item_to_dict(item):
     group = {'id': slug, 'name': item.get('name', ''), 'active': item.get('active', True)}
     for field in ['website', 'ical', 'fallback_url', 'categories',
                   'suppress_urls', 'suppress_guid', 'scan_for_metadata',
-                  'url_override', 'skip_phrases']:
+                  'url_override', 'skip_phrases', 'category_rules']:
         if field in item:
             group[field] = _to_plain(item[field])
     return group
@@ -2025,6 +2025,89 @@ def delete_category(slug):
     """Delete a CATEGORY entity."""
     table = _get_table()
     table.delete_item(Key={'PK': f'CATEGORY#{slug}', 'SK': 'META'})
+
+
+def retire_category(slug, subscribers_move_to=None, actor=None):
+    """Delete a category and strip it from everything that names it.
+
+    Groups (categories and category_rules), event records, event overlays and
+    recurring series lose the slug outright; nothing is substituted, since the
+    right replacement differs per item. Newsletter subscribers who picked it
+    get `subscribers_move_to` instead when given — just dropping it could empty
+    their list, and an empty list means "send everything" (see
+    get_subscriber_preferences). Drafts keep it: they are a record of what was
+    submitted, and approval re-validates categories anyway.
+
+    Overlays go through set_event_overlay so the change is on the audit trail;
+    one left with no categories has that field cleared, falling back to the
+    source rather than overriding it to nothing. The CATEGORY row goes last so
+    those overlay writes still validate. Returns what changed, by kind.
+    """
+    if slug not in get_all_categories():
+        raise ValueError(f'No such category: {slug}')
+    if subscribers_move_to is not None:
+        validate_category_slugs([subscribers_move_to])
+        if subscribers_move_to == slug:
+            raise ValueError('subscribers_move_to must be a different category')
+    table = _get_table()
+    changed = {'groups': [], 'events': [], 'overlays': [], 'recurring': [],
+               'subscribers': 0}
+
+    def strip(cats):
+        return [c for c in cats or [] if c != slug]
+
+    for group in get_all_groups():
+        rules = group.get('category_rules') or []
+        new_rules = [{**r, 'categories': strip(r.get('categories'))} for r in rules]
+        new_rules = [r for r in new_rules if r['categories']]
+        if slug not in (group.get('categories') or []) and new_rules == rules:
+            continue
+        data = {k: v for k, v in group.items() if k != 'id'}
+        data['categories'] = strip(group.get('categories'))
+        if rules:
+            data['category_rules'] = new_rules
+        put_group(group['id'], data)
+        changed['groups'].append(group['id'])
+
+    for item in _scan_all(table, FilterExpression=(
+            Attr('PK').begins_with('EVENT#') & Attr('SK').eq('META')
+            & (Attr('categories').contains(slug) | Attr('overrides').exists()))):
+        guid = item['PK'].split('#', 1)[1]
+        cats = _to_plain(item.get('categories') or [])
+        if slug in cats:
+            table.update_item(Key={'PK': item['PK'], 'SK': 'META'},
+                              UpdateExpression='SET categories = :c',
+                              ExpressionAttributeValues={':c': strip(cats)})
+            changed['events'].append(guid)
+        overlay_cats = _to_plain((item.get('overrides') or {}).get('categories'))
+        if isinstance(overlay_cats, list) and slug in overlay_cats:
+            comment = f'category {slug} retired'
+            if strip(overlay_cats):
+                set_event_overlay(guid, {'categories': strip(overlay_cats)},
+                                  comment, actor=actor)
+            else:
+                set_event_overlay(guid, {}, comment, actor=actor,
+                                  clear=('categories',))
+            changed['overlays'].append(guid)
+
+    for series in get_all_recurring_events():
+        if slug in (series.get('categories') or []):
+            merge_recurring_event_fields(
+                series['id'], {'categories': strip(series['categories'])})
+            changed['recurring'].append(series['id'])
+
+    for item in _scan_all(table, FilterExpression=(
+            Attr('PK').begins_with('SUBSCRIBER#') & Attr('SK').eq('PREFS')
+            & Attr('categories').contains(slug))):
+        cats = strip(_to_plain(item['categories']))
+        if subscribers_move_to and subscribers_move_to not in cats:
+            cats.append(subscribers_move_to)
+        put_subscriber_preferences(item['PK'].split('#', 1)[1], cats,
+                                   _to_plain(item.get('regions') or []))
+        changed['subscribers'] += 1
+
+    delete_category(slug)
+    return changed
 
 
 # ─── POST operations (free-form /updates posts) ───────────────────

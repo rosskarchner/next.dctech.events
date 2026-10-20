@@ -80,7 +80,7 @@ def _get_or_404(fetch_fn, id_, label):
 @mcp.tool()
 def list_groups() -> list:
     """List all meetup groups: slug, name, website, ical feed, categories,
-    active, skip_phrases."""
+    active, skip_phrases, category_rules."""
     return [
         {
             'slug': g['id'],
@@ -90,6 +90,7 @@ def list_groups() -> list:
             'categories': g.get('categories', []),
             'active': g.get('active', True),
             'skip_phrases': g.get('skip_phrases', []),
+            'category_rules': g.get('category_rules', []),
         }
         for g in db.get_all_groups()
     ]
@@ -168,6 +169,54 @@ def set_group_skip_phrases(slug: str, phrases: list) -> dict:
     data['skip_phrases'] = cleaned
     db.put_group(slug, data)
     return {'slug': slug, 'skip_phrases': cleaned}
+
+
+@mcp.tool()
+def set_group_categories(slug: str, categories: list) -> dict:
+    """
+    Replace a group's default categories, which its feed events inherit
+    unless a category rule matches. `categories` must be valid slugs — see
+    list_categories.
+    """
+    group = _get_or_404(db.get_group, slug, 'group')
+    _check_categories(categories)
+    data = {k: v for k, v in group.items() if k != 'id'}
+    data['categories'] = list(categories)
+    db.put_group(slug, data)
+    return {'slug': slug, 'categories': data['categories']}
+
+
+@mcp.tool()
+def set_group_category_rules(slug: str, rules: list) -> dict:
+    """
+    Categorize a group's feed events by keyword: each rule is
+    {"phrase": "anime night", "categories": ["social"]}. An event whose title
+    (or feed keywords) contains the phrase, case-insensitively, gets the
+    rule's categories *instead of* the group's; if several rules match it gets
+    all of theirs. Unmatched events keep the group's categories, and an event
+    overlay's categories still win over both. Replaces the whole list; pass []
+    to clear.
+
+    The site build honors it on the next rebuild; the iCal aggregator rewrites
+    stored events' categories on its next run (every 4 hours).
+    """
+    group = _get_or_404(db.get_group, slug, 'group')
+    cleaned = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise ValueError('each rule must be {"phrase": ..., "categories": [...]}')
+        phrase = rule.get('phrase')
+        cats = rule.get('categories')
+        if not isinstance(phrase, str) or not phrase.strip():
+            raise ValueError(f'rule needs a non-empty phrase: {rule}')
+        if not isinstance(cats, list) or not cats:
+            raise ValueError(f'rule needs at least one category: {rule}')
+        _check_categories(cats)
+        cleaned.append({'phrase': phrase.strip(), 'categories': list(cats)})
+    data = {k: v for k, v in group.items() if k != 'id'}
+    data['category_rules'] = cleaned
+    db.put_group(slug, data)
+    return {'slug': slug, 'category_rules': cleaned}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -374,6 +423,19 @@ def add_category(slug: str, name: str, description: str) -> dict:
         raise ValueError(f'Category already exists: {slug}')
     db.put_category(slug, {'name': name, 'description': description})
     return {'slug': slug}
+
+
+@mcp.tool()
+def retire_category(slug: str, subscribers_move_to: str | None = None) -> dict:
+    """
+    Delete a category and strip it from every group (categories and
+    category_rules), event, event overlay and recurring series that names it.
+    Nothing is substituted there — re-categorize anything left bare by hand.
+    Newsletter subscribers who chose it are moved to `subscribers_move_to`
+    when given (otherwise it is just dropped from their filters). Drafts are
+    left as submitted. Returns what changed; trigger_rebuild afterwards.
+    """
+    return db.retire_category(slug, subscribers_move_to)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

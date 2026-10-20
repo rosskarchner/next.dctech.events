@@ -164,7 +164,7 @@ feeds.
    Data & Analytics, Mobile Development, UX & Design, Apple Technologies,
    Technology & Media. The meta categories (Conferences, Social & Networking,
    Training & Workshops, Career & Professional Development, Vendor Conferences,
-   Tech Culture, Coworking) aren't topics; for those search "tech conference",
+   Coworking) aren't topics; for those search "tech conference",
    "tech happy hour", "coding workshop" and so on once each, with the region.
 2. *Specific technologies*, which is where the small groups live. Every run
    takes one fifth of this list: number the items from 0 and use the ones whose
@@ -310,3 +310,26 @@ At the end, report as a JSON object:
 scheduled; they're the first thing to re-check next run. `sweep` records which
 slice of the rotation ran, so the next run can tell what has and hasn't been
 covered. After the report, say plainly which proposals you are least sure of.
+
+## Review with the user, one at a time
+
+A run doesn't end at the report. Walk the user through this run's proposals
+one by one with AskUserQuestion, one question per proposal, never batched,
+starting with the one you are most sure of so the doubtful ones get the
+closest attention. Each question gives what the reviewer needs without
+clicking through: name or title, date and venue (or the feed's upcoming
+count and next event), the categories you chose, and your doubts in plain
+words. Offer **Approve**, **Approve with different categories** and
+**Reject**; "Other" covers anything else.
+
+Act on each answer before asking the next question: `approve_submission`
+(pass `categories` when they changed them), or `reject_submission` with
+their reason, or the reason you understood from their answer. A rejection is
+on record and keeps the next run from proposing the same thing again. Don't
+pass `trust_submitter`. Discovery proposals are credited to the agent, not to
+a person whose future events should skip review. Once every proposal is
+decided, approving a group may need `trigger_rebuild` before its events show
+up on the site, so offer to run it.
+
+If the user stops partway through, leave the rest pending in the queue and
+say which ones are still waiting.

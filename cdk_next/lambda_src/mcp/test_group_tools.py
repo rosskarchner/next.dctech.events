@@ -47,3 +47,38 @@ def test_set_skip_phrases_rejects_non_strings(puts):
 def test_set_skip_phrases_unknown_group(puts):
     with pytest.raises(Exception):
         server.set_group_skip_phrases("nope", ["x"])
+
+
+@pytest.fixture
+def valid_slugs(monkeypatch):
+    monkeypatch.setattr(server.db, "valid_category_slugs",
+                        lambda: {"startups", "social"})
+
+
+def test_set_category_rules_cleans_and_keeps_other_fields(puts, valid_slugs):
+    out = server.set_group_category_rules(
+        "station-dc", [{"phrase": " Mixer ", "categories": ["social"]}])
+
+    assert out["category_rules"] == [{"phrase": "Mixer", "categories": ["social"]}]
+    ((_, data),) = puts
+    assert data["category_rules"] == out["category_rules"]
+    assert data["categories"] == ["startups"]
+
+
+@pytest.mark.parametrize("rule", [
+    {"phrase": "", "categories": ["social"]},
+    {"phrase": "x", "categories": []},
+    {"phrase": "x", "categories": ["tech-culture"]},
+    "x",
+])
+def test_set_category_rules_rejects_bad_rules(puts, valid_slugs, rule):
+    with pytest.raises(ValueError):
+        server.set_group_category_rules("station-dc", [rule])
+    assert puts == []
+
+
+def test_set_group_categories_validates(puts, valid_slugs):
+    with pytest.raises(ValueError):
+        server.set_group_categories("station-dc", ["nope"])
+    server.set_group_categories("station-dc", ["social"])
+    assert puts[0][1]["categories"] == ["social"]

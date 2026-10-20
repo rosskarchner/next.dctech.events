@@ -25,7 +25,8 @@ from server import mcp
 _SECURITY = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
 # Deliberately excludes anything destructive or trust-changing (delete_*,
-# add_group, set_group_active, set_group_skip_phrases, trigger_rebuild,
+# add_group, set_group_active, set_group_skip_phrases, set_group_categories,
+# set_group_category_rules, retire_category, trigger_rebuild,
 # submission/correction moderation, trust/untrust_submitter, revert_qa_run) —
 # a leaked long-lived token should still not be able to publish, delete, or
 # grant trust on its own. Rebuilds already happen on their own via the DynamoDB stream trigger

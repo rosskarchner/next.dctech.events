@@ -110,11 +110,11 @@ printf '%s\n' \
   | python3 scripts/mcp_sigv4_bridge.py
 ```
 
-Tools: `list_groups`, `add_group`, `set_group_active`, `set_group_skip_phrases`, `verify_ical_feed`,
+Tools: `list_groups`, `add_group`, `set_group_active`, `set_group_skip_phrases`, `set_group_categories`, `set_group_category_rules`, `verify_ical_feed`,
 `list_single_events`, `add_single_event`, `update_single_event`,
 `delete_single_event`, `list_recurring_events`, `add_recurring_event`,
 `update_recurring_event`, `delete_recurring_event`, `list_categories`,
-`add_category`, `get_overlay`, `set_overlay`, `get_events`, `trigger_rebuild`.
+`add_category`, `retire_category`, `get_overlay`, `set_overlay`, `get_events`, `trigger_rebuild`.
 
 Submissions: `submit_event` queues an event for review the way the public
 /submit form does; `list_pending_submissions`, `get_submission`,
