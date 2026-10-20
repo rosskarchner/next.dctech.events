@@ -98,3 +98,59 @@ def test_no_sponsors_file_is_harmless(monkeypatch, tmp_path):
     app.testing = True
     html = _get(app.test_client(), '/sponsor/')
     assert 'Upcoming sponsors' not in html
+
+
+# ─── House ad: the slot's filler in unsponsored weeks ───────────────
+
+HOUSE = {'name': 'Sponsor DC Tech Events!',
+         'message': 'Get your message out and help support this site.',
+         'url': '/sponsor/'}
+
+
+@pytest.fixture
+def house_client(monkeypatch, tmp_path):
+    def make(sponsors):
+        client = _client(monkeypatch, tmp_path, sponsors)
+        cfg = {'site_name': 'DC Tech Events', 'base_url': 'https://dctech.events',
+               'sponsorship_house_ad': HOUSE}
+        monkeypatch.setattr('calgen.app.get_config', lambda: cfg)
+        monkeypatch.setattr('calgen.routes.newsletter.get_config', lambda: cfg)
+        return client
+    return make
+
+
+def test_house_ad_fills_header_in_unsponsored_week(house_client):
+    header = _get(house_client([NEXT]), '/sponsor/').split('</header>')[0]
+    assert 'Sponsor DC Tech Events!' in header
+    assert 'Get your message out and help support this site.' in header
+    assert 'href="/sponsor/"' in header
+    assert 'rel="sponsored' not in header
+
+
+def test_paid_sponsor_beats_house_ad(house_client):
+    header = _get(house_client([ACME]), '/sponsor/').split('</header>')[0]
+    assert 'Acme &lt;Corp&gt;' in header
+    assert 'Get your message out' not in header
+
+
+def test_house_ad_leads_newsletter_with_absolute_link(house_client):
+    client = house_client([])
+    html = _get(client, '/newsletter.html')
+    assert 'href="https://dctech.events/sponsor/"' in html
+    assert 'Get your message out' in html
+    text = _get(client, '/newsletter.txt')
+    assert 'https://dctech.events/sponsor/' in text
+
+
+def test_house_ad_stays_off_week_pages(house_client):
+    main = _get(house_client([]), f'/week/{NEXT_WEEK}/').split('</header>', 1)[1]
+    assert 'Get your message out' not in main
+    assert 'sponsored by' not in main.lower()
+
+
+def test_header_slot_avoids_easylist_class(house_client):
+    # EasyList hides `.header-sponsor` outright (it blanked the slot in
+    # Firefox), so the line uses a neutral class instead.
+    header = _get(house_client([ACME]), '/sponsor/').split('</header>')[0]
+    assert 'class="masthead-note"' in header
+    assert 'header-sponsor' not in header

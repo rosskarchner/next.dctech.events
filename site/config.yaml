@@ -27,6 +27,14 @@ oauth_callback_endpoint: "https://add.dctech.events/oauth/callback"
 # actually charges (a test checks). "0" hides the price.
 sponsorship_price_usd: "50"
 
+# Shown in the header and the newsletter in weeks nobody has sponsored. It is
+# deliberately not used on week pages or in the Monday/Thursday posts. A url
+# starting with "/" is made absolute (base_url) in the newsletter.
+sponsorship_house_ad:
+  name: "Sponsor DC Tech Events!"
+  message: "Get your message out and help support this site."
+  url: /sponsor/
+
 # DynamoDB Configuration
 # Table name for storing event tracking data
 dynamodb_table: "DcTechEvents"

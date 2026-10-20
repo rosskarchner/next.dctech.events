@@ -3,6 +3,9 @@
 {% if current_sponsor %}
 This week's sponsor: {{ current_sponsor.name }} — {{ current_sponsor.message }}
 {{ current_sponsor.url }}
+{% elif house_sponsor %}
+{{ house_sponsor.name }} {{ house_sponsor.message }}
+{{ (base_url ~ house_sponsor.url) if house_sponsor.url.startswith('/') else house_sponsor.url }}
 {% endif %}
 {% if days %}
 {% for day in days %}

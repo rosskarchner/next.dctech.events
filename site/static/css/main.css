@@ -156,7 +156,10 @@ a:focus {
     outline-offset: 2px;
 }
 
-/* Logo with this week's sponsor beside it (stacked on phones). The
+/* Logo with this week's sponsor beside it (stacked on phones). The line's
+   class is `masthead-note`, not anything with "sponsor" in it: EasyList hides
+   `.header-sponsor` outright, which blanked the slot in Firefox. Check
+   https://easylist.to/easylist/easylist.txt before renaming it. The
    explicit color/margin reset beats `header > div > div` above, which is
    meant for the tagline. */
 header > div > .header-top {
@@ -170,7 +173,7 @@ header > div > .header-top {
     margin-bottom: 0;
 }
 
-.header-sponsor {
+.masthead-note {
     margin: 0 0 var(--spacing-sm) 0;
     max-width: 32rem;
     font-size: 0.9rem;
@@ -182,35 +185,36 @@ header > div > .header-top {
     header > div > .header-top {
         flex-wrap: nowrap;
         align-items: center;
+        column-gap: calc(var(--spacing-xl) * 1.5);
     }
     .header-top .logo {
         flex: none;
         white-space: nowrap;
     }
-    .header-sponsor {
+    .masthead-note {
         flex: 0 1 20rem;
         margin: 0;
         text-align: right;
     }
 }
 
-.header-sponsor-label {
+.masthead-note-label {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-size: 0.75rem;
 }
 
-.header-sponsor a {
+.masthead-note a {
     color: var(--color-text);
     text-decoration: none;
 }
 
-.header-sponsor a:hover {
+.masthead-note a:hover {
     color: var(--color-primary);
     text-decoration: underline;
 }
 
-.header-sponsor-open a {
+.masthead-note-open a {
     color: var(--color-text-light);
 }
 

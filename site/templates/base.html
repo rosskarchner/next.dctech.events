@@ -71,10 +71,12 @@
             {# This week's sponsor, Daring Fireball style. Static pages are
                rebuilt just after midnight Monday, which is when this flips. #}
             {% if current_sponsor %}
-            <p class="header-sponsor"><span class="header-sponsor-label">Sponsor:</span>
+            <p class="masthead-note"><span class="masthead-note-label">Sponsor:</span>
                 <a href="{{ current_sponsor.url }}" rel="sponsored noopener"><strong>{{ current_sponsor.name }}</strong> — {{ current_sponsor.message }}&nbsp;&rarr;</a></p>
+            {% elif house_sponsor %}
+            <p class="masthead-note masthead-note-house"><a href="{{ house_sponsor.url }}"><strong>{{ house_sponsor.name }}</strong> {{ house_sponsor.message }}&nbsp;&rarr;</a></p>
             {% else %}
-            <p class="header-sponsor header-sponsor-open"><a href="/sponsor/">Sponsor {{ site_name }}&nbsp;&rarr;</a></p>
+            <p class="masthead-note masthead-note-open"><a href="/sponsor/">Sponsor {{ site_name }}&nbsp;&rarr;</a></p>
             {% endif %}
             </div>
             <div>Upcoming Tech Events in DC, Maryland &amp; Virginia</div>

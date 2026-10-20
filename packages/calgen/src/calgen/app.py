@@ -107,6 +107,8 @@ def _register_routes(app):
             'current_sponsor': sponsor_for_week(
                 get_week_identifier(datetime.now(local_tz).date()), sponsors),
             'sponsor_for_week': lambda week_id: sponsor_for_week(week_id, sponsors),
+            # Fills the header and newsletter slot in an unsponsored week.
+            'house_sponsor': cfg.get('sponsorship_house_ad') or None,
             'categories': get_categories(),
             'nav_locations': nav_locations,
             'category_icon_slugs': app.category_icon_slugs,
