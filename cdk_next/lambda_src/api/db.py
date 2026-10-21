@@ -2222,34 +2222,56 @@ WRITE_RATE_LIMIT_WINDOW_SECONDS = 3600
 WRITE_RATE_LIMIT_MAX_PER_WINDOW = 20
 
 
-def check_and_record_write(submitter_id, action, now=None):
-    """Consume one public write (a submission or a correction) for
-    `submitter_id` under `action` ('submission' | 'correction').
+def check_and_record_write(submitter_id, action, now=None,
+                           limit=WRITE_RATE_LIMIT_MAX_PER_WINDOW):
+    """Consume one public write (a submission, a correction, a sponsorship
+    booking) for `submitter_id` under `action`, allowing `limit` per window.
 
     Returns (allowed, retry_after_seconds). Records the write when allowed.
+
+    The write is a compare-and-swap on the counter: a plain read-then-write
+    let a burst of concurrent requests all read the same count and all get
+    through. A lost race re-reads and tries again; if it keeps losing, the
+    request is refused rather than let through uncounted.
     """
     now = int(now if now is not None else time.time())
     table = _get_table()
     key = {'PK': f'WRITERATE#{action}#{submitter_id}', 'SK': 'META'}
 
-    item = (table.get_item(Key=key).get('Item') or {})
-    window_start = int(item.get('window_start', 0))
-    count = int(item.get('count', 0))
+    for _ in range(5):
+        item = table.get_item(Key=key).get('Item')
+        window_start = int((item or {}).get('window_start', 0))
+        count = int((item or {}).get('count', 0))
 
-    if now - window_start >= WRITE_RATE_LIMIT_WINDOW_SECONDS:
-        window_start, count = now, 0
+        if now - window_start >= WRITE_RATE_LIMIT_WINDOW_SECONDS:
+            window_start, count = now, 0
 
-    if count >= WRITE_RATE_LIMIT_MAX_PER_WINDOW:
-        return False, (window_start + WRITE_RATE_LIMIT_WINDOW_SECONDS) - now
+        if count >= limit:
+            return False, (window_start + WRITE_RATE_LIMIT_WINDOW_SECONDS) - now
 
-    table.put_item(Item={
-        **key,
-        'window_start': window_start,
-        'count': count + 1,
-        # Outlive the window so the counter is not reset early by TTL.
-        'ttl': window_start + WRITE_RATE_LIMIT_WINDOW_SECONDS * 2,
-    })
-    return True, 0
+        if item is None:
+            guard = {'ConditionExpression': 'attribute_not_exists(PK)'}
+        else:
+            guard = {
+                'ConditionExpression': 'window_start = :ws AND #c = :c',
+                'ExpressionAttributeNames': {'#c': 'count'},
+                'ExpressionAttributeValues': {':ws': item.get('window_start'),
+                                              ':c': item.get('count')},
+            }
+        try:
+            table.put_item(Item={
+                **key,
+                'window_start': window_start,
+                'count': count + 1,
+                # Outlive the window so the counter is not reset early by TTL.
+                'ttl': window_start + WRITE_RATE_LIMIT_WINDOW_SECONDS * 2,
+            }, **guard)
+        except ClientError as exc:
+            if exc.response['Error']['Code'] != 'ConditionalCheckFailedException':
+                raise
+            continue
+        return True, 0
+    return False, 1
 
 
 # ─── Newsletter opt-in (from the submission form) ─────────────────

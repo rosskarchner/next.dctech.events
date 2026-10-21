@@ -15,22 +15,7 @@ os.environ.setdefault("DYNAMODB_TABLE_NAME", "test-table")
 import db  # noqa: E402
 
 
-class FakeTable:
-    """In-memory stand-in for the DynamoDB table."""
-
-    def __init__(self):
-        self.items = {}
-
-    @staticmethod
-    def _k(key):
-        return (key["PK"], key["SK"])
-
-    def get_item(self, Key):
-        item = self.items.get(self._k(Key))
-        return {"Item": item} if item else {}
-
-    def put_item(self, Item):
-        self.items[self._k(Item)] = dict(Item)
+from test_sponsorships import FakeTable  # noqa: E402  (honours conditions)
 
 
 @pytest.fixture
@@ -164,3 +149,34 @@ def test_write_record_carries_a_ttl_beyond_the_window(table):
     db.check_and_record_write("magiclink:a@example.com", "submission", now=1000)
     item = table.items[("WRITERATE#submission#magiclink:a@example.com", "META")]
     assert item["ttl"] > item["window_start"] + db.WRITE_RATE_LIMIT_WINDOW_SECONDS
+
+
+def test_write_concurrent_requests_cannot_overshoot_the_cap(table, monkeypatch):
+    """A request that read the counter just before another request bumped it
+    must not write a stale count back: that was how a burst got through."""
+    who = "ip:203.0.113.9"
+    for _ in range(db.WRITE_RATE_LIMIT_MAX_PER_WINDOW - 1):
+        db.check_and_record_write(who, "sponsorship", now=1000)
+
+    real_get = table.get_item
+    raced = []
+
+    def get_then_lose_the_race(Key):
+        response = real_get(Key)
+        if not raced:
+            raced.append(True)
+            # A concurrent request takes the last slot between our read and write.
+            db.check_and_record_write(who, "sponsorship", now=1000)
+        return response
+
+    monkeypatch.setattr(table, "get_item", get_then_lose_the_race)
+    allowed, retry = db.check_and_record_write(who, "sponsorship", now=1000)
+    assert not allowed and retry > 0
+    item = table.items[(f"WRITERATE#sponsorship#{who}", "META")]
+    assert item["count"] == db.WRITE_RATE_LIMIT_MAX_PER_WINDOW
+
+
+def test_write_limit_can_be_set_per_call(table):
+    for _ in range(3):
+        assert db.check_and_record_write("ip:x", "sponsorship_hold", now=1000, limit=3)[0]
+    assert not db.check_and_record_write("ip:x", "sponsorship_hold", now=1000, limit=3)[0]

@@ -310,8 +310,28 @@ def test_second_hold_on_a_week_is_refused(table):
 
 def test_booker_can_replace_their_own_hold(table):
     first, _ = sp.create_hold(_copy(), now=NOW)
-    second, _ = sp.create_hold(_copy(message="Take two."), now=NOW)
+    second, _ = sp.create_hold(
+        _copy(message="Take two.", replace_booking_id=first["booking_id"]), now=NOW)
     assert second["booking_id"] != first["booking_id"]
+
+
+def test_knowing_the_email_does_not_replace_a_hold(table):
+    """The email is unverified: anyone who guessed it could otherwise swap
+    out a hold mid-payment and turn the real booker's payment into a conflict."""
+    first, _ = sp.create_hold(_copy(), now=NOW)
+    with pytest.raises(sp.SponsorshipError) as exc:
+        sp.create_hold(_copy(message="Mine now."), now=NOW)
+    assert exc.value.status_code == 409
+    with pytest.raises(sp.SponsorshipError):
+        sp.create_hold(_copy(replace_booking_id="not-the-id"), now=NOW)
+    assert sp.get_sponsorship("2026-W44")["booking_id"] == first["booking_id"]
+
+
+def test_booking_id_cannot_replace_a_paid_booking(table, mail):
+    first, _ = sp.create_hold(_copy(), now=NOW)
+    sp.handle_ipn(_ipn(first), verify=_verified)
+    with pytest.raises(sp.SponsorshipError):
+        sp.create_hold(_copy(replace_booking_id=first["booking_id"]), now=NOW)
 
 
 def test_expired_hold_frees_the_week(table):
@@ -417,6 +437,37 @@ def test_pending_then_completed(table, mail):
                          verify=_verified) == "pending"
     assert sp.get_sponsorship("2026-W44")["status"] == "payment_pending"
     assert sp.handle_ipn(_ipn(booking), verify=_verified) == "paid"
+
+
+@pytest.mark.parametrize("override", [
+    {"mc_gross": "0.01"},
+    {"mc_currency": "JPY", "mc_gross": "1", "pending_reason": "multi_currency"},
+])
+def test_underpaid_pending_payment_does_not_hold_the_week(table, mail, override):
+    """payment_pending never lapses, so a cheap Pending payment must not be
+    a way to lock a week."""
+    booking, _ = sp.create_hold(_copy(), now=NOW)
+    pending = _ipn(booking, payment_status="Pending", **override)
+    assert sp.handle_ipn(pending, verify=_verified) == "wrong_amount"
+    assert sp.get_sponsorship("2026-W44")["status"] == "held"
+
+
+@pytest.mark.parametrize("final", ["Failed", "Denied", "Voided", "Expired"])
+def test_pending_payment_that_never_clears_frees_the_week(table, mail, final):
+    booking, _ = sp.create_hold(_copy(), now=NOW)
+    sp.handle_ipn(_ipn(booking, payment_status="Pending"), verify=_verified)
+    assert sp.handle_ipn(_ipn(booking, payment_status=final),
+                         verify=_verified) == "payment_failed"
+    assert sp.get_sponsorship("2026-W44")["status"] == "cancelled"
+    sp.create_hold(_copy(contact_email="other@example.com"), now=NOW)
+
+
+def test_failure_of_another_txn_leaves_pending_booking_alone(table, mail):
+    booking, _ = sp.create_hold(_copy(), now=NOW)
+    sp.handle_ipn(_ipn(booking, payment_status="Pending"), verify=_verified)
+    sp.handle_ipn(_ipn(booking, txn_id="TX9", payment_status="Failed"),
+                  verify=_verified)
+    assert sp.get_sponsorship("2026-W44")["status"] == "payment_pending"
 
 
 def test_refund_marks_booking_refunded(table, mail):

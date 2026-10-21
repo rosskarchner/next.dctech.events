@@ -94,9 +94,32 @@ def test_coupon_booking_skips_paypal():
 
 def test_booking_is_rate_limited(monkeypatch):
     monkeypatch.setattr(handler.sponsorships, "check_and_record_write",
-                        lambda who, action: (False, 60))
+                        lambda who, action, **kw: (False, 60))
     status, _ = _call("POST", "/api/sponsorships", BOOKING)
     assert status == 429
+
+
+def test_holds_have_their_own_smaller_budget():
+    weeks = sp.bookable_weeks()
+    for week in weeks[:sp.HOLDS_PER_IP_PER_HOUR]:
+        status, _ = _call("POST", "/api/sponsorships", {**BOOKING, "week_id": week})
+        assert status == 201
+    status, body = _call("POST", "/api/sponsorships",
+                         {**BOOKING, "week_id": weeks[sp.HOLDS_PER_IP_PER_HOUR]})
+    assert status == 429
+    # Coupon bookings draw on the larger budget, not the hold one.
+    code = sp.mint_coupons(1)[0]["code"]
+    status, _ = _call("POST", "/api/sponsorships",
+                      {**BOOKING, "week_id": weeks[-1], "coupon_code": code})
+    assert status == 201
+
+
+def test_rebooking_with_the_returned_booking_id_replaces_the_hold():
+    _, first = _call("POST", "/api/sponsorships", BOOKING)
+    status, second = _call("POST", "/api/sponsorships",
+                           {**BOOKING, "replace_booking_id": first["booking_id"]})
+    assert status == 201
+    assert second["booking_id"] != first["booking_id"]
 
 
 def test_ipn_answers_200_and_echoes_body_verbatim(monkeypatch):

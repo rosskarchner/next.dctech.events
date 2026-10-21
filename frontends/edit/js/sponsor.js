@@ -4,6 +4,26 @@
   // submits; PayPal's IPN confirms the payment server-side. A coupon skips
   // PayPal entirely.
   let price = null;
+  // The last hold this browser made, so cancelling at PayPal and trying
+  // again replaces it instead of colliding with it. The API only lets a
+  // hold be replaced by whoever has its booking_id.
+  const HOLD_KEY = 'dctech-sponsor-hold';
+
+  function savedHold() {
+    try {
+      return JSON.parse(sessionStorage.getItem(HOLD_KEY) || 'null');
+    } catch {
+      return null;
+    }
+  }
+
+  function saveHold(weekId, bookingId) {
+    try {
+      sessionStorage.setItem(HOLD_KEY, JSON.stringify({ week_id: weekId, booking_id: bookingId }));
+    } catch {
+      // Storage blocked: a retry within 30 minutes just reports the week as taken.
+    }
+  }
 
   function el(id) {
     return document.getElementById(id);
@@ -81,6 +101,8 @@
     const form = el('sponsor-form');
     const body = Object.fromEntries(new FormData(form).entries());
     body.coupon_code = (body.coupon_code || '').trim();
+    const hold = savedHold();
+    if (hold && hold.week_id === body.week_id) body.replace_booking_id = hold.booking_id;
     const button = el('submit-button');
     button.disabled = true;
     showMessage('', '');
@@ -96,6 +118,7 @@
         throw new Error(data.error || `Request failed (HTTP ${response.status})`);
       }
       if (data.paypal_url) {
+        saveHold(data.week_id, data.booking_id);
         showMessage('Taking you to PayPal…', 'info');
         postToPayPal(data.paypal_url, data.paypal_fields);
         return;

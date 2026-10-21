@@ -58,7 +58,7 @@
       actions.push('<button class="btn btn-sm btn-outline" data-act="cancel" title="Free the week without emailing the booker">Cancel</button>');
     }
     return `
-      <tr data-week="${week}">
+      <tr data-week="${week}" data-status="${esc(b.status)}">
         <td><a href="/week/${week}/" target="_blank" rel="noopener">${week}</a></td>
         <td style="min-width: 18rem;">${copy}</td>
         <td>${esc(b.contact_email || '—')}<br><span class="muted">${how} · $${esc(b.price_usd)}</span></td>
@@ -102,6 +102,11 @@
         await request(base, jsonBody('PUT', copy));
         showMessage(`Saved ${week}.`, 'success');
       } else if (act === 'approve') {
+        // held and payment_pending are approvable for comps and off-PayPal
+        // payments, but no money has cleared for them yet.
+        const status = row.dataset.status;
+        if (status !== 'paid'
+            && !window.confirm(`${week} is ${status}: no payment has cleared. Approve anyway?`)) return;
         // Save first, so whatever is in the boxes is what gets approved.
         if (Object.keys(copy).length) await request(base, jsonBody('PUT', copy));
         await request(`${base}/approve`, jsonBody('POST'));

@@ -74,12 +74,21 @@ def book_json(event, jinja_env):
             return _json(201, {'week_id': booking['week_id'],
                                'status': booking['status']}, event)
 
+        # Holds cost nothing, so they get a far smaller budget than coupon
+        # attempts: at 20 an hour, a few IPs could keep every week held.
+        allowed, retry_after = check_and_record_write(
+            _source_ip(event), 'sponsorship_hold', limit=sp.HOLDS_PER_IP_PER_HOUR)
+        if not allowed:
+            return _json(429, {'error': f'Too many holds — try again in {retry_after}s'},
+                         event)
+
         booking, _ = sp.create_hold(data)
     except sp.SponsorshipError as exc:
         return _error(exc, event)
 
     return _json(201, {
         'week_id': booking['week_id'],
+        'booking_id': booking['booking_id'],
         'status': booking['status'],
         'hold_expires_at': booking['hold_expires_at'],
         'paypal_url': sp.paypal_form_url(),

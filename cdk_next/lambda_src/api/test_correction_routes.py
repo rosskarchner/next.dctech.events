@@ -69,7 +69,9 @@ class FakeTable:
         item = self.items.get(self._k(Key))
         return {"Item": item} if item else {}
 
-    def put_item(self, Item):
+    def put_item(self, Item, **_conditions):
+        # Conditions are ignored: only the rate limiter sends them here, and
+        # these tests never race it (test_rate_limit.py covers that).
         self.items[self._k(Item)] = dict(Item)
 
     @staticmethod

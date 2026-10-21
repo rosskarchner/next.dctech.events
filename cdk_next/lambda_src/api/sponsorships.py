@@ -25,6 +25,7 @@ Booking lifecycle:
   held ──IPN Completed──> paid ──approve──> approved      (shown on the site)
     │                      └──reject───> rejected         (refund by hand)
     └──IPN Pending──> payment_pending ──IPN Completed──> paid
+                             └──IPN Failed/Denied──> cancelled
 
 A week is free again once its booking is rejected, refunded or cancelled, or
 while it is only `held` and the hold has lapsed.
@@ -58,6 +59,9 @@ REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'ross@karchner.com')
 
 HORIZON_WEEKS = 26
 HOLD_SECONDS = 30 * 60
+# Per source IP. Enough to retry after cancelling at PayPal a few times; few
+# enough that one address can't keep more than a couple of weeks held.
+HOLDS_PER_IP_PER_HOUR = 4
 NAME_MAX = 60
 MESSAGE_MAX = 140
 
@@ -286,6 +290,11 @@ def _new_booking(week_id, copy, status, payment_method, now=None, **extra):
 def create_hold(data, now=None):
     """Hold a week for HOLD_SECONDS while the booker pays at PayPal.
 
+    `replace_booking_id` lets a booker who cancelled at PayPal replace their
+    own live hold. It must be the booking_id this function handed them, not
+    their email: the email is unverified and often guessable, and replacing
+    a hold mid-payment turns the real booker's payment into a conflict.
+
     Returns (booking, paypal_fields). Raises SponsorshipError(409) if the
     week is taken.
     """
@@ -297,16 +306,18 @@ def create_hold(data, now=None):
 
     item = _new_booking(week_id, copy, 'held', 'paypal', now,
                         hold_expires_at=_epoch(now) + HOLD_SECONDS)
+    condition = _WEEK_FREE_CONDITION
+    values = _free_condition_values(now)
+    replace_id = str(data.get('replace_booking_id') or '').strip()
+    if replace_id:
+        condition += ' OR (#s = :held AND booking_id = :replace)'
+        values[':replace'] = replace_id
     try:
         db._get_table().put_item(
             Item=item,
-            # Also replace the booker's own live hold: someone who cancels at
-            # PayPal and tries again must not be locked out by themselves.
-            ConditionExpression=(f'{_WEEK_FREE_CONDITION} OR '
-                                 f'(#s = :held AND contact_email = :email)'),
+            ConditionExpression=condition,
             ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={**_free_condition_values(now),
-                                       ':email': copy['contact_email']},
+            ExpressionAttributeValues=values,
         )
     except ClientError as exc:
         if exc.response['Error']['Code'] == 'ConditionalCheckFailedException':
@@ -712,20 +723,26 @@ def handle_ipn(raw_body, verify=None):
         _notify_admin(f'Payment {status.lower()} for {week_id}', params, booking)
         return status.lower()
 
-    if status == 'Pending':
-        if ours and booking.get('status') == 'held':
+    if status in ('Failed', 'Denied', 'Voided', 'Expired'):
+        # A pending payment that never cleared (a bounced eCheck, a declined
+        # review): payment_pending never lapses on its own, so free the week.
+        if (ours and booking.get('status') == 'payment_pending'
+                and booking.get('txn_id') == txn_id):
             try:
-                _set_status(week_id, 'payment_pending', ('held',),
-                            {'txn_id': txn_id})
+                booking = _set_status(week_id, 'cancelled', ('payment_pending',))
             except SponsorshipError:
                 pass
-        _notify_admin(f'Payment pending for {week_id}', params, booking)
-        return 'pending'
+        _notify_admin(f'Payment {status.lower()} for {week_id}', params, booking)
+        return 'payment_failed'
 
-    if status != 'Completed':
+    if status not in ('Pending', 'Completed'):
         _notify_admin(f'IPN status {status} for {week_id}', params, booking)
         return 'ignored'
 
+    # Before Pending as well as Completed: the PayPal form is in the booker's
+    # hands, and payment_pending holds a week indefinitely, so a one-cent
+    # payment in a currency we don't hold (left Pending by PayPal) must not
+    # be able to lock a week.
     try:
         gross = Decimal(params.get('mc_gross', ''))
     except InvalidOperation:
@@ -735,6 +752,16 @@ def handle_ipn(raw_body, verify=None):
         _notify_admin(f'Wrong amount for {week_id} — refund or follow up',
                       params, booking)
         return 'wrong_amount'
+
+    if status == 'Pending':
+        if ours and booking.get('status') == 'held':
+            try:
+                _set_status(week_id, 'payment_pending', ('held',),
+                            {'txn_id': txn_id})
+            except SponsorshipError:
+                pass
+        _notify_admin(f'Payment pending for {week_id}', params, booking)
+        return 'pending'
 
     if not ours:
         _notify_admin(f'CONFLICT: payment for {week_id} but the hold was lost '
