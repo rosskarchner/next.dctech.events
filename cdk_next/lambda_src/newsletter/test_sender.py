@@ -8,6 +8,7 @@ shared one — lands in the content actually sent to them.
 
 Run: DYNAMODB_TABLE_NAME=t python -m pytest test_sender.py
 """
+import json
 import os
 import sys
 
@@ -199,3 +200,24 @@ def test_build_site_failure_aborts_before_sending_anything(monkeypatch):
     result = sender.send_newsletter_to_subscribers()
     assert result['status'] == 'error'
     assert 'export failed' in result['reason']
+
+
+def test_text_part_gets_the_rendered_text_not_the_html(monkeypatch, no_real_aws):
+    contacts = [_contact("a@example.com")]
+    fake_ses = FakeSes(contacts)
+    monkeypatch.setattr(sender, "ses", fake_ses)
+    monkeypatch.setattr(db, "get_subscriber_preferences", lambda email: None)
+    monkeypatch.setattr(
+        sender, "render_for_filters",
+        lambda categories, regions: (
+            "<html>Manage: __PREFERENCES_LINK__</html>",
+            "Plain text. Manage: __PREFERENCES_LINK__"))
+
+    sender.send_newsletter_to_subscribers()
+
+    data = json.loads(fake_ses.sent[0]['Content']['Template']['TemplateData'])
+    assert data['content'].startswith('<html>')
+    assert data['text_content'].startswith('Plain text.')
+    assert '<' not in data['text_content']
+    assert '__PREFERENCES_LINK__' not in data['text_content']
+    assert 'a@example.com' in data['text_content']

@@ -34,7 +34,10 @@ TEMPLATE_CONTENT = {
     'Subject': 'DC Tech Events Weekly',
     'Html': '{{content}}<br><br>You received this email because you subscribed to DC Tech Events Weekly. '
             'To unsubscribe, click <a href="{{amazonSESUnsubscribeUrl}}">here</a>.',
-    'Text': '{{content}}\n\nYou received this email because you subscribed to DC Tech Events Weekly. '
+    # Rendered from calgen's newsletter.txt by the sender. Deploy the sender
+    # (NextNewsletterStack) before re-running this script: SES fails to render
+    # a template whose variable is missing from TemplateData, and drops the mail.
+    'Text': '{{text_content}}\n\nYou received this email because you subscribed to DC Tech Events Weekly. '
             'To unsubscribe, click here {{amazonSESUnsubscribeUrl}}',
 }
 

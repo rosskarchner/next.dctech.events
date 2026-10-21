@@ -102,7 +102,7 @@ def send_newsletter_to_subscribers(dry_run=False, only_addresses=None):
 
         for (categories, regions), emails in _group_subscribers(subscribed_emails).items():
             try:
-                html_content, _text_content = render_for_filters(
+                html_content, text_content = render_for_filters(
                     list(categories), list(regions))
             except Exception as e:
                 print(f"Error rendering group categories={categories} "
@@ -118,8 +118,11 @@ def send_newsletter_to_subscribers(dry_run=False, only_addresses=None):
                     continue
 
                 try:
+                    prefs_link = _preferences_link(email)
                     personalized_html = html_content.replace(
-                        PREFERENCES_LINK_PLACEHOLDER, _preferences_link(email))
+                        PREFERENCES_LINK_PLACEHOLDER, prefs_link)
+                    personalized_text = text_content.replace(
+                        PREFERENCES_LINK_PLACEHOLDER, prefs_link)
                     ses.send_email(
                         FromEmailAddress=FROM_EMAIL,
                         ReplyToAddresses=[REPLY_TO_EMAIL],
@@ -127,7 +130,14 @@ def send_newsletter_to_subscribers(dry_run=False, only_addresses=None):
                         Content={
                             'Template': {
                                 'TemplateName': TEMPLATE_NAME,
-                                'TemplateData': json.dumps({'content': personalized_html}),
+                                # `content` fills the template's Html part and
+                                # `text_content` its Text part (setup_ses_next.py).
+                                # Both are always sent, so the template can be
+                                # updated before or after this code deploys.
+                                'TemplateData': json.dumps({
+                                    'content': personalized_html,
+                                    'text_content': personalized_text,
+                                }),
                             }
                         },
                         ListManagementOptions={
