@@ -33,6 +33,20 @@ html {
     }
 }
 
+/* Every page shares the wide desktop width the sidebar layout needs, so the
+   header doesn't jump between pages with and without a sidebar. */
+@media (min-width: 1024px) {
+    html {
+        max-width: 96ch;
+    }
+}
+
+/* Pages without the sidebar keep their text at a readable line length
+   inside the wider page. */
+.layout-single main {
+    max-width: var(--max-width);
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color: var(--color-text);
@@ -499,12 +513,8 @@ footer {
     width: 100%;
 }
 
-/* Widen the page and place the sidebar alongside content on desktop. */
+/* Place the sidebar alongside content on desktop. */
 @media (min-width: 1024px) {
-    html:has(.layout-with-sidebar) {
-        max-width: 96ch;
-    }
-
     .layout-with-sidebar {
         flex-direction: row;
     }

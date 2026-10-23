@@ -85,7 +85,7 @@
     </header>
 
     <div class="container">
-        <div class="{% if sidebar %}layout-with-sidebar{% endif %}">
+        <div class="{% if sidebar %}layout-with-sidebar{% else %}layout-single{% endif %}">
             <main id="main-content">
                 {% if not sidebar %}<p class="back-home"><a href="/">&larr; Back to all events</a></p>{% endif %}
                 {% block content %}{% endblock %}
