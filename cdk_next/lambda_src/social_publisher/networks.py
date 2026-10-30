@@ -17,6 +17,10 @@ from datetime import datetime, timezone
 
 TIMEOUT = 20
 
+# urllib's default "Python-urllib/3.x" is on Cloudflare's banned-signature list
+# (error 1010), which dmv.community sits behind — so always identify ourselves.
+USER_AGENT = "dctech.events/1.0 (+https://dctech.events)"
+
 # Bluesky's post record caps text at 300 graphemes. Mastodon's limit is
 # instance-configurable (500 by default) and is passed in by the caller.
 BLUESKY_CHAR_LIMIT = 300
@@ -35,7 +39,8 @@ class NetworkError(RuntimeError):
 
 def _request(url, *, body=None, headers=None, method=None):
     request = urllib.request.Request(
-        url, data=body, headers=headers or {}, method=method
+        url, data=body, headers={"User-Agent": USER_AGENT, **(headers or {})},
+        method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # nosec B310
