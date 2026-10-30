@@ -91,7 +91,7 @@ whichever host serves a valid feed, and probe it before trusting it.
 
 ## Phase 1 — fixed listing sources
 
-Three sources, every run:
+Four sources, every run:
 
 - **`eventbrite.com/d/dc--washington/technology/`** — heavy client-side
   rendering; WebFetch comes back empty or partial. Use the browser tool:
@@ -134,6 +134,20 @@ Three sources, every run:
   `infosec-conferences.com` listed ACT-IAC's October summit as Arlington when
   Cvent says Reston. Check each title against `get_events` first, since
   ACT-IAC events are also re-listed by other calendars.
+
+- **`dc.aitinkerers.org`** — AI Tinkerers DC Metro, a hands-on AI builder
+  meetup that runs roughly every two months (DC, Arlington). It has no
+  iCal feed and no Meetup or Luma page; the chapter's events live only on
+  this site. curl and WebFetch get HTTP 403, so use the browser tool. The
+  home page's `application/ld+json` includes an `ItemList` of `Event`
+  objects with `startDate`, `endDate`, `location.address`, `eventStatus` and
+  a `/p/<slug>` URL; read those rather than the page text, and keep only
+  ones whose `startDate` is today or later. Each goes in as `propose_event`
+  (category `ai`) with the `/p/<slug>` page as the `url`. The venue is often
+  listed as "Private venue" with just a street address, or only "DC";
+  when there is no street address, say so in the evidence. Skip the
+  invite-only **VIP Lunch** entries. Virtual events are on a separate
+  national site (`virtual-events.aitinkerers.org`) and are out of scope.
 
 `technical.ly/dc/events/` was a fourth source in the original agent's list
 but is gone as of this skill's first real run (2026-09-27): both WebFetch
