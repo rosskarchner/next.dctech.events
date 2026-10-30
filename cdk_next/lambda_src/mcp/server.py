@@ -461,10 +461,16 @@ def get_overlay(guid: str) -> dict:
 
 @mcp.tool()
 def set_overlay(guid: str, fields: dict, comment: str,
-                run_id: str | None = None) -> dict:
+                run_id: str | None = None,
+                clear: list[str] | None = None) -> dict:
     """
     Merge `fields` into the event's `overrides`, preserving existing overlay
     fields. `comment` is recorded alongside as `_comment`.
+
+    `clear` names overlay fields to remove, so the event falls back to the
+    source's own value (e.g. clear=["duplicate_of"] un-merges an event).
+    `fields` may be {} when only clearing. A null in `fields` is different: it
+    is stored, and overrides the source value with nothing.
 
     Editable fields: title, time, end_time, location, location_type, url, cost,
     city, state, description, categories, all_day, hidden, duplicate_of.
@@ -474,7 +480,9 @@ def set_overlay(guid: str, fields: dict, comment: str,
 
     `duplicate_of` must name an event that exists — a dangling one is silently
     ignored at render, so the merge would look done and the event would keep
-    showing.
+    showing. It must also name a canonical event, not one that is itself a
+    duplicate: to flip which half of a pair is canonical, clear duplicate_of on
+    the old duplicate first, then set it on the other.
 
     `location_type` must be 'physical', 'virtual' or 'hybrid'. Only 'virtual'
     changes where the event shows (it leaves the week pages, the newsletter and
@@ -485,8 +493,61 @@ def set_overlay(guid: str, fields: dict, comment: str,
     recording each field's prior value so revert_qa_run can restore it. Pass
     it for automated writes; leave it unset for hand edits.
     """
-    result = db.set_event_overlay(guid, fields, comment, run_id=run_id)
+    result = db.set_event_overlay(guid, fields, comment, run_id=run_id,
+                                  clear=tuple(clear or ()))
     return {'guid': result['guid'], 'overlay': result['overlay']}
+
+
+_TITLE_WORD = re.compile(r'[a-z0-9]+')
+
+
+def _title_words(title):
+    return set(_TITLE_WORD.findall((title or '').lower()))
+
+
+@mcp.tool()
+def find_duplicates(guid: str) -> list:
+    """
+    Events on the same date that may be the same real-world event as `guid`:
+    the same url, or titles sharing most of their words. Use this for the
+    duplicate check rather than pulling the whole corpus with get_events. It
+    looks at every source, including submitted and manual events that were
+    approved long ago and will never be in the review queue.
+
+    Each candidate is the compact projection plus `time`, `duplicate_of`,
+    `hidden` (overlay applied) and `match` ('url' or 'title'). A candidate
+    whose `duplicate_of` is already set has been merged into another event.
+    Pick the canonical half by the rules in the calendar-qc skill; a
+    `source: "submitted"` event wins over a feed listing.
+    """
+    event = _get_or_404(db.get_event_from_config, guid, 'event')
+    shown = db.effective_event(event)
+    date = shown.get('date') or ''
+    if not date:
+        return []
+    words = _title_words(shown.get('title'))
+    url = shown.get('url')
+
+    candidates = []
+    for other in db.get_all_events(date_prefix=date[:7]):
+        other = db.effective_event(other)
+        if other.get('guid') == guid or other.get('date') != date:
+            continue
+        if url and other.get('url') == url:
+            match = 'url'
+        else:
+            other_words = _title_words(other.get('title'))
+            shared = words & other_words
+            if not words or not other_words or \
+                    len(shared) / min(len(words), len(other_words)) < 0.6:
+                continue
+            match = 'title'
+        row = {k: other.get(k) for k in _EVENT_FIELDS}
+        row.update(time=other.get('time'),
+                   duplicate_of=other.get('duplicate_of'),
+                   hidden=bool(other.get('hidden')), match=match)
+        candidates.append(row)
+    return candidates
 
 
 @mcp.tool()

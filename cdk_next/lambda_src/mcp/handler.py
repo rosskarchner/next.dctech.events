@@ -36,7 +36,7 @@ _SECURITY = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 # only bookkeeping stamps.
 SCHEDULED_AGENT_TOOLS = frozenset({
     "list_groups", "list_categories",
-    "get_events", "get_event", "get_overlay",
+    "get_events", "get_event", "get_overlay", "find_duplicates",
     "list_pending_qa", "resolve_qa_review", "set_overlay",
     "list_events_due_for_check", "check_event_source", "mark_events_checked",
     "propose_event", "propose_group", "list_discovery_proposals",

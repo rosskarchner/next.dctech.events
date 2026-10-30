@@ -22,6 +22,7 @@ list_qa_run = server.list_qa_run
 revert_qa_run = server.revert_qa_run
 list_pending_qa = server.list_pending_qa
 resolve_qa_review = server.resolve_qa_review
+find_duplicates = server.find_duplicates
 
 # The fixture's "today". g1 (2026-06-23) is already past, g2 (2026-06-24) is today.
 TODAY = "2026-06-24"
@@ -53,7 +54,7 @@ def store(monkeypatch):
     monkeypatch.setattr(server.db, "get_event_from_config",
                         lambda guid: dict(events[guid]) if guid in events else None)
     monkeypatch.setattr(server.db, "get_all_events",
-                        lambda include_past=False: [dict(e) for e in events.values()])
+                        lambda include_past=False, **kw: [dict(e) for e in events.values()])
 
     # **kw absorbs expect_overrides_rev: the real update_event takes it to make
     # the write conditional, and an in-memory store has no race to lose.
@@ -199,6 +200,55 @@ def test_set_overlay_hides_bookkeeping_from_the_returned_overlay(store):
 def test_set_overlay_unknown_event_raises(store):
     with pytest.raises(ValueError, match="No such event"):
         set_overlay("nope", {"hidden": True}, "x")
+
+
+def test_set_overlay_can_clear_a_field(store):
+    set_overlay("g2", {"duplicate_of": "g1", "title": "Kept"}, "merge")
+    result = set_overlay("g2", {}, "not a duplicate", clear=["duplicate_of"])
+    assert result["overlay"] == {"title": "Kept"}
+
+
+def test_a_cleared_field_is_restored_by_revert(store):
+    set_overlay("g2", {"duplicate_of": "g1"}, "merge")
+    set_overlay("g2", {}, "unmerge", run_id="r1", clear=["duplicate_of"])
+    revert_qa_run("r1")
+    assert rendered(store, "g2") == {"duplicate_of": "g1"}
+
+
+# ── find_duplicates ────────────────────────────────────────────────
+
+def _add(store, guid, title, date="2026-06-24", **extra):
+    store[guid] = {"guid": guid, "title": title, "date": date,
+                   "time": "18:00", **extra}
+
+
+def test_find_duplicates_matches_a_reworded_title_on_the_same_day(store):
+    _add(store, "a", "Marketing in 2027: How Buyers Are Changing",
+         source="submitted")
+    _add(store, "b", "Marketing in 2027 - How Buyers Are Changing and More",
+         source="ical", group="DC Marketing Tech Talks")
+    got = find_duplicates("a")
+    assert [(c["guid"], c["match"], c["source"]) for c in got] == \
+        [("b", "title", "ical")]
+
+
+def test_find_duplicates_matches_the_same_url(store):
+    _add(store, "a", "Monthly Meetup", url="https://example.com/e/1")
+    _add(store, "b", "Something Else Entirely", url="https://example.com/e/1")
+    assert [c["match"] for c in find_duplicates("a")] == ["url"]
+
+
+def test_find_duplicates_ignores_other_days_and_unrelated_titles(store):
+    _add(store, "a", "Rust Hack Night")
+    _add(store, "b", "Rust Hack Night", date="2026-06-25")
+    _add(store, "c", "Board Game Social")
+    assert find_duplicates("a") == []
+
+
+def test_find_duplicates_reports_an_existing_merge(store):
+    _add(store, "a", "Rust Hack Night")
+    _add(store, "b", "Rust Hack Night", overrides={"duplicate_of": "a"})
+    assert find_duplicates("a")[0]["duplicate_of"] == "a"
 
 
 # ── get_event ──────────────────────────────────────────────────────

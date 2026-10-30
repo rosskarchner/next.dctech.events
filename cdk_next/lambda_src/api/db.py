@@ -1017,11 +1017,26 @@ def _validate_overlay_values(guid, fields):
     if target:
         if target == guid:
             raise ValueError('An event cannot be a duplicate of itself')
-        if not get_event_from_config(target):
+        target_event = get_event_from_config(target)
+        if not target_event:
             # A duplicate_of pointing outside the corpus is silently ignored at
             # render (calgen's remove_duplicates requires the target be present),
             # so the merge would look done and the event would keep showing.
             raise ValueError(f'No such event to merge into: {target}')
+        # calgen drops every event that names a parent, so a pair pointing at
+        # each other vanishes from the site entirely, and a child of a child is
+        # credited to a parent that is itself dropped. Flipping which half of
+        # a pair is canonical has to clear the old pointer first.
+        target_parent = effective_event(target_event).get('duplicate_of')
+        if target_parent == guid:
+            raise ValueError(
+                f'{target} is already a duplicate of {guid}; marking {guid} a '
+                f'duplicate of it would hide both. Clear duplicate_of on '
+                f'{target} first.')
+        if target_parent:
+            raise ValueError(
+                f'{target} is itself a duplicate of {target_parent}; '
+                f'point duplicate_of at {target_parent} instead.')
 
 
 def _stamp_qa_run(existing, fields, clear, run_id):

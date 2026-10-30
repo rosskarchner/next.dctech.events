@@ -15,6 +15,7 @@ exist because they were tuned against months of real DC-area feeds, not
 because a strong model needs guardrails.
 
 Tools used: `list_groups`, `list_categories`, `get_events`, `get_event`,
+`find_duplicates`,
 `get_overlay`, `set_overlay`, `list_pending_qa`, `resolve_qa_review`,
 `list_qa_run`, `revert_qa_run`, `verify_ical_feed`, `propose_event`,
 `propose_group`, `list_discovery_proposals`, `list_events_due_for_check`,
@@ -65,15 +66,20 @@ false negative just leaves a duplicate up for another pass.
 real-world event listed by two different groups: the same `url`, the same
 or nearly identical `title` on the same `date`, or one event's description
 referencing the other group's event (`get_event` to read descriptions). The
-other half of a pair is usually *not* in the queue — compare against the
-whole corpus from `get_events`, not just the queued events. Decide which is
+other half of a pair is usually *not* in the queue, often a submitted or
+manual event approved long ago. Call `find_duplicates(guid)` for each queued
+event: it returns the same-day candidates (url or title match, every source)
+with their `source`, `time` and any existing `duplicate_of`. Decide which is
 canonical, in order, stopping at the first rule that settles it:
 
-1. The organising group's own listing wins over an aggregator/umbrella
+1. A user submission (`source: "submitted"`) wins over a feed listing
+   (Meetup, Luma, any iCal group). A person asked for it to be listed; keep
+   their entry and fix its fields from the page rather than discarding it.
+2. The organising group's own listing wins over an aggregator/umbrella
    calendar re-listing someone else's event.
-2. A listing that points at the other ("RSVP on Luma") is still canonical —
+3. A listing that points at the other ("RSVP on Luma") is still canonical —
    don't flip the decision because it routes RSVPs elsewhere.
-3. Otherwise prefer the more complete `location`, then the URL on the
+4. Otherwise prefer the more complete `location`, then the URL on the
    group's own domain.
 
 Put the overlay on whichever half is the duplicate — that may be an event
@@ -83,6 +89,15 @@ approved on an earlier pass, not the one in the current queue.
 set_overlay(duplicate_guid, {"duplicate_of": canonical_guid},
             "{GroupA} re-post of \"{title}\"; canonical is the {GroupB} entry",
             "qc-<date>")
+```
+
+If the pair is already merged the wrong way round, clear the old pointer
+first. `duplicate_of` must name a canonical event, so the tool refuses a write
+that would leave the two pointing at each other (calgen would drop both):
+
+```
+set_overlay(old_duplicate, {}, "un-merge: ...", "qc-<date>", clear=["duplicate_of"])
+set_overlay(old_canonical, {"duplicate_of": old_duplicate}, "...", "qc-<date>")
 ```
 
 **Out-of-area.** DC metro = Washington DC; Northern Virginia (Arlington,

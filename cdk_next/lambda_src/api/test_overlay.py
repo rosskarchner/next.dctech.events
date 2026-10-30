@@ -159,6 +159,28 @@ def test_clearing_duplicate_of_needs_no_target(store):
     assert "duplicate_of" not in overlay_of(store, "g2")
 
 
+def test_a_pair_cannot_point_at_each_other(store):
+    # calgen drops every event that names a parent, so both would vanish.
+    db.set_event_overlay("g2", {"duplicate_of": "g1"}, "merge")
+    with pytest.raises(ValueError, match="would hide both"):
+        db.set_event_overlay("g1", {"duplicate_of": "g2"}, "flip")
+
+
+def test_flipping_a_pair_works_once_the_old_pointer_is_cleared(store):
+    db.set_event_overlay("g2", {"duplicate_of": "g1"}, "merge")
+    db.set_event_overlay("g2", {}, "flip", clear=("duplicate_of",))
+    db.set_event_overlay("g1", {"duplicate_of": "g2"}, "flip")
+    assert overlay_of(store, "g1")["duplicate_of"] == "g2"
+
+
+def test_duplicate_of_must_name_a_canonical_event(store):
+    store["g3"] = {"guid": "g3", "title": "Third", "date": "2026-06-24",
+                   "time": "19:00"}
+    db.set_event_overlay("g2", {"duplicate_of": "g1"}, "merge")
+    with pytest.raises(ValueError, match="point duplicate_of at g1"):
+        db.set_event_overlay("g3", {"duplicate_of": "g2"}, "merge")
+
+
 # ── GSI1 ───────────────────────────────────────────────────────────
 
 
