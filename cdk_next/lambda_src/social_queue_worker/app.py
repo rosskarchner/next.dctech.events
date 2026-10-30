@@ -27,10 +27,16 @@ Posting reuses the same Mastodon/Bluesky HTTP clients and Secrets Manager
 credentials as the /updates cross-poster (lambda_src/social_publisher/), and
 the same per-network progress idea as its SOCIAL# dedupe record — except here
 the queue item *is* the progress record, since there is exactly one of it per
-event. A network that already has an id/uri recorded is skipped on retry; a
-failure on one network never blocks the other. A queue item that keeps
-failing is abandoned (status=failed) after MAX_ATTEMPTS hourly tries rather
-than permanently blocking the one-item-per-hour queue behind it.
+event.
+
+Each network drains the queue independently: every run, each network picks
+its own next item from the pending ones it has not yet posted (or given up
+on), so an outage on one network never slows the other below one post per
+hour. A network keeps retrying the item it already started on — tracked as
+{network}_attempts — and gives up on it ({network}_failed) after
+MAX_ATTEMPTS hourly tries rather than blocking its own queue forever. An item
+leaves the pending index once every network has either posted it or given
+up: status=posted if all posted, failed if all gave up, partial otherwise.
 
 Manual invoke, to drain the queue without waiting for the next hour:
 
@@ -53,9 +59,12 @@ MASTODON_SECRET_NAME = os.environ["MASTODON_SECRET_NAME"]
 BLUESKY_SECRET_NAME = os.environ["BLUESKY_SECRET_NAME"]
 MASTODON_CHAR_LIMIT = int(os.environ.get("MASTODON_CHAR_LIMIT", "500"))
 
-# One post attempt per hour, so a permanently-broken item (e.g. a network
-# outage lasting a day) does not wedge every event behind it forever.
+# One post attempt per network per hour, so a permanently-broken item (e.g.
+# a network outage lasting a day) does not wedge that network's queue forever.
 MAX_ATTEMPTS = 8
+
+# (network, the field whose presence means "already posted there").
+NETWORKS = (("mastodon", "mastodon_id"), ("bluesky", "bluesky_uri"))
 
 # How many of the oldest pending items to consider per run, and how many of
 # the most recently posted groups to steer away from.
@@ -220,14 +229,58 @@ def _save_progress(table, queue_pk, fields):
     )
 
 
-def _bump_attempts(table, queue_pk):
+def _bump_attempts(table, queue_pk, network):
+    field = f"{network}_attempts"
     resp = table.update_item(
         Key={"PK": queue_pk, "SK": "META"},
-        UpdateExpression="SET attempts = if_not_exists(attempts, :zero) + :one",
+        UpdateExpression="SET #a = if_not_exists(#a, :zero) + :one",
+        ExpressionAttributeNames={"#a": field},
         ExpressionAttributeValues={":zero": 0, ":one": 1},
         ReturnValues="UPDATED_NEW",
     )
-    return int(resp["Attributes"]["attempts"])
+    return int(resp["Attributes"][field])
+
+
+def _needs(queue_item, network, done_field):
+    return not queue_item.get(done_field) and not queue_item.get(f"{network}_failed")
+
+
+def _settled(queue_item):
+    """None while any network still owes this item a post, else its status."""
+    if any(_needs(queue_item, n, f) for n, f in NETWORKS):
+        return None
+    posted = [n for n, f in NETWORKS if queue_item.get(f)]
+    if len(posted) == len(NETWORKS):
+        return "posted"
+    return "partial" if posted else "failed"
+
+
+def _choose_for(network, candidates, recent):
+    """Finish the item this network is already retrying before starting a
+    new one, so its MAX_ATTEMPTS budget is spent on one item at a time."""
+    retrying = [c for c in candidates if c[0].get(f"{network}_attempts")]
+    if retrying:
+        return sorted(retrying, key=lambda c: _event_sort_key(c[1]))[0]
+    return _choose(candidates, recent)
+
+
+def _post(network, queue_item, event, url):
+    queue_pk = queue_item["PK"]
+    if network == "mastodon":
+        posted = networks.mastodon_post(
+            _secret(MASTODON_SECRET_NAME),
+            compose_event_post(event, url, MASTODON_CHAR_LIMIT),
+            idempotency_key=queue_pk,
+        )
+        return posted, {"mastodon_id": posted["id"],
+                        "mastodon_url": posted["url"]}
+    posted = networks.bluesky_post(
+        _secret(BLUESKY_SECRET_NAME),
+        compose_event_post(event, url, networks.BLUESKY_CHAR_LIMIT),
+        link=url, title=str(event.get("title") or ""),
+        description=_format_when(event),
+    )
+    return posted, {"bluesky_uri": posted["uri"], "bluesky_url": posted["url"]}
 
 
 def _process_one(table):
@@ -257,56 +310,56 @@ def _process_one(table):
     if not viable:
         return first_skip
 
-    queue_item, event = _choose(viable, _recent_groups(table))
-    queue_pk = queue_item["PK"]
-
-    url = f"{SITE_BASE_URL}/events/{event_utils.event_slug(event)}/"
-    texts = {
-        "mastodon": compose_event_post(event, url, MASTODON_CHAR_LIMIT),
-        "bluesky": compose_event_post(event, url, networks.BLUESKY_CHAR_LIMIT),
-    }
-
-    errors = {}
-    for network, already in (("mastodon", "mastodon_id"),
-                             ("bluesky", "bluesky_uri")):
-        if queue_item.get(already):
+    recent = _recent_groups(table)
+    results = {}
+    touched = {}
+    for network, done_field in NETWORKS:
+        candidates = [c for c in viable if _needs(c[0], network, done_field)]
+        if not candidates:
             continue
+        queue_item, event = _choose_for(network, candidates, recent)
+        queue_pk = queue_item["PK"]
+        touched[queue_pk] = (queue_item, event)
+        url = f"{SITE_BASE_URL}/events/{event_utils.event_slug(event)}/"
         try:
-            if network == "mastodon":
-                posted = networks.mastodon_post(
-                    _secret(MASTODON_SECRET_NAME), texts["mastodon"],
-                    idempotency_key=queue_pk,
-                )
-                fields = {"mastodon_id": posted["id"],
-                          "mastodon_url": posted["url"]}
-            else:
-                posted = networks.bluesky_post(
-                    _secret(BLUESKY_SECRET_NAME), texts["bluesky"],
-                    link=url, title=str(event.get("title") or ""),
-                    description=_format_when(event),
-                )
-                fields = {"bluesky_uri": posted["uri"],
-                          "bluesky_url": posted["url"]}
+            posted, fields = _post(network, queue_item, event, url)
         except Exception as exc:  # noqa: BLE001 — one network must not sink the other
             print(f"ERROR posting {queue_pk} to {network}: {exc}")
-            errors[network] = str(exc)
+            attempts = _bump_attempts(table, queue_pk, network)
+            queue_item[f"{network}_attempts"] = attempts
+            result = {"status": "retry", "pk": queue_pk, "error": str(exc),
+                      "attempts": attempts}
+            if attempts >= MAX_ATTEMPTS:
+                _save_progress(table, queue_pk, {f"{network}_failed": True})
+                queue_item[f"{network}_failed"] = True
+                result["status"] = "failed"
+            results[network] = result
             continue
 
         _save_progress(table, queue_pk, fields)
+        queue_item.update(fields)
         print(f"Posted {queue_pk} to {network}: {posted.get('url')}")
+        results[network] = {"status": "posted", "pk": queue_pk, "url": url}
 
-    if errors:
-        attempts = _bump_attempts(table, queue_pk)
-        if attempts >= MAX_ATTEMPTS:
-            _resolve(table, queue_pk, "failed")
-            return {"status": "failed", "pk": queue_pk, "errors": errors,
-                     "attempts": attempts}
-        return {"status": "retry", "pk": queue_pk, "errors": errors,
-                 "attempts": attempts}
+    if not results:
+        return first_skip or {"status": "empty"}
 
-    _resolve(table, queue_pk, "posted")
-    _remember_group(table, str(event.get("group") or ""))
-    return {"status": "posted", "pk": queue_pk, "url": url}
+    posted_groups = []
+    for queue_pk, (queue_item, event) in touched.items():
+        status = _settled(queue_item)
+        if status:
+            _resolve(table, queue_pk, status)
+        group = str(event.get("group") or "")
+        if (any(r["status"] == "posted" and r["pk"] == queue_pk
+                for r in results.values())
+                and group not in posted_groups):
+            posted_groups.append(group)
+    for group in posted_groups:
+        _remember_group(table, group)
+
+    statuses = {r["status"] for r in results.values()}
+    overall = statuses.pop() if len(statuses) == 1 else "partial"
+    return {"status": overall, "networks": results}
 
 
 def lambda_handler(event, context):
