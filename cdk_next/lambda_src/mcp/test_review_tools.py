@@ -324,6 +324,56 @@ def test_propose_event_creates_event_draft_with_discovery_submitter(fake):
     assert "Discovered at https://source.test" in data["description"]
 
 
+def test_propose_event_carries_start_and_end_time(fake):
+    propose_event(
+        title="Talk", date="2026-08-20", url="https://example.com/e",
+        location="DC", source_url="https://source.test", evidence="x",
+        time="17:30", end_time="20:00",
+    )
+    _, data, _, _ = fake["created"][0]
+    assert (data["time"], data["end_time"]) == ("17:30", "20:00")
+
+
+def test_propose_event_omits_time_when_not_given(fake):
+    propose_event(
+        title="Talk", date="2026-08-20", url="https://example.com/e",
+        location="DC", source_url="https://source.test", evidence="x",
+    )
+    _, data, _, _ = fake["created"][0]
+    assert "time" not in data and "end_time" not in data
+
+
+def test_propose_event_rejects_malformed_time(fake):
+    with pytest.raises(ValueError):
+        propose_event(
+            title="Talk", date="2026-08-20", url="https://example.com/e",
+            location="DC", source_url="https://source.test", evidence="x",
+            time="5:30pm",
+        )
+
+
+def test_add_single_event_stores_time(monkeypatch, fake):
+    stored = []
+    monkeypatch.setattr(server.db, "put_event",
+                        lambda guid, data, **kw: stored.append(data))
+    server.add_single_event(
+        title="Talk", date="2026-08-20", url="https://example.com/e",
+        location="DC", time="12:30", end_time="15:30",
+    )
+    assert (stored[0]["time"], stored[0]["end_time"]) == ("12:30", "15:30")
+
+
+def test_add_single_event_without_time_is_all_day(monkeypatch, fake):
+    stored = []
+    monkeypatch.setattr(server.db, "put_event",
+                        lambda guid, data, **kw: stored.append(data))
+    server.add_single_event(
+        title="Talk", date="2026-08-20", url="https://example.com/e",
+        location="DC",
+    )
+    assert "time" not in stored[0] and "end_time" not in stored[0]
+
+
 def test_list_discovery_proposals_returns_all_statuses(monkeypatch, fake):
     monkeypatch.setattr(server.db, "get_drafts_by_submitter", lambda submitter: [
         {"id": "d1", "draft_type": "group", "status": "pending", "name": "G"},

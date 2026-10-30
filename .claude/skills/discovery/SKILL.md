@@ -290,6 +290,9 @@ Each step is cheap; the later ones cost a fetch.
    person or online and where, the category you chose and why, and anything you
    are unsure of ("generic event titles", "vendor-style summit"). Put the least
    certain proposals' doubts in plain words; that is what the reviewer reads.
+   For a `propose_event`, pass `time` and `end_time` (24-hour local `HH:MM`,
+   from the page's `startDate`/`endDate`) whenever the page gives them;
+   leaving them out makes the event all-day on the site.
 
 ## Judgement
 

@@ -250,9 +250,11 @@ def add_single_event(
     title: str, date: str, url: str, location: str,
     end_date: str | None = None, cost: str | None = None,
     categories: list | None = None,
+    time: str | None = None, end_time: str | None = None,
 ) -> dict:
     """
-    Add a one-off event. date/end_date are 'YYYY-MM-DD'. Returns the guid
+    Add a one-off event. date/end_date are 'YYYY-MM-DD'; time/end_time are
+    24-hour 'HH:MM' local, omitted for all-day events. Returns the guid
     assigned to this event (so you can attach an overlay to it later).
     """
     from event_utils import calculate_event_hash
@@ -260,6 +262,10 @@ def add_single_event(
     _check_categories(categories)
     date = db.validate_event_date(date)
     end_date = db.validate_event_date(end_date, 'end_date')
+    time = db.validate_event_time(time)
+    end_time = db.validate_event_time(end_time, 'end_time')
+    # The guid leaves time out on purpose, so propose_event's duplicate check
+    # matches regardless of whether either side knew the start time.
     guid = calculate_event_hash(date, '', title, url)
     if db.get_event_from_config(guid):
         raise ValueError(f'Event already exists: {guid}')
@@ -267,6 +273,10 @@ def add_single_event(
             'slug': f'{date}-{_slugify(title)}', 'categories': categories}
     if end_date:
         data['end_date'] = end_date
+    if time:
+        data['time'] = time
+    if end_time:
+        data['end_time'] = end_time
     if cost:
         data['cost'] = cost
     db.put_event(guid, data, source='manual', review_status='approved')
@@ -1069,10 +1079,13 @@ def propose_group(name: str, website: str, ical: str, categories: list,
 def propose_event(title: str, date: str, url: str, location: str,
                   source_url: str, evidence: str,
                   end_date: str | None = None, cost: str | None = None,
-                  categories: list | None = None) -> dict:
+                  categories: list | None = None,
+                  time: str | None = None,
+                  end_time: str | None = None) -> dict:
     """
     Propose a one-off event (a conference, a summit — something with no group
-    feed behind it) for review. date/end_date are 'YYYY-MM-DD'.
+    feed behind it) for review. date/end_date are 'YYYY-MM-DD'; time/end_time
+    are 24-hour 'HH:MM' local, omitted for all-day events.
 
     Recurring meetups should be proposed as a *group* instead: one accepted
     feed keeps paying out every month, one accepted event pays out once.
@@ -1083,6 +1096,8 @@ def propose_event(title: str, date: str, url: str, location: str,
     # build_event_draft_data, so it does not inherit that function's checks.
     date = db.validate_event_date(date)
     end_date = db.validate_event_date(end_date, 'end_date')
+    time = db.validate_event_time(time) or None
+    end_time = db.validate_event_time(end_time, 'end_time') or None
 
     from event_utils import calculate_event_hash
     if db.get_event_from_config(calculate_event_hash(date, '', title, url)):
@@ -1090,6 +1105,7 @@ def propose_event(title: str, date: str, url: str, location: str,
 
     data = {'title': title, 'date': date, 'url': url, 'location': location,
             'categories': categories, 'end_date': end_date, 'cost': cost,
+            'time': time, 'end_time': end_time,
             'description': f'Discovered at {source_url}\n\n{evidence}'}
     draft_id = db.create_draft(
         'event', {k: v for k, v in data.items() if v is not None},
