@@ -9,7 +9,7 @@ from calgen.site_config import get_config
 from calgen.archive import get_archived_events, get_archived_week, merge_events
 from calgen.added_at import group_by_added_date
 from calgen.routes.common import (
-    JUST_ADDED_DAYS, UPCOMING_WINDOW_DAYS, local_tz,
+    JUST_ADDED_DAYS, UPCOMING_WINDOW_DAYS, local_tz, local_today,
     get_events, get_stats, get_upcoming_months, get_categories_with_event_counts,
     get_all_months, get_sidebar_data, filter_events_to_upcoming_days,
     filter_events_by_month, is_virtual_event, prepare_events_by_day,
@@ -85,7 +85,8 @@ def register_routes(app):
         events = filter_in_person_events(all_events)
         window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
         upcoming_events = filter_events_to_upcoming_days(events, window_end)
-        days = prepare_events_by_day(upcoming_events, add_week_links=True, window_end=window_end)
+        days = prepare_events_by_day(upcoming_events, add_week_links=True,
+                                     window_end=window_end, window_start=local_today())
 
         cfg = get_config()
         base_url = cfg.get('base_url', '')
@@ -105,7 +106,7 @@ def register_routes(app):
     def virtual_events_page():
         all_events = get_events()
         events = filter_virtual_events(all_events)
-        days = prepare_events_by_day(events, add_week_links=False)
+        days = prepare_events_by_day(events, add_week_links=False, window_start=local_today())
         cfg = get_config()
         base_url = cfg.get('base_url', '')
         stats = {'upcoming_events': len(events)}

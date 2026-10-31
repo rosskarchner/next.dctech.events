@@ -17,7 +17,7 @@ import requests
 from dateutil import rrule
 
 from calgen.site_config import get_config
-from calgen.event_utils import (calculate_event_hash, event_categories,
+from calgen.event_utils import (calculate_event_hash, event_categories, event_last_day,
                                 matches_skip_phrases, _normalize_title)
 from calgen.overlay import apply_overlay
 from calgen.regions import EventRejected, load_region_plugin
@@ -351,10 +351,12 @@ def process_events(groups, categories, single_events, ical_events, recurring_eve
             if matches_skip_phrases(event, skip_phrases):
                 continue
             try:
-                event_date = datetime.strptime(event['date'], '%Y-%m-%d').date()
+                datetime.strptime(event['date'], '%Y-%m-%d')
             except (KeyError, ValueError):
                 continue
-            if event_date < today:
+            # Kept through its last day, so a multi-day event is still
+            # listed once it is under way (next_dctech_events-ax3).
+            if event_last_day(event) < today.isoformat():
                 continue
             processed = dict(event)
             processed['group'] = group.get('name', group_id)
@@ -374,10 +376,10 @@ def process_events(groups, categories, single_events, ical_events, recurring_eve
 
     for event in single_events:
         try:
-            event_date = datetime.strptime(event['date'], '%Y-%m-%d').date()
+            datetime.strptime(event['date'], '%Y-%m-%d')
         except (KeyError, ValueError):
             continue
-        if event_date < today:
+        if event_last_day(event) < today.isoformat():
             continue
         processed = dict(event)
         processed.setdefault('source', 'manual')

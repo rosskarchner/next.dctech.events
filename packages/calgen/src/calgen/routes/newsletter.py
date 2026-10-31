@@ -6,7 +6,7 @@ from flask import render_template, request
 
 from calgen.site_config import get_config
 from calgen.routes.common import (
-    local_tz, UPCOMING_WINDOW_DAYS, get_events, get_stats, get_upcoming_months,
+    local_tz, local_today, UPCOMING_WINDOW_DAYS, get_events, get_stats, get_upcoming_months,
     get_categories_with_event_counts, filter_events_to_upcoming_days,
     prepare_events_by_day, is_virtual_event,
 )
@@ -66,7 +66,8 @@ def _newsletter_context(category_slugs=None, region_slugs=None):
     events = _filter_events(events, category_slugs, region_slugs)
     window_end = datetime.now(local_tz).date() + timedelta(days=UPCOMING_WINDOW_DAYS)
     upcoming_events = filter_events_to_upcoming_days(events, window_end)
-    days = prepare_events_by_day(upcoming_events, window_end=window_end)
+    days = prepare_events_by_day(upcoming_events, window_end=window_end,
+                                 window_start=local_today())
     prepare_newsletter_titles(days)
     stats = get_stats().copy()
     stats['upcoming_events'] = len(upcoming_events)

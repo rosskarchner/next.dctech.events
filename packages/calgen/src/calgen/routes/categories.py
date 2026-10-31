@@ -7,7 +7,7 @@ from flask import Response, render_template
 
 from calgen.site_config import get_config
 from calgen.routes.common import (
-    THIN_FACET_MIN_EVENTS, get_events, get_categories, get_sidebar_data,
+    THIN_FACET_MIN_EVENTS, get_events, get_categories, get_sidebar_data, local_today,
     filter_events_by_month, prepare_events_by_day, _generate_ical_feed,
     _generate_rss_feed,
 )
@@ -36,7 +36,7 @@ def register_routes(app):
             return "Category not found", 404
         events = get_events()
         filtered_events = [e for e in events if slug in e.get('categories', [])]
-        days = prepare_events_by_day(filtered_events)
+        days = prepare_events_by_day(filtered_events, window_start=local_today())
         category = categories[slug]
         stats = {'upcoming_events': len(filtered_events)}
         return render_template('category_page.html',

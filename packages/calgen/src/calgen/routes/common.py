@@ -39,7 +39,8 @@ from icalendar import Calendar, Event as ICalEvent
 
 from calgen.added_at import group_by_added_date
 from calgen.archive import get_archived_events, get_archived_weeks
-from calgen.event_utils import calculate_event_hash, event_slug, has_specific_time
+from calgen.event_utils import (calculate_event_hash, event_last_day, event_slug,
+                                has_specific_time)
 from calgen.location_utils import extract_location_info
 from calgen.site_config import get_config
 
@@ -82,6 +83,11 @@ UPCOMING_WINDOW_DAYS = 21
 # Data loading helpers
 # ---------------------------------------------------------------------------
 
+def local_today():
+    """Today in the site's timezone."""
+    return datetime.now(local_tz).date()
+
+
 def get_events(include_hidden=False):
     events_file = os.path.join('_data', 'all_events.json')
     try:
@@ -89,8 +95,10 @@ def get_events(include_hidden=False):
             events = json.load(f)
         if not include_hidden:
             events = [e for e in events if not e.get('hidden', False) and not e.get('duplicate_of')]
+        # An event stays current through its last day, not just its first:
+        # a two-day conference must still be listed on day two.
         today = datetime.now(local_tz).date().strftime('%Y-%m-%d')
-        events = [e for e in events if e.get('date', '') >= today]
+        events = [e for e in events if event_last_day(e) >= today]
 
         groups = get_approved_groups()
         group_map = {g.get('name'): g for g in groups if g.get('name')}
@@ -412,17 +420,19 @@ def get_stats():
 # ---------------------------------------------------------------------------
 
 def filter_events_to_upcoming_days(events, window_end):
-    """Keep events starting between today and `window_end`, inclusive.
+    """Keep events that run on any day from today through `window_end`.
 
-    Only the start date is checked here — a multi-day event that starts
-    within the window but ends after it is still included. prepare_events_by_day
-    clips its day-by-day expansion to the same `window_end` so it doesn't
-    render past the edge this filter implies.
+    An event qualifies if it starts on or before `window_end` and its last
+    day (event_last_day) is today or later — so a multi-day event already
+    under way is kept, as is one that starts inside the window and ends
+    after it. prepare_events_by_day clips the day-by-day expansion to the
+    same range (window_start/window_end) so neither renders outside it.
     """
-    today = datetime.now(local_tz).date()
+    today = datetime.now(local_tz).date().isoformat()
+    end = window_end.isoformat()
     return [
         e for e in events
-        if e.get('date') and today <= datetime.strptime(e['date'], '%Y-%m-%d').date() <= window_end
+        if e.get('date') and e['date'] <= end and event_last_day(e) >= today
     ]
 
 
@@ -506,7 +516,8 @@ def get_upcoming_weeks(num_weeks=12):
 # Event display helpers
 # ---------------------------------------------------------------------------
 
-def prepare_events_by_day(events, add_week_links=False, window_end=None):
+def prepare_events_by_day(events, add_week_links=False, window_end=None,
+                          window_start=None):
     """Group events by the day(s) they occur on.
 
     A multi-day event is expanded into one entry per day it spans. When
@@ -515,6 +526,11 @@ def prepare_events_by_day(events, add_week_links=False, window_end=None):
     filter would keep appearing on days well past that window
     (next_dctech_events bug: TIX ON POSH bleeding past the homepage's
     two-week cutoff).
+
+    `window_start` clips the other end: "upcoming" views pass today, so an
+    event already under way shows from today on rather than adding a
+    heading for a day that has passed. Week, month and post pages pass
+    neither and see every day.
     """
     events_by_day = {}
     for event in events:
@@ -530,16 +546,20 @@ def prepare_events_by_day(events, add_week_links=False, window_end=None):
                 pass
         if window_end is not None and end_date is not None and end_date > window_end:
             end_date = window_end
+        first_date = start_date
+        if window_start is not None and end_date and end_date > start_date \
+                and start_date < window_start:
+            first_date = min(window_start, end_date)
         event_dates = []
         if end_date and end_date > start_date:
-            current_date = start_date
+            current_date = first_date
             while current_date <= end_date:
                 event_dates.append(current_date)
                 current_date += timedelta(days=1)
         else:
             event_dates = [start_date]
 
-        for i, event_date in enumerate(event_dates):
+        for event_date in event_dates:
             day_key = event_date.strftime('%Y-%m-%d')
             short_date = event_date.strftime('%a %-m/%-d')
             if day_key not in events_by_day:
@@ -569,7 +589,10 @@ def prepare_events_by_day(events, add_week_links=False, window_end=None):
             event_copy = event.copy()
             event_copy['time'] = time_key if time_key != 'All Day' else ''
             event_copy['formatted_time'] = formatted_time
-            event_copy['display_title'] = f"{event['title']} (continuing)" if i > 0 else event['title']
+            # Against the real start, not the loop index: with window_start
+            # clipping, the first day shown may already be a continuing one.
+            event_copy['display_title'] = (f"{event['title']} (continuing)"
+                                           if event_date > start_date else event['title'])
             # Permalink to this event's own page. Every list template renders
             # it as a low-prominence '#' beside the title, never in place of
             # the outbound link: the title always goes straight to the

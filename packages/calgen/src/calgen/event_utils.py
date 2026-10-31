@@ -1,6 +1,7 @@
 import hashlib
 import re
 import unicodedata
+from datetime import datetime
 
 
 def _normalize_title(s: str) -> str:
@@ -117,3 +118,16 @@ def event_slug(event):
         )
     parts = [str(event.get('date', '')), slugify(event.get('title', ''))]
     return '-'.join(p for p in parts if p) + '-' + guid[:8]
+
+
+def event_last_day(event):
+    """The last day an event runs, as 'YYYY-MM-DD': its end_date when that
+    is a real date on or after its start, otherwise its start date. '' for
+    an event with no date at all."""
+    start = str(event.get('date') or '')
+    end = str(event.get('end_date') or '')
+    try:
+        datetime.strptime(end, '%Y-%m-%d')
+    except ValueError:
+        return start
+    return end if end > start else start
