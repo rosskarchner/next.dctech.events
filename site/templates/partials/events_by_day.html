@@ -31,7 +31,14 @@
                                     {% endif %}
                                     <a class="u-url p-name" href="{{ event.url }}" target="_blank" rel="noopener noreferrer">{{ event.title }}</a>{% if event.display_title != event.title %} <span class="p-summary">{{ event.display_title | replace(event.title, '') }}</span>{% endif %}{% if event.permalink %}<a class="event-permalink" href="{{ event.permalink }}" aria-label="Permalink to {{ event.title }} on {{ site_name }}" title="Permalink on {{ site_name }}">🔎</a>{% endif %}
                                     {% if event.is_recurring %}<span class="recurring-badge">🔄 Recurring</span><span class="recurring-note">Confirm date/time with the organizer</span>{% endif %}
-                                    {% if event.time %}<time class="dt-start" datetime="{{ day.date }}T{{ event.time }}">{{ event.formatted_time }}</time>{% endif %}
+                                    {# dt-start is the event's own start: on its start day with the
+                                       visible time; otherwise (all-day, or a "continuing" day) a bare
+                                       date in an empty <data>, which shows nothing. #}
+                                    {% set ev_start = event.date or day.date %}
+                                    {% set on_start_day = day.date == ev_start %}
+                                    {% if event.time %}<time{% if on_start_day %} class="dt-start"{% endif %} datetime="{{ day.date }}T{{ event.time }}">{{ event.formatted_time }}</time>{% endif %}
+                                    {% if not (event.time and on_start_day) %}<data class="dt-start" value="{{ ev_start }}"></data>{% endif %}
+                                    {% if event.end_date and event.end_date > ev_start %}<data class="dt-end" value="{{ event.end_date }}"></data>{% endif %}
                                     <div class="event-details">
                                         {% if event.location %}
                                             <div class="p-location event-location">

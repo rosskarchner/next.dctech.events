@@ -77,8 +77,13 @@
                   "@type": "Event",
                   "name": {{ event.title | tojson }},
                   "url": {{ event.url | tojson }},
-                  {% if event.time %}
-                  "startDate": "{{ day.date }}T{{ event.time }}",
+                  {# Always present: schema.org takes a bare date for an
+                     all-day event. The event's own start, not this day's,
+                     so a "continuing" entry doesn't claim to start today;
+                     the time only belongs with the start day. #}
+                  "startDate": "{{ event.date or day.date }}{% if event.time and day.date == (event.date or day.date) %}T{{ event.time }}{% endif %}",
+                  {% if event.end_date and event.end_date > (event.date or '') %}
+                  "endDate": {{ event.end_date | tojson }},
                   {% endif %}
                   {% if event.location %}
                   "location": {
