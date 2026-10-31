@@ -332,3 +332,22 @@ def test_reconfirming_clears_unsubscribe_all():
     app.route_confirm_post(_confirm_event("back@example.com"))
     assert app.ses.unsubscribe_all["back@example.com"] is False
     assert app._is_subscribed("back@example.com")
+
+
+# ── page shell vs. the homepage's htmx include ──────────────────────
+
+def test_full_page_uses_the_site_shell():
+    body = app.route_index({"headers": {}})["body"]
+    assert '<link rel="stylesheet" href="/static/css/main.css">' in body
+    assert '<body class="newsletter-page">' in body
+    assert 'id="signup-form"' in body
+
+
+def test_htmx_request_still_gets_only_the_bare_form():
+    # The homepage's hx-get swaps this into its own #subscribe box, so it
+    # must not carry a page shell, stylesheet, or a second #subscribe.
+    body = app.route_index({"headers": {"HX-Request": "true"}})["body"]
+    assert "<html" not in body
+    assert "main.css" not in body
+    assert 'id="subscribe"' not in body
+    assert 'id="signup-form"' in body

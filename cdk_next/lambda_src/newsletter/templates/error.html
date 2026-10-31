@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1>Error</h1>
-<p>{{ error }}</p>
-<p><a href="/">Return to homepage</a></p>
+<h1>Something went wrong</h1>
+<div class="error-message" role="alert">{{ error }}</div>
+<p><a href="{{ base_path }}/">Start over from the newsletter page</a></p>
 {% endblock %}

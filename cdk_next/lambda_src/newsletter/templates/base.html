@@ -1,31 +1,119 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>{% block title %}DC Tech Events Newsletter{% endblock %}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Newsletter | DC Tech Events{% endblock %}</title>
     <meta name="robots" content="noindex, nofollow">
 
+    {# The same shell as site/templates/base.html (header, single-column
+       layout, footer), pulling the site's own stylesheet same-origin
+       through CloudFront's /static path, so this page tracks the site's
+       look without a copy of its CSS. The sponsor line is left out: it
+       comes from data only the site build has.
+
+       Only full-page renders use this. The homepage's hx-get of
+       /newsletter/ gets partials/signup_form.html alone (route_index
+       checks HX-Request), so nothing here reaches the homepage. #}
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/images/icon-180.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16.png">
+    <link rel="icon" href="/static/images/favicon.ico" sizes="any">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#296b6b">
+
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link href="/static/kenney-mini/kenney-mini.css" rel="stylesheet">
+
     <style>
+        /* Form controls and result messages. main.css has none (the site
+           is otherwise read-only), so they're defined here from its
+           variables, scoped to this page so they never leak elsewhere. */
+        .newsletter-page input[type="email"] {
+            font: inherit;
+            padding: var(--spacing-sm) var(--spacing-md);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            background: #fff;
+            color: var(--color-text);
+            width: 100%;
+            max-width: 22rem;
+            box-sizing: border-box;
+            margin: 0 var(--spacing-sm) var(--spacing-sm) 0;
+        }
+        .newsletter-page input[type="email"]:focus-visible,
+        .newsletter-page button:focus-visible {
+            outline: 2px solid var(--color-primary);
+            outline-offset: 2px;
+        }
+        .newsletter-page button {
+            font: inherit;
+            font-weight: 600;
+            padding: var(--spacing-sm) var(--spacing-lg);
+            border: 0;
+            border-radius: var(--border-radius);
+            background: var(--color-primary);
+            color: #fff;
+            cursor: pointer;
+        }
+        .newsletter-page button:hover {
+            background: var(--color-primary-hover);
+        }
+        .newsletter-page #confirm-form button {
+            margin-top: var(--spacing-md);
+        }
+        .newsletter-page input[type="checkbox"] {
+            accent-color: var(--color-primary);
+        }
+        .success-message,
+        .error-message {
+            padding: var(--spacing-md);
+            margin: var(--spacing-md) 0;
+            border-radius: var(--border-radius);
+            border-left: 4px solid;
+        }
         .success-message {
             color: #155724;
             background-color: #d4edda;
-            border: 1px solid #c3e6cb;
-            padding: 1rem;
-            margin: 1rem 0;
-            border-radius: 4px;
+            border-color: #4caf50;
         }
         .error-message {
             color: #721c24;
             background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-            padding: 1rem;
-            margin: 1rem 0;
-            border-radius: 4px;
+            border-color: #c0392b;
         }
     </style>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 </head>
-<body>
-    {% block content %}{% endblock %}
+<body class="newsletter-page">
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <header>
+        <div class="container">
+            <div class="header-top">
+                <div class="logo"><a href="/">DC Tech Events</a></div>
+            </div>
+            <div>Upcoming Tech Events in DC, Maryland &amp; Virginia</div>
+            <p class="header-cta">You make it better! <a href="/edit/submit-event.html">Add an event</a>, <a href="/edit/submit-group.html">add a group</a>, or <a href="mailto:ross@karchner.com">send feedback</a>.</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="layout-single">
+            <main id="main-content">
+                <p class="back-home"><a href="/">&larr; Back to all events</a></p>
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+
+    <footer>
+        <div class="container">
+            <p>Made by <a href="mailto:ross@karchner.com">Ross Karchner</a>.
+                 <a href="https://github.com/rosskarchner/next.dctech.events">Improvements</a> and <a href="mailto:ross@karchner.com">feedback</a> are welcome! |
+                 <a href="/events.ics">iCal Feed</a></p>
+        </div>
+    </footer>
+
     {% block scripts %}{% endblock %}
 </body>
 </html>

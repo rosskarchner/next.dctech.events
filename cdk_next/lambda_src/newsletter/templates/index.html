@@ -1,16 +1,19 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1>DC Tech Events Newsletter</h1>
-<p>Subscribe to stay updated on tech events in DC, or enter the address you're already subscribed with to change which topics and areas you get.</p>
-{% include "partials/signup_form.html" %}
-<div id="message"></div>
+<h1>Weekly newsletter</h1>
+<p>Get the week's DC-area tech events in your inbox every Monday. Already subscribed? Enter the same address to change which topics and areas you get.</p>
+{# Same green box the form sits in on the homepage, so it looks the same
+   in both places. #}
+<div id="subscribe">
+    {% include "partials/signup_form.html" %}
+    <div id="message"></div>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script src="https://unpkg.com/htmx.org@1.9.10"></script>
 <script>
-// Fallback for non-HTMX browsers
+// Fallback for when htmx (loaded in base.html) didn't load.
 document.addEventListener('DOMContentLoaded', function() {
     if (!window.htmx) {
         const form = document.getElementById('signup-form');
@@ -19,10 +22,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const email = form.email.value;
             const newsletterValue = form.querySelector('input[name="newsletters"]')?.value;
             const newsletters = newsletterValue ? [newsletterValue] : [];
-            const categories = Array.from(
-                form.querySelectorAll('input[name="categories"]:checked')).map(el => el.value);
-            const regions = Array.from(
-                form.querySelectorAll('input[name="regions"]:checked')).map(el => el.value);
             const message = document.getElementById('message');
 
             if (newsletters.length === 0) {
@@ -36,8 +35,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({email: email, newsletters: newsletters,
-                                       categories: categories, regions: regions})
+                body: JSON.stringify({email: email, newsletters: newsletters})
             })
             .then(response => response.json())
             .then(data => {
