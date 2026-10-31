@@ -20,7 +20,6 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_lambda_event_sources as event_sources,
     aws_logs as logs,
-    aws_secretsmanager as secretsmanager,
     aws_sns as sns,
 )
 from constructs import Construct
@@ -72,22 +71,6 @@ class NextNewsletterStack(cdk.Stack):
             # which is recoverable (a subscriber requests a new one) but
             # rude — matching submit_key's own reasoning in NextApiStack.
             removal_policy=cdk.RemovalPolicy.RETAIN,
-        )
-
-        # No longer read by anything: the signup form's CSRF token was never
-        # verified and couldn't protect a sessionless form (see
-        # newsletter/app.py's docstring), so it was removed. The secret is
-        # kept for now; deleting it is a separate cleanup.
-        csrf_secret = secretsmanager.Secret(
-            self,
-            "NextNewsletterCsrfSecret",
-            secret_name=f"{config.PREFIX}/newsletter-csrf",
-            generate_secret_string=secretsmanager.SecretStringGenerator(
-                secret_string_template="{}",
-                generate_string_key="csrf_secret",
-                exclude_punctuation=True,
-                password_length=48,
-            ),
         )
 
         feedback_topic = sns.Topic(
