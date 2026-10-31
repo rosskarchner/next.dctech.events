@@ -33,3 +33,7 @@ node_modules/
 
 # Pre-decommission backups (contains Cognito user emails — never commit)
 .backup-predecom-*/
+
+# beads per-machine runtime state
+.beads.gate.lock
+.beads/.auto-import-issues.jsonl
