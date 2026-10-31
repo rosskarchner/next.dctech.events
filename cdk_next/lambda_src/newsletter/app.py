@@ -1,15 +1,17 @@
 """Newsletter signup/confirm Lambda for next.dctech.events.
 
-Port of the live dctech-newsletter Chalice app's exact mechanics — double
-opt-in, KMS HMAC_SHA_512-signed confirmation links, CSRF secret from Secrets
-Manager, SESv2 contact list/topic — into a plain Lambda-proxy router (no
-Chalice), against this stack's own isolated SES/KMS/Secrets resources.
+Port of the live dctech-newsletter Chalice app's mechanics — double
+opt-in, KMS HMAC_SHA_512-signed confirmation links, SESv2 contact
+list/topic — into a plain Lambda-proxy router (no Chalice), against this
+stack's own isolated SES/KMS resources.
+
+The form used to carry a CSRF token. It was never verified, and couldn't
+have protected anything: it wasn't tied to a session, so a script could
+fetch a fresh one from GET /newsletter/, and signup has no session to
+forge. Abuse is bounded by route_signup's per-address rate limit instead.
 """
-import hashlib
-import hmac
 import json
 import os
-import uuid
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from datetime import datetime, timezone
 from urllib.parse import parse_qs
@@ -28,11 +30,9 @@ env = Environment(
 
 ses = boto3.client('sesv2')
 kms = boto3.client('kms')
-secrets = boto3.client('secretsmanager')
 
 TOPIC_NAME = os.environ.get('TOPIC_NAME', 'dctech')
 CONFIRMATION_KEY_ID = os.environ.get('CONFIRMATION_KEY_ID')
-CSRF_SECRET_NAME = os.environ.get('CSRF_SECRET_NAME', 'dctech-events-next/newsletter-csrf')
 BASE_URL = os.environ.get('BASE_URL', '')  # public URL of this API, no trailing slash
 # When served through the CloudFront /newsletter* behavior, API Gateway sees
 # paths that still carry this prefix; strip it before routing.
@@ -42,7 +42,6 @@ PATH_PREFIX = os.environ.get('PATH_PREFIX', '').rstrip('/')
 # preferences link.
 SITE_URL = os.environ.get('SITE_URL', '').rstrip('/')
 PREFERENCES_PATH = '/edit/preferences.html'
-CSRF_SECRET = None
 
 # One message for both branches of route_signup, so the response never
 # reveals whether an address is already on the list.
@@ -97,39 +96,6 @@ def filter_signup_newsletters(newsletters):
     # Accept the retired parallel-stack slug so any stale form still works.
     normalized = ['dctech' if n == 'dctech-next' else n for n in newsletters]
     return [slug for slug in normalized if slug in NEWSLETTERS]
-
-
-def get_csrf_secret():
-    global CSRF_SECRET
-    if CSRF_SECRET is None:
-        response = secrets.get_secret_value(SecretId=CSRF_SECRET_NAME)
-        CSRF_SECRET = json.loads(response['SecretString'])['csrf_secret']
-    return CSRF_SECRET
-
-
-def generate_csrf_token(confirmation_id):
-    """Generate a CSRF token for form protection"""
-    secret = get_csrf_secret()
-    timestamp = str(int(_now_ts()))
-    message = f"{confirmation_id}:{timestamp}".encode()
-    signature = hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
-    return f"{timestamp}.{signature}"
-
-
-def verify_csrf_token(confirmation_id, token):
-    """Verify a CSRF token for form protection and check it hasn't expired"""
-    try:
-        timestamp, signature = token.split('.')
-        message = f"{confirmation_id}:{timestamp}".encode()
-        secret = get_csrf_secret()
-        expected_signature = hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
-
-        if int(_now_ts()) - int(timestamp) > 3600:  # 1 hour
-            return False
-
-        return hmac.compare_digest(signature, expected_signature)
-    except Exception:
-        return False
 
 
 def generate_confirmation_signature(email, timestamp, newsletters=None):
@@ -306,12 +272,19 @@ def _send_manage_link(email):
 # ─── Routes ───────────────────────────────────────────────────────
 
 def route_index(event):
-    temp_id = str(uuid.uuid4())
-    csrf_token = generate_csrf_token(temp_id)
     template = 'partials/signup_form.html' if _is_htmx(event) else 'index.html'
-    return _html(_render(
-        template, csrf_token=csrf_token, temp_id=temp_id,
-        categories=db.get_all_categories(), regions=REGIONS))
+    return _html(_render(template))
+
+
+def _signup_error(is_htmx, error_msg, status, email=''):
+    """An error from /signup. JSON callers get the real status. htmx gets
+    200 with the form re-rendered around the message: htmx doesn't swap a
+    4xx/5xx response in by default, so the user would otherwise click and
+    see nothing — and the form (with their email kept) must survive, since
+    the swap replaces it, on the homepage as well as on /newsletter/."""
+    if is_htmx:
+        return _html(_render('partials/signup_form.html', error=error_msg, email=email))
+    return _json({'error': error_msg}, status)
 
 
 def route_signup(event):
@@ -348,23 +321,30 @@ def route_signup(event):
     email = magic_link.normalize_email(email)
     if not email:
         error_msg = 'Email is required'
-        if is_htmx:
-            return _html(_render('partials/error.html', error=error_msg), 400)
-        return _json({'error': error_msg}, 400)
+        return _signup_error(is_htmx, error_msg, 400, email)
     if not magic_link.is_valid_email(email):
         error_msg = 'Please enter a valid email address'
-        if is_htmx:
-            return _html(_render('partials/error.html', error=error_msg), 400)
-        return _json({'error': error_msg}, 400)
+        return _signup_error(is_htmx, error_msg, 400, email)
 
     newsletters = filter_signup_newsletters(newsletters)
     if not newsletters:
         error_msg = 'Please select an available newsletter'
-        if is_htmx:
-            return _html(_render('partials/error.html', error=error_msg), 400)
-        return _json({'error': error_msg}, 400)
+        return _signup_error(is_htmx, error_msg, 400, email)
 
     try:
+        # Per-address cap on emails this site sends: the same MAGICLINK#
+        # counter /api/submit-link uses (1/minute, 6/day), so signup,
+        # manage, submit and correct links share one allowance per inbox.
+        # The 429 says only that a link was sent recently, never whether
+        # the address is subscribed.
+        allowed, retry_after = db.check_and_record_link_request(email)
+        if not allowed:
+            minutes = max(1, round(retry_after / 60))
+            error_msg = (f'A link was just sent to that address. Please check '
+                         f'your inbox, or try again in {minutes} '
+                         f'minute{"s" if minutes != 1 else ""}.')
+            return _signup_error(is_htmx, error_msg, 429, email)
+
         # One entry point for both "subscribe" and "manage": someone already
         # on the list gets a preferences link, everyone else (new, or
         # previously unsubscribed) gets the double-opt-in confirmation,
@@ -402,9 +382,7 @@ def route_signup(event):
     except Exception as e:
         print(f"Subscription error: {e}")
         error_msg = 'Failed to process subscription'
-        if is_htmx:
-            return _html(_render('partials/error.html', error=error_msg), 500)
-        return _json({'error': error_msg}, 500)
+        return _signup_error(is_htmx, error_msg, 500, email)
 
 
 def route_confirm_link(event, encoded_email, encoded_timestamp, signature):

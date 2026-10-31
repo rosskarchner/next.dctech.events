@@ -1,6 +1,6 @@
 """NextNewsletterStack — isolated newsletter infrastructure.
 
-Fresh KMS HMAC key, Secrets Manager CSRF secret, SNS feedback topic, and
+Fresh KMS HMAC key, SNS feedback topic, and
 three Lambdas (signup/confirm router behind its own API, weekly sender on
 production's cron(0 11 ? * MON *), SNS bounce handler). SES contact list /
 template / configuration set are provisioned by the idempotent
@@ -74,6 +74,10 @@ class NextNewsletterStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )
 
+        # No longer read by anything: the signup form's CSRF token was never
+        # verified and couldn't protect a sessionless form (see
+        # newsletter/app.py's docstring), so it was removed. The secret is
+        # kept for now; deleting it is a separate cleanup.
         csrf_secret = secretsmanager.Secret(
             self,
             "NextNewsletterCsrfSecret",
@@ -101,7 +105,6 @@ class NextNewsletterStack(cdk.Stack):
             "CONFIGURATION_SET": config.PREFIX,
             "CONFIRMATION_KEY_ID": confirmation_key.key_id,
             "PREFS_KEY_ID": self.prefs_key.key_id,
-            "CSRF_SECRET_NAME": csrf_secret.secret_name,
             "DYNAMODB_TABLE_NAME": table.table_name,
             # Served same-origin through the CloudFront /newsletter* behavior,
             # so forms, redirects, and emailed confirmation links all use the
@@ -136,7 +139,6 @@ class NextNewsletterStack(cdk.Stack):
             ),
         )
         confirmation_key.grant(self.signup_function, "kms:GenerateMac", "kms:VerifyMac")
-        csrf_secret.grant_read(self.signup_function)
         # Writes subscriber category/region preferences (db.put_subscriber_preferences)
         # on confirm — this Lambda touched no DynamoDB at all before that.
         table.grant_read_write_data(self.signup_function)

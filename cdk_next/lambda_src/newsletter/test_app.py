@@ -351,3 +351,70 @@ def test_htmx_request_still_gets_only_the_bare_form():
     assert "main.css" not in body
     assert 'id="subscribe"' not in body
     assert 'id="signup-form"' in body
+
+
+# ── next_dctech_events-a0i: per-address rate limit, no CSRF token ───
+
+def _htmx_signup(email):
+    return app.route_signup({
+        "headers": {"Content-Type": "application/x-www-form-urlencoded",
+                    "HX-Request": "true"},
+        "body": _form_body(email=email, newsletters="dctech"),
+    })
+
+
+def test_a_second_signup_within_the_cooldown_is_refused_without_sending():
+    assert _signup("new@example.com")["statusCode"] == 200
+    resp = _signup("new@example.com")
+    assert resp["statusCode"] == 429
+    assert "just sent" in resp["body"]
+    assert len(app.ses.sent) == 1
+
+
+def test_the_limit_is_per_address():
+    _signup("one@example.com")
+    assert _signup("two@example.com")["statusCode"] == 200
+    assert len(app.ses.sent) == 2
+
+
+def test_the_limit_is_shared_with_submit_links():
+    # Same MAGICLINK#<email> counter /api/submit-link consumes: one
+    # allowance per inbox across every kind of link this site emails.
+    db.check_and_record_link_request("shared@example.com")
+    assert _signup("shared@example.com")["statusCode"] == 429
+    assert app.ses.sent == []
+
+
+def test_rate_limited_response_does_not_reveal_subscription_status():
+    app.ses.contacts["member@example.com"] = list(OPT_IN)
+    db.check_and_record_link_request("member@example.com")
+    db.check_and_record_link_request("stranger@example.com")
+    member, stranger = _signup("member@example.com"), _signup("stranger@example.com")
+    assert member["statusCode"] == stranger["statusCode"] == 429
+    assert member["body"] == stranger["body"]
+
+
+def test_htmx_errors_come_back_as_200_with_the_form_and_the_email_kept():
+    # htmx won't swap a 4xx in, so the user would see nothing; and the
+    # swap replaces the form, so it has to come back with the message.
+    _htmx_signup("new@example.com")
+    resp = _htmx_signup("new@example.com")
+    assert resp["statusCode"] == 200
+    assert 'id="signup-form"' in resp["body"]
+    assert 'role="alert"' in resp["body"] and "just sent" in resp["body"]
+    assert 'value="new@example.com"' in resp["body"]
+    assert len(app.ses.sent) == 1
+
+
+def test_htmx_invalid_address_also_keeps_the_form():
+    resp = _htmx_signup("not-an-email")
+    assert resp["statusCode"] == 200
+    assert 'id="signup-form"' in resp["body"]
+    assert "valid email" in resp["body"]
+
+
+def test_the_form_carries_no_csrf_token():
+    for headers in ({}, {"HX-Request": "true"}):
+        body = app.route_index({"headers": headers})["body"]
+        assert "csrf_token" not in body and "temp_id" not in body
+    assert not hasattr(app, "secrets")  # no Secrets Manager client at all

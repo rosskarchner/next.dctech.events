@@ -4,10 +4,11 @@
    manage-preferences link. Inline styles because this partial is also
    swapped into the homepage's #subscribe box via htmx, without base.html. #}
 <form id="signup-form" hx-post="{{ base_path }}/signup" hx-swap="outerHTML">
-    <input type="email" name="email" placeholder="Enter your email" required autocomplete="email">
+    {% if error %}
+    <div class="error-message" role="alert" style="margin: 0 0 0.75rem 0; padding: 0.75rem 1rem; border-radius: 0.5rem; border-left: 4px solid #c0392b; background: #f8d7da; color: #721c24;">{{ error }}</div>
+    {% endif %}
+    <input type="email" name="email" placeholder="Enter your email" required autocomplete="email" value="{{ email or '' }}">
     <input type="hidden" name="newsletters" value="dctech">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="temp_id" value="{{ temp_id }}">
     <button type="submit">Continue</button>
     <p style="margin: 0.5rem 0 0 0; font-size: 0.9em; color: #666;">New here? We'll email you a link to confirm and pick the topics and areas you want. Already subscribed? We'll email you a link to change them.</p>
 </form>
