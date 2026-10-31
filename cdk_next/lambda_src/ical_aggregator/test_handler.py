@@ -130,3 +130,77 @@ def test_category_rules_set_stored_categories(fake_db, monkeypatch):
     handler._persist_group(group, [EVENT, anime])
 
     assert [p["categories"] for p in fake_db["puts"]] == [["quantum"], ["social"]]
+
+
+# ── Today's events stay all day even after the feed drops them ──────
+
+TODAY = "2026-10-31"
+
+
+def _ev(title, date, time="10:00", **kw):
+    return {"title": title, "date": date, "time": time,
+            "url": f"https://www.meetup.com/g/events/{title}/", "location": "DC",
+            "location_type": "physical", **kw}
+
+
+@pytest.fixture
+def cache_db(monkeypatch, tmp_path):
+    state = {"cache": None, "written": None, "puts": []}
+    monkeypatch.setattr(handler, "ICAL_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(handler, "_local_today", lambda: TODAY)
+    monkeypatch.setattr(handler.db, "get_ical_cache", lambda gid: state["cache"])
+    monkeypatch.setattr(handler.db, "put_ical_cache",
+                        lambda gid, events, meta: state.update(written=events))
+    monkeypatch.setattr(handler.db, "get_event_from_config", lambda guid: None)
+    monkeypatch.setattr(handler.db, "put_event",
+                        lambda guid, data, **kw: state["puts"].append(data["title"]))
+    return state
+
+
+def test_an_event_from_today_missing_from_the_feed_is_carried_and_not_pruned(cache_db):
+    morning, evening = _ev("Morning", TODAY), _ev("Evening", TODAY, "19:00")
+    cache_db["cache"] = {"events": [morning, evening]}
+    fresh, _ = handler._persist_group(GROUP, [evening])  # feed dropped Morning
+    assert [e["title"] for e in cache_db["written"]] == ["Evening", "Morning"]
+    assert handler._event_key(morning) in fresh  # so _prune_stale_ical_events keeps it
+
+
+def test_a_future_event_missing_from_the_feed_is_still_dropped(cache_db):
+    gone = _ev("Cancelled", "2026-11-05")
+    cache_db["cache"] = {"events": [gone]}
+    fresh, _ = handler._persist_group(GROUP, [])
+    assert cache_db["written"] == []
+    assert handler._event_key(gone) not in fresh
+
+
+def test_a_multiday_event_under_way_is_carried(cache_db):
+    conf = _ev("Conference", "2026-10-30", "", end_date="2026-11-01")
+    cache_db["cache"] = {"events": [conf]}
+    fresh, _ = handler._persist_group(GROUP, [])
+    assert cache_db["written"] is None  # carried as-is: the cache is unchanged
+    assert handler._event_key(conf) in fresh
+
+
+def test_yesterdays_event_is_not_carried(cache_db):
+    cache_db["cache"] = {"events": [_ev("Yesterday", "2026-10-30")]}
+    handler._persist_group(GROUP, [])
+    assert cache_db["written"] == []
+
+
+def test_an_event_still_in_the_feed_is_not_duplicated(cache_db):
+    ev = _ev("Morning", TODAY)
+    cache_db["cache"] = {"events": [ev]}
+    handler._persist_group(GROUP, [ev])
+    assert cache_db["written"] is None  # unchanged cache: no write at all
+
+
+def test_local_today_is_eastern_not_utc(monkeypatch):
+    # 01:00 UTC on Nov 1 is still Oct 31 in DC.
+    from datetime import datetime as real_dt, timezone
+
+    class FixedNow(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return real_dt(2026, 11, 1, 1, 0, tzinfo=timezone.utc).astimezone(tz)
+    monkeypatch.setattr(handler, "datetime", FixedNow)
+    assert handler._local_today() == "2026-10-31"

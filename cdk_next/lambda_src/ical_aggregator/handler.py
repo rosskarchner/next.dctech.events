@@ -13,7 +13,7 @@ so Meetup pages aren't refetched on every 4-hour run.
 import json
 import os
 import shutil
-from datetime import date as date_type
+from datetime import datetime
 
 SITE_DIR = '/tmp/calgen-site'  # nosec - Lambda scratch space
 
@@ -28,9 +28,9 @@ if not os.path.exists(os.path.join(SITE_DIR, 'config.yaml')):
 os.environ['CALGEN_SITE_DIR'] = SITE_DIR
 os.chdir(SITE_DIR)
 
-from calgen.calendars import fetch_ical_and_extract_events  # noqa: E402
+from calgen.calendars import fetch_ical_and_extract_events, local_tz  # noqa: E402
 from calgen.event_utils import (calculate_event_hash, event_categories,  # noqa: E402
-                                matches_skip_phrases)
+                                event_last_day, matches_skip_phrases)
 
 import db  # noqa: E402
 
@@ -93,6 +93,34 @@ def _persist_jsonld_cache():
     })
 
 
+def _local_today():
+    """Today in the site's timezone. Lambda runs in UTC, so date.today()
+    turns over at 8 pm Eastern."""
+    return datetime.now(local_tz).date().isoformat()
+
+
+def _event_key(ev):
+    return calculate_event_hash(ev.get('date', ''), ev.get('time', ''),
+                                ev.get('title', ''), ev.get('url'))
+
+
+def _carry_forward_today(fresh, previous, today):
+    """Events from the previous fetch that are under way today but missing
+    from this one, so they stay listed for the rest of the day.
+
+    Feeds drop an event once it ends (Meetup does), and the site builds iCal
+    events from this cache, so without this a morning meetup vanished at the
+    first run after it finished. Only today's events are carried: one
+    missing from a future date is a real cancellation or reschedule and
+    must still drop out (and be pruned). The cost is that an event
+    cancelled on the day stays listed until midnight.
+    """
+    fresh_keys = {_event_key(ev) for ev in fresh}
+    return [ev for ev in (previous or [])
+            if ev.get('date') and ev['date'] <= today <= event_last_day(ev)
+            and _event_key(ev) not in fresh_keys]
+
+
 def _persist_group(group, events):
     """Write the group's fresh cache + materialized EVENT# items; prune stale ones."""
     gid = group['id']
@@ -110,19 +138,21 @@ def _persist_group(group, events):
     # means the next run re-fetches — the run cadence already matches
     # calgen's 4-hour throttle, so nothing is lost.
     writes = 0
+    today = _local_today()
     existing_cache = db.get_ical_cache(gid)
+    events = list(events) + _carry_forward_today(
+        events, (existing_cache or {}).get('events'), today)
     if existing_cache is None or existing_cache.get('events') != events:
         db.put_ical_cache(gid, events, meta)
         writes += 1
 
-    today = date_type.today().isoformat()
     suppress = group.get('suppress_urls') or []
     if isinstance(suppress, bool):
         suppress = []
 
     fresh_guids = set()
     for ev in events:
-        if not ev.get('date') or ev['date'] < today:
+        if not ev.get('date') or event_last_day(ev) < today:
             continue
         if ev.get('url', '') in suppress:
             continue

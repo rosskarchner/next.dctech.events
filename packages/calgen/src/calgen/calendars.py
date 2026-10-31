@@ -193,39 +193,54 @@ def fetch_ical_and_extract_events(url, group_id, group=None):
         if group_name is None:
             group_name = str(cal.get('x-wr-calname', '')) or None
 
-        start_dt = datetime.now(timezone.utc)
+        # The window opens at local midnight today, not "now": an event stays
+        # in the cache for the whole of its day, even after it has started or
+        # ended. Comparing starts to "now" made every event drop out of the
+        # cache at the first aggregator run after it began, and the aggregator
+        # then deleted it as if cancelled (next_dctech_events-ax3 follow-up).
+        today_local = datetime.now(local_tz).date()
+        start_dt = local_tz.localize(
+            datetime.combine(today_local, datetime.min.time())).astimezone(timezone.utc)
         end_dt = start_dt + timedelta(days=HORIZON_DAYS)
 
         events = []
 
         def _append_event_data(event):
             dtstart = event.get('dtstart').dt
+            dtend = event.get('dtend')
+            dtend = dtend.dt if dtend else None
+            end_date_str = ''
+            end_time_str = ''
             if isinstance(dtstart, datetime):
                 dtstart_utc = dtstart.astimezone(timezone.utc)
-                if dtstart_utc < start_dt or dtstart_utc > end_dt:
+                # Judged by when it ends, so an event under way since an
+                # earlier day (a multi-day conference) is kept too.
+                last_utc = (dtend.astimezone(timezone.utc)
+                            if isinstance(dtend, datetime) else dtstart_utc)
+                if last_utc < start_dt or dtstart_utc > end_dt:
                     return
                 dt_local = dtstart.astimezone(local_tz)
                 date_str = dt_local.strftime('%Y-%m-%d')
                 time_str = dt_local.strftime('%H:%M')
                 if time_str == '00:00':
                     time_str = ''
-            else:
-                if dtstart < start_dt.date() or dtstart > end_dt.date():
-                    return
-                date_str = dtstart.strftime('%Y-%m-%d')
-                time_str = ''
-
-            dtend = event.get('dtend')
-            end_date_str = ''
-            end_time_str = ''
-            if dtend:
-                dtend = dtend.dt
                 if isinstance(dtend, datetime):
                     dt_end_local = dtend.astimezone(local_tz)
                     end_date_str = dt_end_local.strftime('%Y-%m-%d')
                     end_time_str = dt_end_local.strftime('%H:%M')
-                else:
-                    end_date_str = dtend.strftime('%Y-%m-%d')
+            else:
+                # All-day: DTEND is exclusive (RFC 5545), so a one-day event
+                # on the 30th ends "the 31st". Store its real last day, or
+                # it would show as continuing onto the next day.
+                last_day = dtstart
+                if dtend is not None and not isinstance(dtend, datetime) and dtend > dtstart:
+                    last_day = dtend - timedelta(days=1)
+                if last_day < today_local or dtstart > end_dt.date():
+                    return
+                date_str = dtstart.strftime('%Y-%m-%d')
+                time_str = ''
+                if last_day > dtstart:
+                    end_date_str = last_day.strftime('%Y-%m-%d')
 
             title = _normalize_title(str(event.get('summary', 'Untitled Event')))
             if ical_says_cancelled(event):
