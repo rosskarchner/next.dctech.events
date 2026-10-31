@@ -65,7 +65,8 @@ if [ -d lambda_src/newsletter ] && [ -e lambda_src/newsletter/app.py ]; then
   # Tests live next to the handlers; they have no business in the bundle.
   rm -rf build/newsletter/test_*.py build/newsletter/__pycache__
   # magic_link.py: sender.py signs each subscriber's preferences link with
-  # it (purpose='prefs'); db.py: both sender.py (reads preferences) and
+  # it (purpose='prefs'), and app.py's /signup does the same for an address
+  # that's already subscribed; db.py: both sender.py (reads preferences) and
   # app.py (writes them on confirm) need it now.
   cp lambda_src/api/db.py lambda_src/api/constants.py lambda_src/api/magic_link.py build/newsletter/
   # render.py rebuilds the calgen site in /tmp from DynamoDB

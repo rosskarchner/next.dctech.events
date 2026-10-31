@@ -163,16 +163,21 @@ def verify_token(email, timestamp, signature, purpose='submit', ttl_seconds=None
     return True, None
 
 
-def build_link(email, timestamp, signature, path='/edit/submit-event.html'):
+def build_link(email, timestamp, signature, path='/edit/submit-event.html',
+               base_url=None):
     """The URL emailed to a submitter.
 
     `path` may already carry its own query string (e.g. a correction link's
     `?guid=...`), so the token params are appended with `&` in that case
     rather than always starting a fresh `?`.
+
+    `base_url` overrides the BASE_URL env var for callers whose own
+    BASE_URL points somewhere else — the newsletter signup Lambda's is
+    `<site>/newsletter`, but a preferences link belongs on the site root.
     """
     separator = '&' if '?' in path else '?'
     return (
-        f"{BASE_URL}{path}"
+        f"{base_url or BASE_URL}{path}"
         f"{separator}e={_b64(normalize_email(email).encode())}"
         f"&t={timestamp}"
         f"&s={signature}"

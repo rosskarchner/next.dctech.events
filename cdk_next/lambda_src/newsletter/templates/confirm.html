@@ -8,8 +8,32 @@
     <input type="hidden" name="timestamp" value="{{ timestamp }}">
     <input type="hidden" name="signature" value="{{ signature }}">
     <input type="hidden" name="newsletters" value="{{ newsletters }}">
-    <input type="hidden" name="categories" value="{{ categories }}">
-    <input type="hidden" name="regions" value="{{ regions }}">
+
+    {% if all_categories or all_regions %}
+    <h2 style="font-size: 1.1em; margin: 1.25rem 0 0.25rem 0;">Choose what you get (optional)</h2>
+    <p style="margin: 0 0 0.75rem 0; font-size: 0.9em; color: #666;">Leave everything unchecked to get every event. You can change this later from the link at the bottom of any newsletter.</p>
+
+    {% if all_regions %}
+    <fieldset style="border: 0; margin: 0 0 0.75rem 0; padding: 0;">
+        <legend style="font-weight: 600; margin-bottom: 0.35rem;">Only interested in certain areas?</legend>
+        {% for slug, region in all_regions.items() %}
+        <label style="display: inline-block; margin: 0 1rem 0.35rem 0;"><input type="checkbox" name="regions" value="{{ slug }}"{% if slug in selected_regions %} checked{% endif %}> {{ region.name }}</label>
+        {% endfor %}
+    </fieldset>
+    {% endif %}
+
+    {% if all_categories %}
+    <fieldset style="border: 0; margin: 0 0 1rem 0; padding: 0;">
+        <legend style="font-weight: 600; margin-bottom: 0.35rem;">Only interested in certain topics?</legend>
+        <div style="columns: 2; column-gap: 1.5rem;">
+            {% for slug, category in all_categories.items()|sort(attribute='1.name') %}
+            <label style="display: block; margin-bottom: 0.35rem; break-inside: avoid;"><input type="checkbox" name="categories" value="{{ slug }}"{% if slug in selected_categories %} checked{% endif %}> {{ category.name }}</label>
+            {% endfor %}
+        </div>
+    </fieldset>
+    {% endif %}
+    {% endif %}
+
     <button type="submit">Yes! Sign me up!</button>
 </form>
 <p id="message"></p>

@@ -100,7 +100,6 @@ def _register_routes(app):
             'add_groups_link': cfg.get('add_groups_link', ''),
             'newsletter_signup_link': cfg.get('newsletter_signup_link', ''),
             'edit_home_link': cfg.get('edit_home_link', ''),
-            'newsletter_preferences_link': cfg.get('newsletter_preferences_link', ''),
             'sponsors': sponsors,
             # This week's sponsor for the header and newsletter, chosen in the
             # site's timezone so the Monday-morning build flips it on time.

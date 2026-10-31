@@ -5,15 +5,17 @@
   // no Cognito account involved. Unlike correction.js, there's no
   // logged-in-admin fallback here — a Cognito login isn't a newsletter
   // subscription, so the magic link is the only way in.
+  //
+  // Links are requested from /newsletter/, the single entry point for both
+  // subscribing and managing: it checks whether the address is subscribed
+  // and emails either a confirmation or a link back to this page. Arriving
+  // here without a token just forwards there.
 
-  const { setResponse, readMagicToken, stripTokenFromUrl, focusFirstField, requestLink: requestMagicLink } = DctechMagicLink;
+  const SIGNUP_PATH = '/newsletter/';
+  const { setResponse, readMagicToken, stripTokenFromUrl, focusFirstField } = DctechMagicLink;
 
   let magicToken = null;
   let selected = { categories: [], regions: [] };
-
-  function requestLink(event) {
-    return requestMagicLink(event, { extraBody: () => ({ redirect_path: '/edit/preferences.html' }) });
-  }
 
   function renderCheckboxes(containerId, name, items, selectedSlugs) {
     const container = document.getElementById(containerId);
@@ -100,9 +102,7 @@
   async function initPreferencesPage() {
     magicToken = readMagicToken();
     if (!magicToken) {
-      showLinkRequest();
-      const linkForm = document.getElementById('link-form');
-      if (linkForm) linkForm.addEventListener('submit', requestLink);
+      window.location.replace(SIGNUP_PATH);
       return;
     }
     stripTokenFromUrl();
@@ -113,8 +113,6 @@
     } catch (err) {
       setResponse(document.getElementById('form-response'), err.message, true);
       showLinkRequest();
-      const linkForm = document.getElementById('link-form');
-      if (linkForm) linkForm.addEventListener('submit', requestLink);
       return;
     }
 

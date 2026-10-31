@@ -121,7 +121,13 @@ class NextNewsletterStack(cdk.Stack):
             code=lambda_.Code.from_asset(os.path.join(BUILD_DIR, "newsletter")),
             timeout=cdk.Duration.seconds(30),
             memory_size=512,
-            environment=newsletter_env,
+            environment={
+                **newsletter_env,
+                # /signup emails an already-subscribed address a link to
+                # /edit/preferences.html on the site root; BASE_URL above
+                # is this function's own /newsletter mount.
+                "SITE_URL": config.BASE_URL,
+            },
             log_group=logs.LogGroup(
                 self,
                 "NextNewsletterSignupLogGroup",
@@ -134,6 +140,11 @@ class NextNewsletterStack(cdk.Stack):
         # Writes subscriber category/region preferences (db.put_subscriber_preferences)
         # on confirm — this Lambda touched no DynamoDB at all before that.
         table.grant_read_write_data(self.signup_function)
+        # /signup is the single subscribe-or-manage entry point: for an
+        # address already on the list it emails a purpose='prefs' link
+        # instead of a confirmation, so it generates (never verifies) those.
+        # Its role is also named in the key's resource policy below.
+        self.prefs_key.grant(self.signup_function, "kms:GenerateMac")
 
         # 2. Weekly sender — same schedule as production
         self.sender_function = lambda_.Function(
@@ -184,9 +195,14 @@ class NextNewsletterStack(cdk.Stack):
         # identities.
         self.prefs_key.add_to_resource_policy(
             iam.PolicyStatement(
-                sid="RestrictMacGenerationToNewsletterSenderRole",
+                sid="RestrictMacGenerationToNewsletterRoles",
                 effect=iam.Effect.ALLOW,
-                principals=[iam.ArnPrincipal(self.sender_function.role.role_arn)],
+                # Both generators live in this stack, so naming the signup
+                # role here creates no cross-stack reference.
+                principals=[
+                    iam.ArnPrincipal(self.sender_function.role.role_arn),
+                    iam.ArnPrincipal(self.signup_function.role.role_arn),
+                ],
                 actions=["kms:GenerateMac"],
                 resources=["*"],
             )

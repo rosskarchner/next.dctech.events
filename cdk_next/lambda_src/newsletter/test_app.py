@@ -22,6 +22,8 @@ os.environ.setdefault("CONFIRMATION_KEY_ID", "test-confirmation-key")
 os.environ.setdefault("CONTACT_LIST_NAME", "test-list")
 os.environ.setdefault("TOPIC_NAME", "dctech")
 os.environ.setdefault("BASE_URL", "https://dctech.events/newsletter")
+os.environ.setdefault("PATH_PREFIX", "/newsletter")
+os.environ.setdefault("PREFS_KEY_ID", "test-prefs-key")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api'))
 
@@ -41,13 +43,17 @@ class FakeKms:
 
 
 class FakeSes:
-    def __init__(self):
-        self.contacts = {}
-        self.sent = []
-
     class exceptions:
         class AlreadyExistsException(Exception):
             pass
+
+        class NotFoundException(Exception):
+            pass
+
+    def __init__(self):
+        self.contacts = {}
+        self.unsubscribe_all = {}
+        self.sent = []
 
     def create_contact(self, ContactListName, EmailAddress, TopicPreferences):
         if EmailAddress in self.contacts:
@@ -55,10 +61,16 @@ class FakeSes:
         self.contacts[EmailAddress] = TopicPreferences
 
     def get_contact(self, ContactListName, EmailAddress):
-        return {'TopicPreferences': self.contacts[EmailAddress]}
+        if EmailAddress not in self.contacts:
+            raise self.exceptions.NotFoundException()
+        return {'TopicPreferences': self.contacts[EmailAddress],
+                'UnsubscribeAll': self.unsubscribe_all.get(EmailAddress, False)}
 
-    def update_contact(self, ContactListName, EmailAddress, TopicPreferences):
+    def update_contact(self, ContactListName, EmailAddress, TopicPreferences,
+                       UnsubscribeAll=None):
         self.contacts[EmailAddress] = TopicPreferences
+        if UnsubscribeAll is not None:
+            self.unsubscribe_all[EmailAddress] = UnsubscribeAll
 
     def send_email(self, **kwargs):
         self.sent.append(kwargs)
@@ -83,6 +95,7 @@ class FakeTable:
 @pytest.fixture(autouse=True)
 def fake_backends(monkeypatch):
     monkeypatch.setattr(app, "kms", FakeKms())
+    monkeypatch.setattr(app.magic_link, "kms", FakeKms())
     monkeypatch.setattr(app, "ses", FakeSes())
     # One shared FakeTable instance per test, not a fresh one per
     # _get_table() call — a preferences write in route_confirm_post must
@@ -196,3 +209,126 @@ def test_an_invalid_signature_writes_nothing_and_refuses(monkeypatch):
     resp = app.route_confirm_post({"body": _form_body(**tampered)})
     assert resp["statusCode"] == 400
     assert db.get_subscriber_preferences("user2@example.com") is None
+
+
+# ── route_signup: one entry point for subscribe and manage ──────────
+
+OPT_IN = [{"TopicName": "dctech", "SubscriptionStatus": "OPT_IN"}]
+OPT_OUT = [{"TopicName": "dctech", "SubscriptionStatus": "OPT_OUT"}]
+
+
+def _signup(email):
+    return app.route_signup({
+        "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+        "body": _form_body(email=email, newsletters="dctech"),
+    })
+
+
+def _only_sent():
+    assert len(app.ses.sent) == 1
+    return app.ses.sent[0]
+
+
+def _subject(msg):
+    return msg["Content"]["Simple"]["Subject"]["Data"]
+
+
+def test_a_new_address_gets_a_confirmation_email():
+    resp = _signup("new@example.com")
+    assert resp["statusCode"] == 200
+    msg = _only_sent()
+    assert "Confirm your subscription" in _subject(msg)
+    assert "/newsletter/confirm/" in msg["Content"]["Simple"]["Body"]["Html"]["Data"]
+
+
+def test_a_subscribed_address_gets_a_manage_link_instead():
+    app.ses.contacts["member@example.com"] = list(OPT_IN)
+    resp = _signup("member@example.com")
+    assert resp["statusCode"] == 200
+    msg = _only_sent()
+    assert "Manage your" in _subject(msg)
+    text = msg["Content"]["Simple"]["Body"]["Text"]["Data"]
+    link = next(w for w in text.split() if w.startswith("https://"))
+    # Site root, not the /newsletter mount this Lambda lives under.
+    assert link.startswith("https://dctech.events/edit/preferences.html?")
+    q = parse_qs(urlparse(link).query)
+    ok, reason = app.magic_link.verify_token(
+        app.magic_link.decode_email_param(q["e"][0]), q["t"][0], q["s"][0],
+        purpose="prefs")
+    assert ok, reason
+
+
+def test_signup_normalizes_the_address_before_looking_it_up():
+    app.ses.contacts["member@example.com"] = list(OPT_IN)
+    _signup("  Member@Example.com ")
+    assert "Manage your" in _subject(_only_sent())
+
+
+def test_an_opted_out_address_gets_a_confirmation_not_a_manage_link():
+    app.ses.contacts["former@example.com"] = list(OPT_OUT)
+    _signup("former@example.com")
+    assert "Confirm your subscription" in _subject(_only_sent())
+
+
+def test_unsubscribe_all_counts_as_not_subscribed():
+    app.ses.contacts["gone@example.com"] = list(OPT_IN)
+    app.ses.unsubscribe_all["gone@example.com"] = True
+    _signup("gone@example.com")
+    assert "Confirm your subscription" in _subject(_only_sent())
+
+
+def test_both_branches_return_the_same_response():
+    app.ses.contacts["member@example.com"] = list(OPT_IN)
+    subscribed = _signup("member@example.com")
+    new = _signup("new@example.com")
+    assert subscribed["statusCode"] == new["statusCode"]
+    assert subscribed["body"] == new["body"]
+
+
+def test_an_invalid_address_is_refused_without_sending():
+    resp = _signup("not-an-email")
+    assert resp["statusCode"] == 400
+    assert app.ses.sent == []
+
+
+# ── confirm page: preferences are chosen here now ───────────────────
+
+def _confirm_link_parts(email, query=None):
+    url = app.generate_confirmation_url(email, **(query or {}))
+    path, _, qs = url.partition("?")
+    _, _, enc_email, enc_ts, sig = path.split("/")
+    params = {k: v[0] for k, v in parse_qs(qs).items()}
+    return {"queryStringParameters": params}, enc_email, enc_ts, sig
+
+
+def test_confirm_page_shows_checkboxes_with_carried_selections_checked():
+    event, e, t, s = _confirm_link_parts(
+        "user@example.com", {"categories": ["ai"], "regions": ["va"]})
+    body = app.route_confirm_link(event, e, t, s)["body"]
+    assert 'name="categories" value="ai" checked' in body
+    assert 'name="categories" value="cloud">' in body
+    assert 'name="regions" value="va" checked' in body
+    assert 'name="regions" value="dc">' in body
+
+
+def test_confirming_with_repeated_checkbox_fields_saves_them():
+    ts = int(time.time())
+    sig = app.generate_confirmation_signature("user@example.com", ts, ["dctech"])
+    from urllib.parse import urlencode
+    body = urlencode([("email", "user@example.com"), ("timestamp", str(ts)),
+                      ("signature", sig), ("newsletters", "dctech"),
+                      ("categories", "ai"), ("categories", "cloud"),
+                      ("regions", "md")])
+    resp = app.route_confirm_post({"body": body})
+    assert resp["statusCode"] == 303
+    saved = db.get_subscriber_preferences("user@example.com")
+    assert saved["categories"] == ["ai", "cloud"]
+    assert saved["regions"] == ["md"]
+
+
+def test_reconfirming_clears_unsubscribe_all():
+    app.ses.contacts["back@example.com"] = list(OPT_OUT)
+    app.ses.unsubscribe_all["back@example.com"] = True
+    app.route_confirm_post(_confirm_event("back@example.com"))
+    assert app.ses.unsubscribe_all["back@example.com"] is False
+    assert app._is_subscribed("back@example.com")

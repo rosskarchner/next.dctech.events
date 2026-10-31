@@ -18,6 +18,7 @@ import boto3
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import db
+import magic_link
 from constants import FROM_EMAIL, REPLY_TO_EMAIL, CONTACT_LIST_NAME
 
 env = Environment(
@@ -36,7 +37,18 @@ BASE_URL = os.environ.get('BASE_URL', '')  # public URL of this API, no trailing
 # When served through the CloudFront /newsletter* behavior, API Gateway sees
 # paths that still carry this prefix; strip it before routing.
 PATH_PREFIX = os.environ.get('PATH_PREFIX', '').rstrip('/')
+# The public site root, where /edit/preferences.html lives. BASE_URL above
+# is this Lambda's own /newsletter mount, which is the wrong place for a
+# preferences link.
+SITE_URL = os.environ.get('SITE_URL', '').rstrip('/')
+PREFERENCES_PATH = '/edit/preferences.html'
 CSRF_SECRET = None
+
+# One message for both branches of route_signup, so the response never
+# reveals whether an address is already on the list.
+SIGNUP_SENT_MESSAGE = ('Check your email (and maybe your junk folder!) for a '
+                       'link to confirm your subscription or manage your '
+                       'preferences.')
 
 # The one newsletter this stack serves, on the long-standing SES contact
 # list and topic so existing subscribers carry over.
@@ -228,6 +240,69 @@ def _parse_form(event):
     return parse_qs(body)
 
 
+# ─── Subscribe-or-manage branching ────────────────────────────────
+
+def _site_url():
+    if SITE_URL:
+        return SITE_URL
+    if PATH_PREFIX and BASE_URL.endswith(PATH_PREFIX):
+        return BASE_URL[:-len(PATH_PREFIX)]
+    return BASE_URL
+
+
+def _is_subscribed(email):
+    """True only if the address is on the contact list, opted in to our
+    topic, and not globally unsubscribed — the same test sender.py uses to
+    decide who gets mail, plus UnsubscribeAll.
+
+    Any lookup failure (NotFoundException for a new address, or a transient
+    SES error) counts as not subscribed: the fallback is a double-opt-in
+    confirmation email, which is harmless to send to someone who turns out
+    to be subscribed already.
+    """
+    newsletter = NEWSLETTERS[DEFAULT_NEWSLETTERS[0]]
+    try:
+        contact = ses.get_contact(
+            ContactListName=newsletter['contact_list_name'], EmailAddress=email)
+    except Exception as e:
+        if type(e).__name__ != 'NotFoundException':
+            print(f"get_contact failed, treating as not subscribed: {e}")
+        return False
+    if contact.get('UnsubscribeAll'):
+        return False
+    return any(
+        pref.get('TopicName') == newsletter['topic_name']
+        and pref.get('SubscriptionStatus') == 'OPT_IN'
+        for pref in contact.get('TopicPreferences', [])
+    )
+
+
+def _send_manage_link(email):
+    timestamp, signature = magic_link.generate_token(email, purpose='prefs')
+    link = magic_link.build_link(email, timestamp, signature,
+                                 path=PREFERENCES_PATH, base_url=_site_url())
+    days = magic_link.ttl_seconds_for('prefs') // 86400
+    ses.send_email(
+        FromEmailAddress=FROM_EMAIL,
+        ReplyToAddresses=[REPLY_TO_EMAIL],
+        Destination={'ToAddresses': [email]},
+        Content={'Simple': {
+            'Subject': {'Data': 'Manage your DC Tech Events newsletter subscription'},
+            'Body': {
+                'Html': {'Data': _render('manage_email.html', link=link, days=days)},
+                'Text': {'Data': (
+                    "You're already subscribed to the DC Tech Events "
+                    "newsletter. Use this link to choose which topics and "
+                    f"areas you hear about:\n\n{link}\n\n"
+                    f"The link works for the next {days} days. If you did "
+                    "not request it, you can ignore this email; nothing "
+                    "was changed.\n"
+                )},
+            },
+        }},
+    )
+
+
 # ─── Routes ───────────────────────────────────────────────────────
 
 def route_index(event):
@@ -270,8 +345,14 @@ def route_signup(event):
     categories = _clean_slugs(categories, set(db.get_all_categories().keys()))
     regions = _clean_slugs(regions, set(REGIONS.keys()))
 
+    email = magic_link.normalize_email(email)
     if not email:
         error_msg = 'Email is required'
+        if is_htmx:
+            return _html(_render('partials/error.html', error=error_msg), 400)
+        return _json({'error': error_msg}, 400)
+    if not magic_link.is_valid_email(email):
+        error_msg = 'Please enter a valid email address'
         if is_htmx:
             return _html(_render('partials/error.html', error=error_msg), 400)
         return _json({'error': error_msg}, 400)
@@ -284,29 +365,36 @@ def route_signup(event):
         return _json({'error': error_msg}, 400)
 
     try:
-        if not CONFIRMATION_KEY_ID:
-            raise ValueError('Missing CONFIRMATION_KEY_ID configuration')
+        # One entry point for both "subscribe" and "manage": someone already
+        # on the list gets a preferences link, everyone else (new, or
+        # previously unsubscribed) gets the double-opt-in confirmation,
+        # where they choose categories/regions. The response is identical
+        # either way.
+        if _is_subscribed(email):
+            _send_manage_link(email)
+        else:
+            if not CONFIRMATION_KEY_ID:
+                raise ValueError('Missing CONFIRMATION_KEY_ID configuration')
 
-        confirmation_url = generate_confirmation_url(
-            email, newsletters, categories=categories, regions=regions)
-        full_confirmation_url = f"{BASE_URL}{confirmation_url}"
+            confirmation_url = generate_confirmation_url(
+                email, newsletters, categories=categories, regions=regions)
+            full_confirmation_url = f"{BASE_URL}{confirmation_url}"
 
-        html_content = _render('confirmation_email.html',
-                               confirmation_url=full_confirmation_url)
-        ses.send_email(
-            FromEmailAddress=FROM_EMAIL,
-            ReplyToAddresses=[REPLY_TO_EMAIL],
-            Destination={'ToAddresses': [email]},
-            Content={
-                'Simple': {
-                    'Subject': {'Data': 'Confirm your subscription to DCTech Events Newsletter'},
-                    'Body': {'Html': {'Data': html_content}},
-                }
-            },
-        )
+            html_content = _render('confirmation_email.html',
+                                   confirmation_url=full_confirmation_url)
+            ses.send_email(
+                FromEmailAddress=FROM_EMAIL,
+                ReplyToAddresses=[REPLY_TO_EMAIL],
+                Destination={'ToAddresses': [email]},
+                Content={
+                    'Simple': {
+                        'Subject': {'Data': 'Confirm your subscription to DCTech Events Newsletter'},
+                        'Body': {'Html': {'Data': html_content}},
+                    }
+                },
+            )
 
-        success_msg = ('Please check your email (and maybe your junk folder!) '
-                       'to confirm your subscription.')
+        success_msg = SIGNUP_SENT_MESSAGE
         if is_htmx:
             return _html(_render('partials/success.html', message=success_msg))
         return _json({'message': success_msg})
@@ -336,12 +424,12 @@ def route_confirm_link(event, encoded_email, encoded_timestamp, signature):
         if not verify_confirmation_signature(email, timestamp, signature, newsletters):
             return _html(_render('error.html', error='Invalid confirmation link'), 400)
 
-        # Unsigned, carried straight through to the confirm form's hidden
-        # fields — see generate_confirmation_url's own docstring for why
-        # that's fine here.
+        # Unsigned pre-selections for the confirm page's checkboxes — see
+        # generate_confirmation_url's own docstring for why that's fine.
+        all_categories = db.get_all_categories()
         categories = _clean_slugs(
             query_params.get('categories', '').split(','),
-            set(db.get_all_categories().keys()))
+            set(all_categories.keys()))
         regions = _clean_slugs(
             query_params.get('regions', '').split(','), set(REGIONS.keys()))
 
@@ -350,8 +438,10 @@ def route_confirm_link(event, encoded_email, encoded_timestamp, signature):
                              timestamp=timestamp,
                              signature=signature,
                              newsletters=','.join(newsletters),
-                             categories=','.join(categories),
-                             regions=','.join(regions)))
+                             all_categories=all_categories,
+                             all_regions=REGIONS,
+                             selected_categories=categories,
+                             selected_regions=regions))
     except Exception as e:
         print(f"Error in confirmation: {e}")
         return _html(_render('error.html', error='Invalid confirmation link'), 400)
@@ -365,8 +455,10 @@ def route_confirm_post(event):
         signature = data.get('signature', [''])[0]
         newsletters_str = data.get('newsletters', ['dctech'])[0]
         newsletters = [n.strip() for n in newsletters_str.split(',')]
-        categories_str = data.get('categories', [''])[0]
-        regions_str = data.get('regions', [''])[0]
+        # Checkboxes arrive as repeated fields; a comma-joined single value
+        # (the older hidden-field form) is still accepted.
+        categories_raw = [s for v in data.get('categories', []) for s in v.split(',')]
+        regions_raw = [s for v in data.get('regions', []) for s in v.split(',')]
 
         if not all([email, timestamp, signature]):
             return _html(_render('error.html', error='Invalid confirmation data'), 400)
@@ -408,19 +500,24 @@ def route_confirm_post(event):
                 if not topic_found:
                     existing_preferences.append({'TopicName': topic_name,
                                                  'SubscriptionStatus': 'OPT_IN'})
+                # UnsubscribeAll=False: a signed double-opt-in from someone
+                # who once hit "unsubscribe from all" is them asking back
+                # in. Left set, the topic OPT_IN above would change nothing
+                # and route_signup would keep sending them confirmations.
                 ses.update_contact(
                     ContactListName=contact_list_name,
                     EmailAddress=email,
                     TopicPreferences=existing_preferences,
+                    UnsubscribeAll=False,
                 )
 
-        # Re-validated here (not trusted from confirm.html's hidden fields
-        # as-is) the same way route_confirm_link validated them going out —
-        # a confirm POST is unsigned data riding alongside a signature that
-        # only ever covered email/newsletters/timestamp.
+        # Re-validated here (not trusted from the confirm form as-is) the
+        # same way route_confirm_link validated them going out — a confirm
+        # POST is unsigned data riding alongside a signature that only ever
+        # covered email/newsletters/timestamp.
         categories = _clean_slugs(
-            categories_str.split(','), set(db.get_all_categories().keys()))
-        regions = _clean_slugs(regions_str.split(','), set(REGIONS.keys()))
+            categories_raw, set(db.get_all_categories().keys()))
+        regions = _clean_slugs(regions_raw, set(REGIONS.keys()))
         if categories or regions:
             db.put_subscriber_preferences(email, categories, regions)
 
