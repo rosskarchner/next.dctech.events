@@ -285,14 +285,17 @@ def _maybe_subscribe(data, email):
 # so a malformed or unrecognized value costs nothing worse than falling back
 # to the default rather than erroring out the whole request.
 # path -> the magic-link purpose it should be issued for (magic_link.py's
-# generate_token/verify_token purpose param). Keeps a preferences-link
-# request from minting a token that could also be replayed as a submission
-# token, and vice versa.
+# generate_token/verify_token purpose param).
+#
+# /edit/preferences.html is deliberately absent: preferences links come only
+# from NextNewsletterStack (the weekly send, and /newsletter/ for an address
+# already subscribed). Issuing them here let anyone mint one for any address
+# and save filters the sender never reads. A request naming that path now
+# falls back to the default, a submission link.
 _LINK_REDIRECT_PATHS = {
     '/edit/submit-event.html': 'submit',
     '/edit/correct-event.html': 'submit',
     '/edit/submit-group.html': 'submit',
-    '/edit/preferences.html': 'prefs',
 }
 _DEFAULT_REDIRECT_PATH = '/edit/submit-event.html'
 _GUID_RE = re.compile(r'^[0-9a-f]{1,64}$')
@@ -336,25 +339,16 @@ def request_link_json(event, jinja_env):
 
     redirect_path, purpose = _sanitize_redirect_path(data.get('redirect_path'))
     is_correction = redirect_path.startswith('/edit/correct-event.html')
-    is_preferences = redirect_path.startswith('/edit/preferences.html')
     is_group = redirect_path.startswith('/edit/submit-group.html')
 
     try:
         timestamp, signature = magic_link.generate_token(email, purpose=purpose)
         link = magic_link.build_link(email, timestamp, signature, path=redirect_path)
         ttl = magic_link.ttl_seconds_for(purpose)
-        # Preferences links are valid for weeks, not hours — say so in
-        # whichever unit actually reads naturally.
         duration = (f'{ttl // 86400} days' if ttl >= 86400
                     else f'{ttl // 3600} hours')
 
-        if is_preferences:
-            subject = 'Your DC Tech Events preferences link'
-            action_verb = 'manage your DC Tech Events email preferences'
-            action_label = 'Manage preferences'
-            not_requested = 'nothing was changed'
-            response_thing = 'manage your preferences'
-        elif is_correction:
+        if is_correction:
             subject = 'Your DC Tech Events correction link'
             action_verb = 'suggest a correction to an event'
             action_label = 'Suggest a correction'

@@ -1,7 +1,8 @@
 """Subscriber category/region newsletter preferences.
 
-Reached via a unique, emailed magic link (see routes/submit.py's
-request_link_json, purpose='prefs') rather than a Cognito account — the
+Reached via a unique, emailed magic link (purpose='prefs', minted only by
+NextNewsletterStack: every weekly send, and /newsletter/ for an address
+already subscribed) rather than a Cognito account — the
 same account-free pattern as event submission/correction, since a
 newsletter subscriber never has one. Both routes are public at the API
 Gateway level; the Lambda does its own token verification.

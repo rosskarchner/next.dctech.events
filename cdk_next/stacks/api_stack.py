@@ -212,8 +212,8 @@ class NextApiStack(cdk.Stack):
             )
         )
 
-        # prefs_key: generates (for /api/submit-link's preferences-link
-        # request flow) and verifies (routes/preferences.py) here. No
+        # prefs_key: verified here (routes/preferences.py), never generated
+        # — preferences links are minted only in NextNewsletterStack. No
         # matching add_to_resource_policy() statement for api_function the
         # way submit_key gets one, on purpose: prefs_key is a resource
         # physically owned by NextNewsletterStack (constructed there), so
@@ -228,7 +228,7 @@ class NextApiStack(cdk.Stack):
         # needs. The one resource-policy restriction that *is* safe to add
         # lives in NextNewsletterStack instead, restricting sender_function
         # (same-stack as the key there, no cycle).
-        prefs_key.grant(self.api_function, "kms:GenerateMac", "kms:VerifyMac")
+        prefs_key.grant(self.api_function, "kms:VerifyMac")
 
         api = apigateway.RestApi(
             self,

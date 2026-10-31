@@ -73,13 +73,11 @@ def test_the_group_submission_form_is_allowed_with_the_submit_purpose():
         ('/edit/submit-group.html', 'submit')
 
 
-def test_the_preferences_page_is_allowed_with_the_prefs_purpose():
+def test_the_preferences_page_is_not_a_link_target():
+    # next_dctech_events-amz: preferences links come only from the newsletter
+    # stack, so this endpoint must never mint a prefs-purpose token. The
+    # path falls back to the default submission link instead.
     assert _sanitize_redirect_path('/edit/preferences.html') == \
-        ('/edit/preferences.html', 'prefs')
-
-
-def test_a_preferences_redirect_drops_any_query_params():
-    # Unlike the correction form, preferences.html has no accepted query
-    # param — anything appended is dropped, not treated as an invalid path.
+        ('/edit/submit-event.html', 'submit')
     assert _sanitize_redirect_path('/edit/preferences.html?categories=ai') == \
-        ('/edit/preferences.html', 'prefs')
+        ('/edit/submit-event.html', 'submit')
