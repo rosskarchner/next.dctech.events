@@ -249,12 +249,6 @@ header > div > .header-top {
     background: #fff;
 }
 
-@media (min-width: 768px) {
-    .pick-box {
-        margin-left: 100px;
-    }
-}
-
 .pick-head {
     display: flex;
     justify-content: space-between;
