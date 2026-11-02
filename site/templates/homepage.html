@@ -12,6 +12,7 @@
 <div class="home-container">
 
     <section class="events-section">
+        {% include "partials/highlight_box.html" %}
         {% with days=days[:2] %}
             {% include "partials/events_by_day.html" %}
         {% endwith %}

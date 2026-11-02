@@ -25,11 +25,12 @@
                                         {% set ns.icon_slug = cat_slug %}
                                     {% endif %}
                                 {% endfor %}
-                                <li class="h-event event{% if ns.icon_slug %} has-category-icon{% endif %}">
+                                <li class="h-event event{% if ns.icon_slug %} has-category-icon{% endif %}{% if event.highlight %} has-pick{% endif %}">
                                     {% if ns.icon_slug %}
                                         <img class="event-category-icon" src="/static/images/categories/{{ ns.icon_slug }}.png" width="64" height="64" loading="lazy" alt="{{ categories[ns.icon_slug].name if categories and ns.icon_slug in categories else ns.icon_slug }}">
                                     {% endif %}
                                     <a class="u-url p-name" href="{{ event.url }}" target="_blank" rel="noopener noreferrer">{{ event.title }}</a>{% if event.display_title != event.title %} <span class="p-summary">{{ event.display_title | replace(event.title, '') }}</span>{% endif %}{% if event.permalink %}<a class="event-permalink" href="{{ event.permalink }}" aria-label="Permalink to {{ event.title }} on {{ site_name }}" title="Permalink on {{ site_name }}">🔎</a>{% endif %}
+                                    {% if event.highlight %}<a class="pick-label pick-label-{{ 'editor' if event.highlight.kind == 'editor' else 'buyer' }}" href="/highlights/">{{ event.highlight.label }}</a>{% endif %}
                                     {% if event.is_recurring %}<span class="recurring-badge">🔄 Recurring</span><span class="recurring-note">Confirm date/time with the organizer</span>{% endif %}
                                     {# dt-start is the event's own start: on its start day with the
                                        visible time; otherwise (all-day, or a "continuing" day) a bare

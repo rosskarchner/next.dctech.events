@@ -8,6 +8,8 @@ import base64
 import json
 import traceback
 
+import highlights as hl
+import paypal
 import sponsorships as sp
 from db import check_and_record_write
 from routes.admin import _admin_check
@@ -97,7 +99,8 @@ def book_json(event, jinja_env):
 
 
 def ipn(event, jinja_env):
-    """POST /api/paypal/ipn — PayPal's server-to-server payment notice.
+    """POST /api/paypal/ipn — PayPal's server-to-server payment notice, for
+    sponsorships and highlights alike.
 
     Answers 200 regardless of outcome once the message has been handled;
     PayPal retries anything else for days, and none of our rejections (bad
@@ -109,7 +112,14 @@ def ipn(event, jinja_env):
         # latin-1 maps bytes 1:1, so the echo back to PayPal is byte-exact.
         raw = base64.b64decode(raw).decode('latin-1')
     try:
-        outcome = sp.handle_ipn(raw)
+        # One IPN endpoint for everything we sell: highlights tag their
+        # `custom` with `highlight|`; anything else is a sponsorship. The
+        # unverified custom only picks the handler — each one verifies the
+        # message with PayPal before trusting any of it.
+        if hl.is_highlight_custom(paypal.custom_of(raw)):
+            outcome = hl.handle_ipn(raw)
+        else:
+            outcome = sp.handle_ipn(raw)
     except Exception:
         print(f'IPN handling failed: {traceback.format_exc()}')
         return {'statusCode': 500, 'headers': {}, 'body': ''}

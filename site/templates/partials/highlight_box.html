@@ -1,0 +1,18 @@
+{# The Highlighted box: one line per highlighted event this page lists.
+   Rendered only when there is something in it — no empty card, no heading,
+   no "highlight your event" prompt. Class names stay neutral (pick-*), never
+   sponsor/promoted/paid/ad, which EasyList hides outright (see .masthead-note
+   in main.css). Titles link to the event's own page, not our /events/ copy. #}
+{% if highlights %}
+<aside class="pick-box" aria-labelledby="pick-box-title">
+    <div class="pick-head">
+        <h2 id="pick-box-title">Highlighted</h2>
+        <a class="pick-more" href="/highlights/">what's this?</a>
+    </div>
+    <ul class="pick-lines">
+    {% for h in highlights %}
+        <li class="pick-line"><span class="pick-when">{{ h.short_date }}{% if h.short_time %} {{ h.short_time }}{% endif %}</span> <a href="{{ h.url }}" target="_blank" rel="noopener noreferrer">{{ h.title }}</a> <a class="pick-label pick-label-{{ 'editor' if h.kind == 'editor' else 'buyer' }}" href="/highlights/">{{ h.label }}</a></li>
+    {% endfor %}
+    </ul>
+</aside>
+{% endif %}

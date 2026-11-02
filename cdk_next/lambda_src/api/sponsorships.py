@@ -37,25 +37,25 @@ import secrets
 import time
 import uuid
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
-from html import escape as html_escape
-from urllib.parse import parse_qsl, urlencode
-from urllib.request import Request, urlopen
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from botocore.exceptions import ClientError
 
 import db
+import paypal
+# Re-exported under their historical names: callers and tests reach them as
+# sponsorships.<name>, and the IPN path below must resolve them through this
+# module so a test can patch e.g. sponsorships._send.
+from paypal import (  # noqa: F401
+    ADMIN_EMAIL, BASE_URL, PAYPAL_RECEIVER_EMAIL, PAYPAL_SANDBOX,
+    paypal_form_url, verify_with_paypal,
+    iso_now as _iso_now, send as _send,
+)
 
 LOCAL_TZ = ZoneInfo('America/New_York')
 
 PRICE_USD = Decimal(os.environ.get('SPONSOR_WEEK_PRICE_USD', '0') or '0')
-PAYPAL_RECEIVER_EMAIL = os.environ.get('PAYPAL_RECEIVER_EMAIL', 'ross@karchner.com')
-PAYPAL_SANDBOX = os.environ.get('PAYPAL_SANDBOX', '') == '1'
-BASE_URL = os.environ.get('BASE_URL', 'https://dctech.events')
-ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'ross@karchner.com')
-FROM_EMAIL = os.environ.get('FROM_EMAIL', 'outbound@dctech.events')
-REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'ross@karchner.com')
 
 HORIZON_WEEKS = 26
 HOLD_SECONDS = 30 * 60
@@ -163,10 +163,6 @@ def _epoch(now=None):
     if isinstance(now, datetime):
         return int(now.timestamp())
     return int(now)
-
-
-def _iso_now():
-    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
 def _to_dict(item):
@@ -326,11 +322,6 @@ def create_hold(data, now=None):
     return _to_dict(item), paypal_fields(item)
 
 
-def paypal_form_url():
-    host = 'www.sandbox.paypal.com' if PAYPAL_SANDBOX else 'www.paypal.com'
-    return f'https://{host}/cgi-bin/webscr'
-
-
 def paypal_fields(booking, notify_url=None):
     """Fields for a PayPal Payments Standard "Buy Now" (_xclick) form.
 
@@ -339,25 +330,19 @@ def paypal_fields(booking, notify_url=None):
     re-booked by someone else.
     """
     monday = week_start(booking['week_id'])
-    fields = {
-        'cmd': '_xclick',
-        'business': PAYPAL_RECEIVER_EMAIL,
-        'item_name': (f'DC Tech Events sponsorship, week of '
-                      f'{monday.strftime("%b %-d, %Y")}'),
-        'item_number': booking['week_id'],
-        'amount': booking['price_usd'],
-        'currency_code': 'USD',
-        'no_shipping': '1',
-        'custom': f"{booking['week_id']}|{booking['booking_id']}",
-        'invoice': booking['booking_id'],
-        'return': (f'{BASE_URL}/edit/sponsor.html?status=returned'
-                   f"&week={booking['week_id']}"),
-        'cancel_return': (f'{BASE_URL}/edit/sponsor.html?status=cancelled'
-                          f"&week={booking['week_id']}"),
-    }
-    if notify_url:
-        fields['notify_url'] = notify_url
-    return fields
+    return paypal.buy_now_fields(
+        item_name=(f'DC Tech Events sponsorship, week of '
+                   f'{monday.strftime("%b %-d, %Y")}'),
+        item_number=booking['week_id'],
+        amount=booking['price_usd'],
+        custom=f"{booking['week_id']}|{booking['booking_id']}",
+        invoice=booking['booking_id'],
+        return_url=(f'{BASE_URL}/edit/sponsor.html?status=returned'
+                    f"&week={booking['week_id']}"),
+        cancel_url=(f'{BASE_URL}/edit/sponsor.html?status=cancelled'
+                    f"&week={booking['week_id']}"),
+        notify_url=notify_url,
+    )
 
 
 def redeem_coupon_booking(data, code, now=None):
@@ -630,28 +615,6 @@ def _release_coupon(booking):
 
 # ─── PayPal IPN ────────────────────────────────────────────────────
 
-def _ipn_verify_url():
-    host = 'ipnpb.sandbox.paypal.com' if PAYPAL_SANDBOX else 'ipnpb.paypal.com'
-    return f'https://{host}/cgi-bin/webscr'
-
-
-def verify_with_paypal(raw_body):
-    """Echo the message back to PayPal; only 'VERIFIED' means it came from them."""
-    req = Request(
-        _ipn_verify_url(),
-        data=b'cmd=_notify-validate&' + raw_body.encode('latin-1', 'replace'),
-        headers={'Content-Type': 'application/x-www-form-urlencoded',
-                 'User-Agent': 'dctech-events-ipn/1.0'},
-    )
-    with urlopen(req, timeout=15) as resp:
-        return resp.read().decode('utf-8', 'replace').strip() == 'VERIFIED'
-
-
-def _parse_ipn(raw_body):
-    return dict(parse_qsl(raw_body, keep_blank_values=True,
-                          encoding='latin-1'))
-
-
 def _parse_custom(custom):
     week_id, _, booking_id = str(custom or '').partition('|')
     if not week_start(week_id) or not booking_id:
@@ -661,24 +624,7 @@ def _parse_custom(custom):
 
 def _record_payment(week_id, params):
     """Store an IPN once. Returns False if this exact message was seen."""
-    txn_id = params.get('txn_id', '')
-    status = params.get('payment_status', '')
-    item = {
-        'PK': f'SPONSOR#{week_id}', 'SK': f'PAYMENT#{txn_id}#{status}',
-        'received_at': _iso_now(),
-        **{k: params.get(k, '') for k in (
-            'txn_id', 'parent_txn_id', 'payment_status', 'mc_gross',
-            'mc_currency', 'receiver_email', 'payer_email', 'custom',
-            'pending_reason', 'reason_code')},
-    }
-    try:
-        db._get_table().put_item(Item=item,
-                                 ConditionExpression='attribute_not_exists(PK)')
-    except ClientError as exc:
-        if exc.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            return False
-        raise
-    return True
+    return paypal.record_payment(f'SPONSOR#{week_id}', params)
 
 
 def handle_ipn(raw_body, verify=None):
@@ -693,7 +639,7 @@ def handle_ipn(raw_body, verify=None):
         print('IPN failed verification')
         return 'invalid'
 
-    params = _parse_ipn(raw_body)
+    params = paypal.parse_ipn(raw_body)
     txn_id = params.get('txn_id')
     status = params.get('payment_status', '')
     week_id, booking_id = _parse_custom(params.get('custom'))
@@ -704,8 +650,7 @@ def handle_ipn(raw_body, verify=None):
     if not _record_payment(week_id, params):
         return 'duplicate'
 
-    receiver = (params.get('receiver_email') or params.get('business') or '').lower()
-    if receiver != PAYPAL_RECEIVER_EMAIL.lower():
+    if not paypal.receiver_ok(params):
         _notify_admin('IPN for a different receiver', params)
         return 'wrong_receiver'
 
@@ -743,12 +688,8 @@ def handle_ipn(raw_body, verify=None):
     # hands, and payment_pending holds a week indefinitely, so a one-cent
     # payment in a currency we don't hold (left Pending by PayPal) must not
     # be able to lock a week.
-    try:
-        gross = Decimal(params.get('mc_gross', ''))
-    except InvalidOperation:
-        gross = None
     expected = Decimal(str(booking['price_usd'])) if ours else PRICE_USD
-    if params.get('mc_currency') != 'USD' or gross != expected:
+    if not paypal.amount_ok(params, expected):
         _notify_admin(f'Wrong amount for {week_id} — refund or follow up',
                       params, booking)
         return 'wrong_amount'
@@ -788,28 +729,6 @@ def handle_ipn(raw_body, verify=None):
 # ─── Email ─────────────────────────────────────────────────────────
 
 ADMIN_PAGE_URL = f'{BASE_URL}/edit/sponsorships.html'
-
-
-def _send(to, subject, text, reply_to=None):
-    """Plain-text mail. Never raises: mail trouble must not fail a booking."""
-    try:
-        import boto3
-        boto3.client('sesv2').send_email(
-            FromEmailAddress=FROM_EMAIL,
-            ReplyToAddresses=[reply_to or REPLY_TO_EMAIL],
-            Destination={'ToAddresses': [to]},
-            Content={'Simple': {
-                'Subject': {'Data': subject[:200]},
-                'Body': {
-                    'Text': {'Data': text},
-                    'Html': {'Data': '<pre style="font-family:inherit;'
-                                     'white-space:pre-wrap">'
-                                     f'{html_escape(text)}</pre>'},
-                },
-            }},
-        )
-    except Exception as exc:
-        print(f'Sponsorship email to {to} failed: {exc}')
 
 
 def _describe(booking):

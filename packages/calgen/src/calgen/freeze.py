@@ -67,6 +67,10 @@ def create_freezer(app):
         yield {}
 
     @freezer.register_generator
+    def highlights_page():
+        yield {}
+
+    @freezer.register_generator
     def virtual_events_page():
         yield {}
 

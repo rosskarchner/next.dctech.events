@@ -13,6 +13,7 @@ from calgen.routes.common import (
     get_events, get_stats, get_upcoming_months, get_categories_with_event_counts,
     get_all_months, get_sidebar_data, filter_events_to_upcoming_days,
     filter_events_by_month, is_virtual_event, prepare_events_by_day,
+    select_highlights,
 )
 
 RECENTLY_ADDED_WINDOW_DAYS = 7
@@ -96,6 +97,7 @@ def register_routes(app):
 
         return render_template('homepage.html',
                                days=days,
+                               highlights=select_highlights(events),
                                stats=stats,
                                base_url=base_url,
                                upcoming_months=get_upcoming_months(),
@@ -136,13 +138,15 @@ def register_routes(app):
         week_start_formatted = week_start.strftime('%B %-d, %Y')
         stats = {'upcoming_events': len(week_events)}
         base_url = get_config().get('base_url', '')
+        is_past = week_end < datetime.now(local_tz).date()
         return render_template('week_page.html',
                                days=days,
+                               highlights=[] if is_past else select_highlights(week_events),
                                stats=stats,
                                week_id=week_id,
                                week_start=week_start,
                                week_end=week_end,
-                               is_past=week_end < datetime.now(local_tz).date(),
+                               is_past=is_past,
                                week_start_formatted=week_start_formatted,
                                base_url=base_url)
 
@@ -173,8 +177,10 @@ def register_routes(app):
         next_year = year if month < 12 else year + 1
         built_months = set(get_all_months())
 
+        is_past = last_day < datetime.now(local_tz).date()
         return render_template('month_page.html',
                                days=days,
+                               highlights=[] if is_past else select_highlights(month_events),
                                stats=stats,
                                month_name=month_name,
                                year=year,
@@ -188,7 +194,7 @@ def register_routes(app):
                                # pages that were never frozen.
                                has_prev=(prev_year, prev_month) in built_months,
                                has_next=(next_year, next_month) in built_months,
-                               is_past=last_day < datetime.now(local_tz).date(),
+                               is_past=is_past,
                                sidebar=get_sidebar_data(active_month=(year, month)))
 
     @app.route("/just-added/")

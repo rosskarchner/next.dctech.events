@@ -8,7 +8,7 @@ from calgen.site_config import get_config
 from calgen.routes.common import (
     local_tz, local_today, UPCOMING_WINDOW_DAYS, get_events, get_stats, get_upcoming_months,
     get_categories_with_event_counts, filter_events_to_upcoming_days,
-    prepare_events_by_day, is_virtual_event,
+    prepare_events_by_day, is_virtual_event, select_highlights,
 )
 
 # Rendered literally into the newsletter's output, then string-replaced
@@ -73,6 +73,10 @@ def _newsletter_context(category_slugs=None, region_slugs=None):
     stats['upcoming_events'] = len(upcoming_events)
     return {
         'days': days,
+        # Built from the same filtered list as `days`, so a subscriber's
+        # category and region preferences (and the virtual-event cut above)
+        # apply to the highlights too.
+        'highlights': select_highlights(events),
         'stats': stats,
         'base_url': get_config().get('base_url', ''),
         'upcoming_months': get_upcoming_months(),

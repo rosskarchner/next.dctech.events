@@ -7,7 +7,8 @@ from flask import render_template
 from calgen.location_utils import extract_location_info
 from calgen.site_config import get_config
 from calgen.event_utils import has_specific_time
-from calgen.routes.common import get_categories, get_event_by_slug, _generate_ical_feed
+from calgen.routes.common import (get_categories, get_event_by_slug, _generate_ical_feed,
+                                  is_virtual_event, local_today)
 
 
 def _format_event_date(event):
@@ -53,8 +54,17 @@ def register_routes(app):
             return "Event not found", 404
         cfg = get_config()
         city, state = extract_location_info(event.get('location', '') or '')
+        # "Highlight this event" is offered only where the checkout would
+        # accept it: in person, not yet happened, not already highlighted.
+        highlight_price = str(cfg.get('highlight_price_usd', '') or '').strip()
+        can_highlight = (highlight_price not in ('', '0')
+                         and not event.get('highlight')
+                         and not is_virtual_event(event)
+                         and (event.get('date') or '') >= local_today().isoformat())
         return render_template('event_page.html',
                                event=event,
+                               can_highlight=can_highlight,
+                               highlight_price=highlight_price,
                                slug=slug,
                                city=city,
                                state=state,

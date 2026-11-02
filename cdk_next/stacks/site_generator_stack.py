@@ -44,7 +44,7 @@ BUILD_DIR = os.path.join(os.path.dirname(__file__), "..", "build")
 # and not the only guard.
 SITE_RELEVANT_PREFIXES = (
     "EVENT#", "GROUP#", "CATEGORY#", "RECURRING#", "ICAL#",
-    "POST#", "UPDATE#", "ARCHIVE#", "SPONSOR#",
+    "POST#", "UPDATE#", "ARCHIVE#", "SPONSOR#", "HIGHLIGHT#",
 )
 
 # The one state item the trigger, the follow-up and the build share. IAM below is
@@ -84,6 +84,11 @@ BUILDSPEC = {
                 # Deliberately no `calgen refresh` — the iCal Aggregator owns
                 # fetching; the export already materialized the cache files.
                 "calgen pipeline --site-dir .",
+                # Store what each highlighted event matched this build (and
+                # email about any that have gone missing). Never fails the
+                # build: it swallows its own errors, and `|| true` covers an
+                # import-time crash too.
+                "python ../reconcile_highlights.py --table $TABLE_NAME || true",
                 # Must run after pipeline (needs _data/all_events.json) and
                 # before build (Frozen-Flask copies static/ into the frozen
                 # output wholesale, so these need to already be there).
@@ -183,6 +188,16 @@ class NextSiteGeneratorStack(cdk.Stack):
                 "DISTRIBUTION_ID": codebuild.BuildEnvironmentVariable(
                     value=distribution.distribution_id
                 ),
+                # reconcile_highlights.py's lost-event emails.
+                "ADMIN_EMAIL": codebuild.BuildEnvironmentVariable(
+                    value=config.NEWSLETTER_ADMIN_EMAIL
+                ),
+                "FROM_EMAIL": codebuild.BuildEnvironmentVariable(
+                    value="outbound@dctech.events"
+                ),
+                "BASE_URL": codebuild.BuildEnvironmentVariable(
+                    value=config.BASE_URL
+                ),
             },
             build_spec=codebuild.BuildSpec.from_object(BUILDSPEC),
             # One build at a time. Every build ends in `s3 sync --delete` over
@@ -229,6 +244,28 @@ class NextSiteGeneratorStack(cdk.Stack):
             )
         )
 
+        # reconcile_highlights.py writes HIGHLIGHT#<key>/RESOLVED (and only
+        # that: the condition pins the partition key prefix, and the build
+        # trigger ignores SK=RESOLVED), and emails Ross and a paid buyer when
+        # a highlighted event disappears.
+        self.project.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:UpdateItem"],
+                resources=[table.table_arn],
+                conditions={
+                    "ForAllValues:StringLike": {"dynamodb:LeadingKeys": ["HIGHLIGHT#*"]}
+                },
+            )
+        )
+        self.project.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["ses:SendEmail"],
+                resources=[
+                    f"arn:aws:ses:{config.REGION}:{config.ACCOUNT}:identity/dctech.events"
+                ],
+            )
+        )
+
         # Streams-fed trigger for near-real-time rebuilds: rings dirtyAt, then
         # tries to start a build. A refused start is not an error; the follow-up
         # Lambda below re-drives it when the running build finishes.
@@ -264,14 +301,26 @@ class NextSiteGeneratorStack(cdk.Stack):
                 # One pattern, not one per prefix: a mapping allows five
                 # filters and there are eight prefixes. Values in a field's
                 # array OR together.
+                #
+                # HIGHLIGHT# gets a pattern of its own, narrowed to SK=META:
+                # the build itself writes HIGHLIGHT#<key>/RESOLVED on every
+                # run, and those writes must never ring the doorbell. The
+                # handler re-checks this, and also skips held/abandoned rows.
                 filters=[
                     lambda_.FilterCriteria.filter({
                         "dynamodb": {"Keys": {"PK": {"S": [
                             rule
                             for prefix in SITE_RELEVANT_PREFIXES
+                            if prefix != "HIGHLIGHT#"
                             for rule in lambda_.FilterRule.begins_with(prefix)
                         ]}}}
-                    })
+                    }),
+                    lambda_.FilterCriteria.filter({
+                        "dynamodb": {"Keys": {
+                            "PK": {"S": lambda_.FilterRule.begins_with("HIGHLIGHT#")},
+                            "SK": {"S": ["META"]},
+                        }}
+                    }),
                 ],
             )
         )

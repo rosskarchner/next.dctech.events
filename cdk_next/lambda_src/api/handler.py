@@ -12,7 +12,8 @@ import traceback
 
 from jinja2 import Environment, FileSystemLoader
 
-from routes import public, submit, admin, events, corrections, preferences, sponsorships
+from routes import (public, submit, admin, events, corrections, preferences,
+                    sponsorships, highlights)
 
 # Set up Jinja2 template environment
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -287,6 +288,20 @@ def lambda_handler(event, context):
             if result is not None:
                 return add_cors(result)
 
+        # Highlighted events (editor's picks and paid highlights)
+        if path == '/api/admin/highlights' and http_method == 'GET':
+            return add_cors(highlights.list_json(event, jinja_env))
+
+        if path == '/api/admin/highlights' and http_method == 'POST':
+            return add_cors(highlights.create_json(event, jinja_env))
+
+        if path.startswith('/api/admin/highlights/'):
+            result = _dispatch_id_tail(path, '/api/admin/highlights/', {
+                ('revoke', 'POST'): highlights.revoke_json,
+            }, event, jinja_env, http_method)
+            if result is not None:
+                return add_cors(result)
+
         # Free-form /updates posts
         if path == '/api/admin/posts' and http_method == 'GET':
             return add_cors(admin.list_posts_json(event, jinja_env))
@@ -312,6 +327,15 @@ def lambda_handler(event, context):
 
         if path == '/api/sponsorships' and http_method == 'POST':
             return add_cors(sponsorships.book_json(event, jinja_env))
+
+        # Highlights: same shape as sponsorship booking — the quote is a
+        # read of the published calendar, and checkout only ever creates a
+        # 30-minute hold. Their IPNs share /api/paypal/ipn below.
+        if path == '/api/highlights/quote' and http_method == 'GET':
+            return add_cors(highlights.quote_json(event, jinja_env))
+
+        if path == '/api/highlights' and http_method == 'POST':
+            return add_cors(highlights.checkout_json(event, jinja_env))
 
         if path == '/api/paypal/ipn' and http_method == 'POST':
             return sponsorships.ipn(event, jinja_env)

@@ -44,6 +44,10 @@ TAGS = {
 # `sponsorship_price_usd` in site/config.yaml, which the /sponsor/ page shows;
 # test_sponsorships.py fails if the two drift.
 SPONSOR_WEEK_PRICE_USD = "50"
+# Highlighted events (lambda_src/api/highlights.py). Same rules as the
+# sponsorship price: "0" means not on sale, and it must equal
+# `highlight_price_usd` in site/config.yaml (test_highlights.py checks).
+HIGHLIGHT_PRICE_USD = "10"
 PAYPAL_RECEIVER_EMAIL = "ross@karchner.com"
 # True points the Buy Now form and IPN verification at PayPal's sandbox; set
 # PAYPAL_RECEIVER_EMAIL to the sandbox business account while it is on.

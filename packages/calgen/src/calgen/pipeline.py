@@ -457,6 +457,12 @@ def main():
         recurring_overrides=recurring_overrides, region_plugin=region_plugin,
     )
 
+    # Highlighted events: matched after dedup, so a highlight bought for a
+    # listing that has since merged into another follows it to the survivor.
+    from calgen import highlights
+    highlights.run(unique_events, datetime.now(local_tz).date().isoformat(),
+                   DATA_DIR)
+
     with open(os.path.join(DATA_DIR, 'all_events.json'), 'w') as f:
         json.dump(unique_events, f, indent=2)
 

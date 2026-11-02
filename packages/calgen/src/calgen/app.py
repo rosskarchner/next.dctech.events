@@ -41,6 +41,7 @@ from calgen.routes import posts as _posts_routes
 from calgen.routes import newsletter as _newsletter_routes
 from calgen.routes import listings as _listings_routes
 from calgen.routes import sponsors as _sponsors_routes
+from calgen.routes import highlights as _highlights_routes
 
 
 def create_app(site_dir=None):
@@ -76,6 +77,7 @@ def create_app(site_dir=None):
     _newsletter_routes.register_routes(app)
     _listings_routes.register_routes(app)
     _sponsors_routes.register_routes(app)
+    _highlights_routes.register_routes(app)
     return app
 
 

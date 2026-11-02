@@ -17,6 +17,7 @@ from aws_cdk import (
     aws_kms as kms,
     aws_lambda as lambda_,
     aws_logs as logs,
+    aws_s3 as s3,
     aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
@@ -36,6 +37,7 @@ class NextApiStack(cdk.Stack):
         user_pool: cognito.IUserPool,
         user_pool_client: cognito.IUserPoolClient,
         prefs_key: kms.Key,
+        site_bucket: s3.IBucket,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -96,6 +98,10 @@ class NextApiStack(cdk.Stack):
             "SPONSOR_WEEK_PRICE_USD": config.SPONSOR_WEEK_PRICE_USD,
             "PAYPAL_RECEIVER_EMAIL": config.PAYPAL_RECEIVER_EMAIL,
             "PAYPAL_SANDBOX": "1" if config.PAYPAL_SANDBOX else "0",
+            # Highlighted events (lambda_src/api/highlights.py). The quote
+            # reads the built events.json from the site bucket directly.
+            "HIGHLIGHT_PRICE_USD": config.HIGHLIGHT_PRICE_USD,
+            "SITE_BUCKET": site_bucket.bucket_name,
         }
 
         self.api_function = lambda_.Function(
@@ -138,6 +144,14 @@ class NextApiStack(cdk.Stack):
 
         for fn in (self.api_function, self.mcp_function):
             table.grant_read_write_data(fn)
+            # highlights.find_event: the published calendar, and only that
+            # one object — the rest of the bucket is the site itself.
+            fn.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["s3:GetObject"],
+                    resources=[site_bucket.arn_for_objects("events.json")],
+                )
+            )
             # On-demand site rebuilds: /api/admin/rebuild and MCP
             # trigger_rebuild. Scoped to the one project.
             fn.add_to_role_policy(
@@ -301,6 +315,14 @@ class NextApiStack(cdk.Stack):
         sponsorships_res.add_resource("availability").add_method("GET", integration)
         api_res.add_resource("paypal").add_resource("ipn").add_method(
             "POST", integration)
+
+        # Highlights: the same reasoning as sponsorship booking. The quote is
+        # a read of the published calendar, and checkout only creates a
+        # 30-minute hold, rate-limited per IP; their IPNs share
+        # /api/paypal/ipn above.
+        highlights_res = api_res.add_resource("highlights")
+        highlights_res.add_method("POST", integration)
+        highlights_res.add_resource("quote").add_method("GET", integration)
 
         public_res = api_res.add_resource("public")
         public_res.add_resource("events").add_resource("{guid}").add_method(

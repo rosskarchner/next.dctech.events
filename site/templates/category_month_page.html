@@ -26,6 +26,7 @@
                 <a href="/categories/{{ category_slug }}/">View all {{ category_name }} events</a>
                 or <a href="/{{ year }}/{{ month }}/">all events in {{ month_name }}</a>.</p>
         {% else %}
+            {% include "partials/highlight_box.html" %}
             {% include "partials/events_by_day.html" %}
         {% endif %}
     </section>

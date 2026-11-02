@@ -7,6 +7,15 @@ This week's sponsor: {{ current_sponsor.name }} — {{ current_sponsor.message }
 {{ house_sponsor.name }} {{ house_sponsor.message }}
 {{ (base_url ~ house_sponsor.url) if house_sponsor.url.startswith('/') else house_sponsor.url }}
 {% endif %}
+{% if highlights %}
+Highlighted (what's this? {{ base_url }}/highlights/)
+{% for h in highlights %}
+{{ h.short_date }}{% if h.short_time %} {{ h.short_time }}{% endif %}  {{ h.title }} [{{ h.label }}]
+  {{ h.url }}
+{% endfor %}
+About highlights: {{ base_url }}/highlights/
+
+{% endif %}
 {% if days %}
 {% for day in days %}
 {% if day.has_events %}

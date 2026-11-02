@@ -238,6 +238,98 @@ header > div > .header-top {
     color: var(--color-text-light);
 }
 
+/* Highlighted events. Every class here is pick-*, never anything with
+   sponsor, promoted, paid or ad in it: EasyList hides those outright (see
+   .masthead-note above). Checked against easylist.txt 2026-11-02. */
+.pick-box {
+    margin: 0 0 var(--spacing-md) 0;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: #fff;
+}
+
+@media (min-width: 768px) {
+    .pick-box {
+        margin-left: 100px;
+    }
+}
+
+.pick-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--spacing-sm);
+}
+
+.pick-head h2 {
+    margin: 0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-light);
+}
+
+.pick-more {
+    font-size: 0.8rem;
+    color: var(--color-text-light);
+}
+
+.pick-lines {
+    list-style: none;
+    margin: var(--spacing-xs, 0.25rem) 0 0 0;
+    padding: 0;
+}
+
+.pick-line {
+    margin: 0.2rem 0;
+    line-height: 1.4;
+}
+
+.pick-when {
+    color: var(--color-text-light);
+    font-variant-numeric: tabular-nums;
+    margin-right: 0.25rem;
+}
+
+/* The label pill, styled like .recurring-badge. */
+.pick-label {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.25rem;
+    margin-left: 0.35rem;
+    text-decoration: none;
+    vertical-align: 0.1em;
+    white-space: nowrap;
+}
+
+.pick-label-editor {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #4caf50;
+}
+
+.pick-label-buyer {
+    background-color: #fff8e1;
+    color: #7a5a00;
+    border: 1px solid #c9a227;
+}
+
+a.pick-label:hover {
+    text-decoration: underline;
+}
+
+/* A highlighted event in the day list: a colored left accent. */
+.event.has-pick {
+    border-left: 4px solid #c9a227;
+}
+
+.event-pick {
+    margin-top: var(--spacing-sm);
+}
+
 /* /sponsor/ */
 .sponsor-list {
     list-style: none;

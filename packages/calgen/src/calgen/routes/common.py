@@ -792,3 +792,62 @@ def _generate_rss_feed(events, feed_title, feed_description, feed_link):
     output = io.BytesIO()
     tree.write(output, encoding='utf-8', xml_declaration=True)
     return Response(output.getvalue(), mimetype='application/rss+xml')
+
+
+# ---------------------------------------------------------------------------
+# Highlighted events
+# ---------------------------------------------------------------------------
+
+def _short_time(value):
+    """'08:00' -> '8am', '18:30' -> '6:30pm'; '' for no time."""
+    if not isinstance(value, str) or not value:
+        return ''
+    try:
+        t = datetime.strptime(value, '%H:%M')
+    except ValueError:
+        return ''
+    hour = t.hour % 12 or 12
+    suffix = 'am' if t.hour < 12 else 'pm'
+    return f'{hour}{suffix}' if t.minute == 0 else f'{hour}:{t.minute:02d}{suffix}'
+
+
+def select_highlights(events, today=None):
+    """The highlighted events from `events` to show in a page's box.
+
+    `events` is whatever the page already lists (filtered by category, month,
+    week, or a subscriber's preferences), so the box only ever repeats what
+    the page is about. Keeps in-person events whose start is between today
+    and UPCOMING_WINDOW_DAYS out — the same window a highlight is sold for —
+    soonest first. Each comes back as a small dict for the box partial.
+    """
+    if today is None:
+        today = local_today()
+    start = today.isoformat()
+    end = (today + timedelta(days=UPCOMING_WINDOW_DAYS)).isoformat()
+    picked, seen = [], set()
+    for event in events:
+        mark = event.get('highlight')
+        if not mark or is_virtual_event(event):
+            continue
+        event_date = event.get('date') or ''
+        if not (start <= event_date <= end) or mark.get('key') in seen:
+            continue
+        seen.add(mark.get('key'))
+        time_value = event.get('time') if isinstance(event.get('time'), str) else ''
+        try:
+            d = datetime.strptime(event_date, '%Y-%m-%d').date()
+            short_date = f'{d.month}/{d.day}'
+        except ValueError:
+            short_date = event_date
+        picked.append({
+            'title': event.get('title'),
+            'url': event.get('url'),
+            'date': event_date,
+            'time': time_value or '',
+            'short_date': short_date,
+            'short_time': _short_time(time_value),
+            'kind': mark.get('kind'),
+            'label': mark.get('label'),
+        })
+    picked.sort(key=lambda h: (h['date'], h['time']))
+    return picked

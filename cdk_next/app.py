@@ -51,6 +51,8 @@ api = NextApiStack(
     # magic-link purpose that spans both stacks, so this key is owned by
     # NextNewsletterStack (constructed first) and passed in like `table` is.
     prefs_key=newsletter.prefs_key,
+    # Highlight quotes read the built events.json straight from the bucket.
+    site_bucket=hosting.bucket,
     env=env,
 )
 

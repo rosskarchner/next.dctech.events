@@ -64,6 +64,34 @@ def _scan_all(table, **kwargs):
     return items
 
 
+# What a highlight's export carries: its identity, its kind, and the
+# snapshot taken when it was created (for matching an event that has since
+# moved). Never the buyer's email or payment details — calgen publishes what
+# it is given.
+HIGHLIGHT_FIELDS = ('target_key', 'kind', 'title', 'date', 'time', 'url',
+                    'group', 'guid', 'recurring_slug')
+
+
+def _highlights(items):
+    """Active highlights for _data/highlights.json, each with the guid the
+    last build matched it to (HIGHLIGHT#<key>/RESOLVED), if any."""
+    resolved = {}
+    for item in items:
+        if item.get('SK') == 'RESOLVED' and item.get('resolved_guid'):
+            resolved[item['PK']] = str(item['resolved_guid'])
+    out = []
+    for item in items:
+        if item.get('SK') != 'META' or item.get('status') != 'active':
+            continue
+        row = {k: str(item.get(k) or '') for k in HIGHLIGHT_FIELDS}
+        if not row['target_key']:
+            continue
+        row['resolved_guid'] = resolved.get(item['PK'], '')
+        out.append(row)
+    out.sort(key=lambda r: (r['date'], r['time'], r['target_key']))
+    return out
+
+
 def _write_yaml(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True,
@@ -115,9 +143,11 @@ def main():
     # Everything real lives at SK='META', except a recurring series' own
     # per-occurrence corrections (RECURRING#{slug} / SK=OVERRIDE#{date}) —
     # without the second clause those rows are invisible to this scan
-    # entirely, not just miscategorized once collected.
+    # entirely, not just miscategorized once collected. HIGHLIGHT#/RESOLVED
+    # is the build's own matching state for a highlight (see _highlights).
     items = _scan_all(table, FilterExpression=(
-        Attr('SK').eq('META') | Attr('SK').begins_with('OVERRIDE#')))
+        Attr('SK').eq('META') | Attr('SK').begins_with('OVERRIDE#')
+        | Attr('SK').eq('RESOLVED')))
 
     by_prefix = {}
     for item in items:
@@ -298,6 +328,15 @@ def main():
     with open(os.path.join('_data', 'sponsors.json'), 'w', encoding='utf-8') as f:
         json.dump(sponsors, f, indent=1)
     counts['sponsors'] = len(sponsors)
+
+    # ── _data/highlights.json ───────────────────────────────────────
+    # Active highlighted events. calgen's pipeline matches each to an event
+    # (calgen/highlights.py) and writes _data/highlight_matches.json, which
+    # reconcile_highlights.py stores back as HIGHLIGHT#<key>/RESOLVED.
+    highlights = _highlights(by_prefix.get('HIGHLIGHT', []))
+    with open(os.path.join('_data', 'highlights.json'), 'w', encoding='utf-8') as f:
+        json.dump(highlights, f, indent=1)
+    counts['highlights'] = len(highlights)
 
     # ── _cache/ical/ ────────────────────────────────────────────────
     _reset_dir(os.path.join('_cache', 'ical'))

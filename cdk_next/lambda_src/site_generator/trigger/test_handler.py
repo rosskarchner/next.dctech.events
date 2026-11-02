@@ -267,3 +267,48 @@ def test_the_stacks_event_filter_lists_the_same_prefixes():
         and any(getattr(t, "id", "") == "SITE_RELEVANT_PREFIXES" for t in node.targets))
 
     assert tuple(listed) == handler.RELEVANT_PREFIXES
+
+
+# ─── Highlights ─────────────────────────────────────────────────────
+
+def _hl(sk, event_name, old_status=None, new_status=None):
+    rec = _record("HIGHLIGHT#g-abc", event_name,
+                  {"status": {"S": old_status}} if old_status else None,
+                  {"status": {"S": new_status}} if new_status else None)
+    rec["dynamodb"]["Keys"]["SK"] = {"S": sk}
+    return rec
+
+
+@pytest.mark.parametrize("old,new,name", [
+    (None, "active", "INSERT"),          # an editor's pick
+    ("held", "active", "MODIFY"),        # PayPal confirmed
+    ("payment_pending", "active", "MODIFY"),
+    ("active", "revoked", "MODIFY"),     # taken down
+    ("active", "refunded", "MODIFY"),
+])
+def test_a_highlight_going_live_or_down_builds(old, new, name, start_ok):
+    result = handler.lambda_handler({"Records": [_hl("META", name, old, new)]}, None)
+    assert result["started"] is True
+
+
+@pytest.mark.parametrize("old,new,name", [
+    (None, "held", "INSERT"),            # someone opened PayPal
+    ("held", "held", "MODIFY"),          # retried over their own hold
+    ("held", "payment_pending", "MODIFY"),
+    ("payment_pending", "cancelled", "MODIFY"),
+    ("held", "cancelled", "MODIFY"),
+])
+def test_checkouts_that_never_went_live_do_not_build(old, new, name, monkeypatch):
+    monkeypatch.setattr(handler.codebuild, "start_build",
+                        lambda **kw: pytest.fail("should not start a build"))
+    result = handler.lambda_handler({"Records": [_hl("META", name, old, new)]}, None)
+    assert result["started"] is False
+
+
+@pytest.mark.parametrize("sk", ["RESOLVED", "PAYMENT#T1#Completed"])
+def test_highlight_bookkeeping_never_builds(sk, monkeypatch):
+    monkeypatch.setattr(handler.codebuild, "start_build",
+                        lambda **kw: pytest.fail("should not start a build"))
+    result = handler.lambda_handler(
+        {"Records": [_hl(sk, "MODIFY", "active", "active")]}, None)
+    assert result["started"] is False

@@ -30,7 +30,8 @@ uv pip install "${UV_ARGS[@]}" --target build/api jinja2 pytz "pyjwt[crypto]"
 # ── mcp ──────────────────────────────────────────────────────────────
 mkdir -p build/mcp
 cp -r lambda_src/mcp/. build/mcp/
-cp lambda_src/api/db.py lambda_src/api/event_utils.py lambda_src/api/sponsorships.py build/mcp/
+cp lambda_src/api/db.py lambda_src/api/event_utils.py lambda_src/api/sponsorships.py \
+   lambda_src/api/paypal.py lambda_src/api/highlights.py build/mcp/
 # check_event_source parses pages with calgen's own JSON-LD rules and fetches
 # through its SSRF guard. Both are bs4/requests/stdlib only, so they are copied
 # rather than installing calgen and its Flask stack (conftest.py mirrors this).
@@ -173,7 +174,8 @@ fi
 # ── site_generator CodeBuild source (site files + export + calgen wheel) ──
 mkdir -p build/site_src/wheels
 cp -r ../site build/site_src/site
-cp lambda_src/site_generator/export_dynamo_to_calgen.py build/site_src/
+cp lambda_src/site_generator/export_dynamo_to_calgen.py \
+   lambda_src/site_generator/reconcile_highlights.py build/site_src/
 # Card fonts (~12 MB, mostly the color emoji font). Deliberately not inside the
 # calgen wheel: the Lambdas install that wheel and never draw cards.
 cp -r ../packages/calgen/og-fonts build/site_src/og-fonts

@@ -121,6 +121,65 @@
 
   // ── rendering ───────────────────────────────────────────────────
 
+  // Active highlights by stored-event guid (target key `g-<guid>`).
+  // Recurring occurrences are highlighted from highlights.html instead.
+  let highlighted = new Map();
+
+  async function loadHighlights() {
+    try {
+      const response = await DctechAuth.authorizedFetch('/api/admin/highlights?status=active');
+      if (!response.ok) return;
+      const payload = await response.json();
+      highlighted = new Map((payload.highlights || [])
+        .filter(h => String(h.target_key || '').startsWith('g-'))
+        .map(h => [h.target_key.slice(2), h]));
+    } catch {
+      // The toggle just shows "Highlight" everywhere; the API still refuses a
+      // second highlight for the same event.
+    }
+  }
+
+  function highlightButton(event) {
+    const eff = event.effective || {};
+    const guid = DctechUtil.escapeHtml(event.guid);
+    const h = highlighted.get(event.guid);
+    if (h) {
+      const label = h.kind === 'editor' ? "★ Editor's pick" : '★ Paid';
+      return `<button type="button" class="btn btn-sm btn-outline" data-action="unhighlight"
+                data-guid="${guid}" title="Highlighted (${DctechUtil.escapeHtml(h.kind)}); click to revoke">${label}</button>`;
+    }
+    if (eff.hidden || eff.duplicate_of) return '';
+    return `<button type="button" class="btn btn-sm btn-outline" data-action="highlight"
+              data-guid="${guid}" title="Make this an Editor's pick">☆ Highlight</button>`;
+  }
+
+  async function setHighlight(guid, on) {
+    if (on) {
+      const response = await DctechAuth.authorizedFetch('/api/admin/highlights', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guid }),
+      });
+      if (!response.ok) throw new Error(await errorText(response));
+      showMessage("Highlighted as an Editor's pick. It shows after the next rebuild.", 'success');
+    } else {
+      const h = highlighted.get(guid);
+      if (!h) return;
+      const paid = h.kind === 'paid';
+      if (!window.confirm(paid
+          ? 'This is a PAID highlight. Revoke it? You will need to refund it in PayPal yourself.'
+          : "Remove this Editor's pick?")) return;
+      const response = await DctechAuth.authorizedFetch(
+        `/api/admin/highlights/${encodeURIComponent(h.target_key)}/revoke`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'removed from the events list' }),
+        });
+      if (!response.ok) throw new Error(await errorText(response));
+      showMessage(paid ? 'Revoked. Refund it in PayPal.' : 'Highlight removed.', 'success');
+    }
+    await loadHighlights();
+    renderTable();
+  }
+
   function byGuid(guid) {
     return allEvents.find(e => e.guid === guid);
   }
@@ -226,6 +285,7 @@
                   data-action="edit" data-guid="${DctechUtil.escapeHtml(event.guid)}">
             ${expandedGuid === event.guid ? 'Close' : 'Edit'}
           </button>
+          ${highlightButton(event)}
         </td>
       </tr>
       ${expandedGuid === event.guid ? renderEditRow(event) : ''}`;
@@ -836,6 +896,10 @@
         renderMergeConfirm();
       } else if (action === 'undo') {
         guard(undo());
+      } else if (action === 'highlight') {
+        guard(setHighlight(guid, true));
+      } else if (action === 'unhighlight') {
+        guard(setHighlight(guid, false));
       }
     });
   }
@@ -857,6 +921,7 @@
     if (!DctechAuth.requireAdmin()) return;
     bindEvents();
     await loadCategories();
+    await loadHighlights();
     await loadEvents();
   }
 

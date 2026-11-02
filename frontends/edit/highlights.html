@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Highlights - DC Tech Events Admin</title>
+  <link rel="stylesheet" href="/edit/css/styles.css">
+  <link rel="stylesheet" href="/static/kenney-mini/kenney-mini.css">
+  <script src="/edit/js/config.js"></script>
+  <script src="/edit/js/auth.js"></script>
+  <style>
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    .toolbar select, .toolbar input {
+      padding: 0.4rem; border: 1px solid var(--color-border, #ddd); border-radius: 0.25rem; font: inherit;
+    }
+    table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    table.data th, table.data td {
+      text-align: left; vertical-align: top; padding: 0.5rem; border-bottom: 1px solid var(--color-border, #ddd);
+    }
+    table.data input {
+      width: 100%; box-sizing: border-box; padding: 0.3rem; font: inherit;
+      border: 1px solid var(--color-border, #ddd); border-radius: 0.25rem; margin-bottom: 0.25rem;
+    }
+    .badge { display: inline-block; font-size: 0.75em; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 0.25rem; }
+    .badge-active { background: #dcfce7; color: #166534; }
+    .badge-held, .badge-payment_pending { background: #e0e7ff; color: #3730a3; }
+    .badge-revoked, .badge-refunded, .badge-cancelled { background: #f3f4f6; color: #6b7280; }
+    .kind-paid { background: #fff8e1; color: #7a5a00; }
+    .kind-editor { background: #e8f5e9; color: #2e7d32; }
+    .row-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .muted { color: var(--color-text-muted, #666); font-size: 0.85em; }
+    .message { padding: 0.75rem 1rem; border-radius: 0.25rem; margin-bottom: 1rem; }
+    .message p { margin: 0; }
+    .message-success { background: #dcfce7; color: #166534; }
+    .message-error { background: #fee2e2; color: #991b1b; }
+    code.coupon { font-size: 1rem; letter-spacing: 0.08em; }
+    section.card { margin-bottom: 2rem; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="container" style="display:flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1100px;">
+      <div style="display:flex; align-items: center; gap: 2rem;">
+        <a href="index.html" class="nav-brand" id="nav-brand">DC Tech Events</a>
+        <ul class="nav-links" data-auth="admin" style="display:flex; list-style: none; gap: 1rem; margin: 0; padding: 0;">
+          <li><a href="queue.html">Queue</a></li>
+          <li><a href="events.html">Events</a></li>
+          <li><a href="corrections.html">Corrections</a></li>
+          <li><a href="posts.html">Posts</a></li>
+          <li><a href="sponsorships.html">Sponsors</a></li>
+          <li><a href="highlights.html" style="font-weight: bold;">Highlights</a></li>
+          <li><a href="subscribers.html">Subscribers</a></li>
+        </ul>
+      </div>
+      <div class="nav-right">
+        <span data-auth="logged-in" class="hidden">
+          <span data-user="name"></span>
+          <button class="btn-sign-out" onclick="DctechAuth.logout()">Sign Out</button>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container" style="max-width: 1100px;">
+    <div class="page-header">
+      <h1>Highlights</h1>
+      <p>
+        Paid highlights go live as soon as PayPal confirms the payment, with no review step. Editor's picks are free and go live straight away.
+        Either kind shows on the site after the next rebuild, which takes a few minutes.
+        Revoking a paid highlight does <strong>not</strong> refund it, so refund it in PayPal yourself.
+        Public page: <a href="/highlights/" target="_blank" rel="noopener">/highlights/</a>.
+      </p>
+    </div>
+
+    <div id="hl-message"></div>
+
+    <section class="card">
+      <div class="toolbar">
+        <label for="status-filter">Show</label>
+        <select id="status-filter">
+          <option value="active" selected>Active</option>
+          <option value="">All</option>
+          <option value="held">Held (awaiting payment)</option>
+          <option value="payment_pending">Payment pending</option>
+          <option value="revoked">Revoked</option>
+          <option value="refunded">Refunded</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <span class="muted" id="price-label"></span>
+      </div>
+      <table class="data">
+        <thead><tr><th>Event</th><th>Kind</th><th>Shows</th><th>Buyer</th><th>Status</th><th></th></tr></thead>
+        <tbody id="hl-rows"><tr><td colspan="6"><span class="spinner"></span> Loading…</td></tr></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2 style="margin-top: 0;">Add an editor's pick</h2>
+      <p class="muted">Paste the event's guid (from <a href="events.html">Events</a>, or the end of its "Report an issue" link) or its dctech.events event page URL. In-person, upcoming events only.</p>
+      <form id="pick-form" class="toolbar">
+        <input name="guid" placeholder="guid or /events/… URL" required size="40">
+        <input name="note" placeholder="Note (optional)" size="30" maxlength="200">
+        <button class="btn btn-primary" type="submit">Highlight</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/edit/js/util.js"></script>
+  <script src="/edit/js/highlights.js"></script>
+</body>
+</html>

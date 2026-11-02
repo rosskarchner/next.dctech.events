@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Highlighted events | {{ site_name }}{% endblock %}
+
+{% block description %}What the Highlighted box on {{ site_name }} is: editor's picks and paid highlights, labeled so you can tell them apart.{% endblock %}
+
+{% block og_title %}Highlighted events on {{ site_name }}{% endblock %}
+{% block og_description %}Editor's picks and paid highlights, always labeled.{% endblock %}
+
+{% block twitter_title %}Highlighted events on {{ site_name }}{% endblock %}
+{% block twitter_description %}Editor's picks and paid highlights, always labeled.{% endblock %}
+
+{% block content %}
+<h1>Highlighted events</h1>
+
+<p>Some events on {{ site_name }} are <strong>highlighted</strong>. A highlighted event gets a line in the
+    <em>Highlighted</em> box at the top of the homepage, and on the category, week and month pages it belongs to.
+    It also appears in the Monday newsletter, for subscribers whose category and region preferences match it.
+    It still shows in its usual place in the day-by-day list, with the same small label.</p>
+
+<p>A highlight runs for the {{ window_days }} days before the event, through the day it happens.</p>
+
+<h2>Two kinds, always labeled</h2>
+<ul>
+    <li><span class="pick-label pick-label-editor">Editor's pick</span> is an event we chose to point out. Nobody paid for it.</li>
+    <li><span class="pick-label pick-label-buyer">Paid</span> means someone paid{% if price %} ${{ price }}{% endif %} to highlight it.
+        Usually that's the organizer, but we don't name buyers.</li>
+</ul>
+
+<h2>Highlight an event{% if price %} for ${{ price }}{% endif %}</h2>
+<p>To highlight an event, find it on the calendar, open its page, and choose <em>Highlight this event</em>.</p>
+<ul>
+        <li><strong>In-person events only.</strong> Virtual events can't be highlighted.</li>
+        <li><strong>One occurrence per purchase.</strong> For a weekly or monthly event, you're buying one date.</li>
+        <li><strong>Live without review.</strong> It goes up as soon as PayPal confirms the payment and the site rebuilds, usually within minutes.
+            We take down anything that isn't a real DC-area tech event, and refund the payment.</li>
+        <li><strong>Late is fine.</strong> You can buy a highlight at any point before the event. It costs the same, and checkout tells you how many days and newsletters are left.</li>
+        <li><strong>If the event moves,</strong> the highlight moves with it. If it disappears from the calendar, we'll email you.</li>
+        <li><strong>Refunds</strong> are handled by hand. Just <a href="mailto:ross@karchner.com">email Ross</a>.</li>
+</ul>
+
+<h2>Highlighted right now</h2>
+{% if highlights %}
+<ul class="pick-lines">
+    {% for h in highlights %}
+    <li class="pick-line"><span class="pick-when">{{ h.short_date }}{% if h.short_time %} {{ h.short_time }}{% endif %}</span> <a href="{{ h.url }}" target="_blank" rel="noopener noreferrer">{{ h.title }}</a> <span class="pick-label pick-label-{{ 'editor' if h.kind == 'editor' else 'buyer' }}">{{ h.label }}</span></li>
+    {% endfor %}
+</ul>
+{% else %}
+<p>Nothing is highlighted at the moment.</p>
+{% endif %}
+
+<p>Want a whole week instead? <a href="/sponsor/">Sponsor {{ site_name }}</a>.</p>
+{% endblock %}

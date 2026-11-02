@@ -119,6 +119,11 @@
             &middot;
             <a href="mailto:ross@karchner.com?subject={{ ('Issue with: ' ~ event.title) | urlencode }}">Email us directly</a>
         </p>
+        {% if event.highlight %}
+        <p class="event-pick"><a class="pick-label pick-label-{{ 'editor' if event.highlight.kind == 'editor' else 'buyer' }}" href="/highlights/">{{ event.highlight.label }}</a> This event is highlighted on {{ site_name }}.</p>
+        {% elif can_highlight %}
+        <p class="event-pick">⭐ <a href="/edit/highlight.html?guid={{ event.guid }}">Highlight this event: ${{ highlight_price }}</a></p>
+        {% endif %}
     </article>
 </div>
 {% endblock %}

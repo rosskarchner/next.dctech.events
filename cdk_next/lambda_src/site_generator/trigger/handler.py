@@ -42,9 +42,12 @@ STATE_KEY = {'PK': 'RENDER#site', 'SK': 'STATE'}
 # archived week pages. SPONSOR# is the week's sponsorship: approving one has to
 # reach the header and /sponsor/ without waiting for the daily build. COUPON# is
 # absent — coupons never render. RENDER# is deliberately absent: this function
-# writes it.
+# writes it. HIGHLIGHT# is a highlighted event, but only its META row and only
+# when it is or was active (see _highlight_matters): holds, abandoned
+# checkouts, payment records and the build's own RESOLVED bookkeeping never
+# change a page.
 RELEVANT_PREFIXES = ('EVENT#', 'GROUP#', 'CATEGORY#', 'RECURRING#', 'ICAL#',
-                     'POST#', 'UPDATE#', 'ARCHIVE#', 'SPONSOR#')
+                     'POST#', 'UPDATE#', 'ARCHIVE#', 'SPONSOR#', 'HIGHLIGHT#')
 
 # Attributes whose changes never alter a rendered page. They differ on an
 # otherwise identical rewrite: the iCal cache stamps updated_at/ttl and its fetch
@@ -74,6 +77,21 @@ def _changed_attrs(record):
     )
 
 
+def _image_status(image):
+    return ((image or {}).get('status') or {}).get('S')
+
+
+def _highlight_matters(record):
+    """A HIGHLIGHT# record changes the site only if it is the META row and it
+    is, or just stopped being, active. Without this, every abandoned PayPal
+    checkout (a held row that lapses) would cost a full site build."""
+    ddb = record.get('dynamodb', {})
+    if ddb.get('Keys', {}).get('SK', {}).get('S') != 'META':
+        return False
+    return 'active' in (_image_status(ddb.get('OldImage')),
+                        _image_status(ddb.get('NewImage')))
+
+
 def _classify(records):
     """Return (relevant, noops, changes) for a batch of stream records.
 
@@ -85,6 +103,8 @@ def _classify(records):
     for record in records:
         pk = record.get('dynamodb', {}).get('Keys', {}).get('PK', {}).get('S', '')
         if not pk.startswith(RELEVANT_PREFIXES):
+            continue
+        if pk.startswith('HIGHLIGHT#') and not _highlight_matters(record):
             continue
         changed = _changed_attrs(record)
         label = f"{pk.split('#')[0]}:{record.get('eventName', '?')}"

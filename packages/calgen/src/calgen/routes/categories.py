@@ -9,7 +9,7 @@ from calgen.site_config import get_config
 from calgen.routes.common import (
     THIN_FACET_MIN_EVENTS, get_events, get_categories, get_sidebar_data, local_today,
     filter_events_by_month, prepare_events_by_day, _generate_ical_feed,
-    _generate_rss_feed,
+    _generate_rss_feed, select_highlights,
 )
 
 
@@ -41,6 +41,7 @@ def register_routes(app):
         stats = {'upcoming_events': len(filtered_events)}
         return render_template('category_page.html',
                                days=days,
+                               highlights=select_highlights(filtered_events),
                                stats=stats,
                                category_name=category['name'],
                                category_description=category.get('description', ''),
@@ -72,6 +73,7 @@ def register_routes(app):
         stats = {'upcoming_events': len(month_events)}
         return render_template('category_month_page.html',
                                days=days,
+                               highlights=select_highlights(month_events),
                                stats=stats,
                                category_name=category['name'],
                                category_description=category.get('description', ''),

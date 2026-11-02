@@ -23,6 +23,15 @@
     </p>
     {% endif %}
 
+    {% if highlights %}
+    <div style="margin: 0 0 20px 0; padding: 10px 12px; border: 1px solid #ccd; border-radius: 4px; font-size: 14px; color: #444;">
+        <div style="margin-bottom: 6px;"><strong>Highlighted</strong> <a href="{{ base_url }}/highlights/" style="color: #666; font-size: 12px;">(what's this?)</a></div>
+        {% for h in highlights %}
+        <div style="margin: 4px 0;">{{ h.short_date }}{% if h.short_time %} {{ h.short_time }}{% endif %} &nbsp;<a href="{{ h.url }}" style="color: #0066cc; text-decoration: none;">{{ h.title }}</a> <a href="{{ base_url }}/highlights/" style="display: inline-block; padding: 0 5px; border: 1px solid {{ '#4caf50' if h.kind == 'editor' else '#b8860b' }}; border-radius: 3px; font-size: 11px; color: #444; text-decoration: none;">{{ h.label }}</a></div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     {% if days %}
         {% for day in days %}
             {% if day.has_events %}

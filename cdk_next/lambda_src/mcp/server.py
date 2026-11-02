@@ -22,6 +22,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 import db
+import highlights
 import sponsorships
 # Both copied from packages/calgen by build_lambdas.sh (conftest.py does the
 # same for tests), so the re-check parses pages exactly as the aggregator does.
@@ -1300,3 +1301,57 @@ def list_sponsor_coupons() -> list:
 def revoke_sponsor_coupon(code: str) -> dict:
     """Make an unredeemed coupon unusable. Does not affect a booking it already paid for."""
     return _sponsor_call(sponsorships.revoke_coupon, code)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Highlighted events
+#
+# Thin wrappers over highlights.py (copied from lambda_src/api by
+# build_lambdas.sh), the same rules as the /edit admin page. Not in
+# handler.SCHEDULED_AGENT_TOOLS: an editor's pick publishes to every page and
+# the newsletter.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _highlight_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except highlights.HighlightError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+@mcp.tool()
+def list_highlights(status: str | None = None) -> list:
+    """
+    Every highlighted event (editor's picks and paid), soonest first. Filter
+    by status: held, payment_pending, active (live), revoked, refunded,
+    cancelled. Each row carries kind ('editor' or 'paid'), target_key (pass
+    it to revoke_highlight), a snapshot of the event (title, date, url), and
+    for paid ones the buyer's contact_email and PayPal txn_id.
+    """
+    return highlights.list_highlights(status)
+
+
+@mcp.tool()
+def highlight_event(guid: str, note: str | None = None) -> dict:
+    """
+    Make an event an Editor's pick: free, live on the next build, shown in
+    the Highlighted box for the 21 days before it happens and in the Monday
+    newsletter. `guid` is the event's guid as published in events.json
+    (get_events returns it; a recurring event's guid picks that one
+    occurrence). In-person, upcoming events only, and never one that already
+    has a live paid highlight.
+    """
+    return _highlight_call(highlights.add_editor_pick, guid, MCP_REVIEWER,
+                           note or '')
+
+
+@mcp.tool()
+def revoke_highlight(target_key: str, reason: str | None = None) -> dict:
+    """
+    Take a highlight down (target_key from list_highlights, e.g. 'g-<guid>'
+    or 'r-<series>-<YYYY-MM-DD>'). For a paid highlight this does NOT refund
+    the buyer — do that by hand in PayPal.
+    """
+    return _highlight_call(highlights.revoke, target_key, MCP_REVIEWER,
+                           reason or '')
