@@ -138,6 +138,14 @@ def test_window_keeps_upcoming_in_person_within_21_days():
     assert picked[0]['label'] == "Editor's pick"
 
 
+def test_multi_day_event_stays_through_its_last_day():
+    ongoing = _mark(_event('conf', -1, title='Three Day Conf', end_date=_day(1)))
+    ends_today = _mark(_event('ends', -2, title='Ends Today', end_date=_day(0)))
+    finished = _mark(_event('done', -3, title='Done Conf', end_date=_day(-1)))
+    titles = [p['title'] for p in select_highlights([ongoing, ends_today, finished])]
+    assert titles == ['Ends Today', 'Three Day Conf']
+
+
 def test_window_sorts_by_date_then_time():
     a = _mark(_event('a', 5, time='19:30'))
     b = _mark(_event('b', 5, time='08:00'))

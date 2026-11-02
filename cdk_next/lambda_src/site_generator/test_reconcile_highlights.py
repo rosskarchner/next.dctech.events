@@ -54,10 +54,10 @@ class Ses:
         self.sent.append(kw['Destination']['ToAddresses'][0])
 
 
-def _data(tmp_path, matches, date='2026-11-10'):
+def _data(tmp_path, matches, date='2026-11-10', end_date=''):
     (tmp_path / 'highlight_matches.json').write_text(json.dumps(matches))
     (tmp_path / 'highlights.json').write_text(json.dumps(
-        [{'target_key': k, 'date': date} for k in matches]))
+        [{'target_key': k, 'date': date, 'end_date': end_date} for k in matches]))
     return str(tmp_path)
 
 
@@ -141,3 +141,10 @@ def test_main_never_fails(monkeypatch, tmp_path):
 
 def test_no_matches_file_is_a_no_op(tmp_path):
     assert rec.run(Table(), Ses(), str(tmp_path), NOW, TODAY) == []
+
+
+def test_a_multi_day_event_under_way_is_still_chased(tmp_path):
+    table = Table([META])
+    rec.run(table, Ses(), _data(tmp_path, {'g-a': None}, date='2026-11-01',
+                                end_date='2026-11-03'), NOW, TODAY)
+    assert table.items[('HIGHLIGHT#g-a', 'RESOLVED')]['missing_since'] == NOW

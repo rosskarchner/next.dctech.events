@@ -97,8 +97,9 @@ def plan(matches, snapshots, resolved, now, today):
                                          'missing_since': None}))
             continue
         snap = snapshots.get(key) or {}
-        if (snap.get('date') or '') < today:
-            continue  # the event has happened; nothing to chase
+        last = max(snap.get('date') or '', snap.get('end_date') or '')
+        if last < today:
+            continue  # the event is over (multi-day: its last day); nothing to chase
         if state.get('lost_notified_at'):
             continue
         missing_since = state.get('missing_since')

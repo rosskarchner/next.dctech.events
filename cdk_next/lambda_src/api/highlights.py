@@ -187,16 +187,28 @@ def _event_date(event):
         return None
 
 
+def last_day(event):
+    """The last day an event runs: its end_date when that is a real date
+    after its start, otherwise its start (calgen's event_last_day)."""
+    start = _event_date(event)
+    try:
+        end = date.fromisoformat(str(event.get('end_date') or ''))
+    except ValueError:
+        return start
+    return end if start and end > start else start
+
+
 def _summary(event):
     return {k: event.get(k) for k in (
-        'guid', 'title', 'date', 'time', 'url', 'group', 'location',
-        'recurring_slug')}
+        'guid', 'title', 'date', 'end_date', 'time', 'url', 'group',
+        'location', 'recurring_slug')}
 
 
 def _snapshot(event):
     """What a highlight remembers about its event, for matching and email."""
     snap = {k: str(event.get(k) or '') for k in (
-        'title', 'date', 'time', 'url', 'group', 'guid', 'recurring_slug')}
+        'title', 'date', 'end_date', 'time', 'url', 'group', 'guid',
+        'recurring_slug')}
     snap['title'] = snap['title'][:300]
     return snap
 
@@ -246,7 +258,8 @@ def _eligibility(event, now=None):
     event_date = _event_date(event)
     if not event_date:
         return False, 'This event has no date'
-    if event_date < today:
+    # A multi-day event can still be highlighted while it is under way.
+    if last_day(event) < today:
         return False, 'This event has already happened'
     if not is_in_person(event):
         return False, 'Only in-person events can be highlighted'
@@ -270,7 +283,8 @@ def quote(guid, now=None):
     start = end = days = newsletters = None
     if event_date:
         start = max(today, window_start(event_date))
-        end = event_date
+        # Shows through the event's last day, not just its first.
+        end = max(last_day(event), start)
         days = max(0, (end - start).days + 1)
         # The newsletter goes out Monday morning, so today's has already
         # been sent: count Mondays strictly after today.
@@ -577,7 +591,7 @@ def _email_receipt(item):
     start = (max(date.today(), window_start(event_date))
              if event_date else None)
     when = (f'It will show from {_pretty_date(start.isoformat())} through '
-            f'the day of the event' if start else 'It is live now')
+            f'the last day of the event' if start else 'It is live now')
     _send(item['contact_email'],
           'Your DC Tech Events highlight is live',
           f"Thanks! Your highlight for \"{item.get('title')}\" "

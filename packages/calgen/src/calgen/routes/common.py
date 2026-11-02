@@ -816,9 +816,10 @@ def select_highlights(events, today=None):
 
     `events` is whatever the page already lists (filtered by category, month,
     week, or a subscriber's preferences), so the box only ever repeats what
-    the page is about. Keeps in-person events whose start is between today
-    and UPCOMING_WINDOW_DAYS out — the same window a highlight is sold for —
-    soonest first. Each comes back as a small dict for the box partial.
+    the page is about. Keeps in-person events that start within
+    UPCOMING_WINDOW_DAYS and have not finished — a multi-day event stays in
+    the box through its last day — soonest first. Each comes back as a small
+    dict for the box partial.
     """
     if today is None:
         today = local_today()
@@ -830,7 +831,8 @@ def select_highlights(events, today=None):
         if not mark or is_virtual_event(event):
             continue
         event_date = event.get('date') or ''
-        if not (start <= event_date <= end) or mark.get('key') in seen:
+        if (not event_date or event_date > end or event_last_day(event) < start
+                or mark.get('key') in seen):
             continue
         seen.add(mark.get('key'))
         time_value = event.get('time') if isinstance(event.get('time'), str) else ''

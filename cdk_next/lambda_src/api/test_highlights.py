@@ -44,6 +44,9 @@ EVENTS = [
      "location_type": "virtual", "source": "ical", "categories": []},
     {"guid": "past01", "title": "Yesterday", "date": _day(-1), "time": "12:00",
      "url": "https://past.example", "source": "ical", "categories": []},
+    {"guid": "conf01", "title": "Three Day Conf", "date": _day(-1),
+     "end_date": _day(1), "time": "09:00", "url": "https://conf.example",
+     "source": "manual", "location": "DC", "categories": []},
     {"guid": "rec777", "title": "Community Tuesdays", "date": _day(3),
      "time": "09:00", "url": "https://refraction.example",
      "source": "recurring", "recurring_slug": "community-tuesdays",
@@ -89,7 +92,7 @@ def _ok(raw):
 
 def test_target_key_for_stored_and_recurring_events():
     assert hl.target_key_for(EVENTS[0]) == "g-abc123"
-    assert hl.target_key_for(EVENTS[4]) == f"r-community-tuesdays-{_day(3)}"
+    assert hl.target_key_for(next(e for e in EVENTS if e["guid"] == "rec777")) == f"r-community-tuesdays-{_day(3)}"
 
 
 def test_quote_counts_days_and_mondays():
@@ -130,6 +133,23 @@ def test_unknown_event_is_404():
 def test_malformed_guid_is_404():
     with pytest.raises(hl.HighlightError):
         hl.quote("../../etc")
+
+
+def test_multi_day_event_under_way_can_be_highlighted_through_its_end():
+    q = hl.quote("conf01")
+    assert q["eligible"]
+    assert q["start_date"] == TODAY.isoformat()
+    assert q["end_date"] == _day(1)
+    assert q["days"] == 2
+
+
+def test_single_day_quote_still_ends_on_the_event_day():
+    assert hl.quote("far999")["end_date"] == _day(40)
+
+
+def test_hold_snapshots_end_date():
+    item = _hold("conf01")
+    assert item["end_date"] == _day(1)
 
 
 # ─── Holds ──────────────────────────────────────────────────────────

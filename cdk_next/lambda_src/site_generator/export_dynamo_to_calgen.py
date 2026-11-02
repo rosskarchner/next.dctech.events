@@ -68,8 +68,8 @@ def _scan_all(table, **kwargs):
 # snapshot taken when it was created (for matching an event that has since
 # moved). Never the buyer's email or payment details — calgen publishes what
 # it is given.
-HIGHLIGHT_FIELDS = ('target_key', 'kind', 'title', 'date', 'time', 'url',
-                    'group', 'guid', 'recurring_slug')
+HIGHLIGHT_FIELDS = ('target_key', 'kind', 'title', 'date', 'end_date', 'time',
+                    'url', 'group', 'guid', 'recurring_slug')
 
 
 def _highlights(items):
