@@ -10,8 +10,11 @@
     <input type="hidden" name="newsletters" value="{{ newsletters }}">
 
     {% if all_categories or all_regions %}
-    <h2 style="font-size: 1.1em; margin: 1.25rem 0 0.25rem 0;">Choose what you get (optional)</h2>
-    <p style="margin: 0 0 0.75rem 0; font-size: 0.9em; color: #666;">Leave everything unchecked to get every event. You can change this later from the link at the bottom of any newsletter.</p>
+    {# Collapsed by default: most people want everything, and the full
+       topic list buries the confirm button. #}
+    <details style="margin: 1.25rem 0 0 0;"{% if selected_regions or selected_categories %} open{% endif %}>
+    <summary style="font-size: 1.1em; font-weight: 600; cursor: pointer;">Only want certain topics or areas? (optional)</summary>
+    <p style="margin: 0.5rem 0 0.75rem 0; font-size: 0.9em; color: #666;">Leave everything unchecked to get every event. You can change this later from the link at the bottom of any newsletter.</p>
 
     {% if all_regions %}
     <fieldset style="border: 0; margin: 0 0 0.75rem 0; padding: 0;">
@@ -32,6 +35,7 @@
         </div>
     </fieldset>
     {% endif %}
+    </details>
     {% endif %}
 
     <button type="submit">Yes! Sign me up!</button>

@@ -369,6 +369,16 @@ a.pick-label:hover {
     font-weight: 600;
 }
 
+/* The signup result swaps into #subscribe, which is already a green box;
+   drop the message's own box so it reads as the box's content. */
+#subscribe .success-message {
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+}
+
 /* Day Containers */
 .day-container {
     padding: var(--spacing-lg) 0;
