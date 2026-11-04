@@ -543,9 +543,7 @@ def lambda_handler(event, context):
         "week_start": publish_date.strftime("%Y-%m-%d"),
         "added_since": start.strftime("%Y-%m-%d"),
         "added_until": last_day.strftime("%Y-%m-%d"),
-        "title": (
-            f"New on DC Tech Events: week of {start.strftime('%B %-d, %Y')}"
-        ),
+        "title": "New on DC Tech Events",
         "summary": _summarize(new_events, start, last_day),
         "published_at": datetime.now(timezone.utc)
                                 .isoformat(timespec="seconds")
