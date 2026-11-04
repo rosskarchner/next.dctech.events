@@ -42,6 +42,9 @@ PATH_PREFIX = os.environ.get('PATH_PREFIX', '').rstrip('/')
 # preferences link.
 SITE_URL = os.environ.get('SITE_URL', '').rstrip('/')
 PREFERENCES_PATH = '/edit/preferences.html'
+# Who hears about each new subscriber (route_confirm_post). Unset or empty
+# turns the notice off.
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', '')
 
 # One message for both branches of route_signup, so the response never
 # reveals whether an address is already on the list.
@@ -269,6 +272,30 @@ def _send_manage_link(email):
     )
 
 
+def _notify_admin_of_subscriber(email, categories, regions):
+    """Tell the site owner someone subscribed. Best-effort: the
+    subscription already happened, so a failed notice is logged, never
+    surfaced to the subscriber."""
+    if not ADMIN_EMAIL:
+        return
+    try:
+        cats = ', '.join(categories) if categories else 'all'
+        regs = ', '.join(regions) if regions else 'all'
+        ses.send_email(
+            FromEmailAddress=FROM_EMAIL,
+            Destination={'ToAddresses': [ADMIN_EMAIL]},
+            Content={'Simple': {
+                'Subject': {'Data': f'[dctech.events] New subscriber: {email}'},
+                'Body': {'Text': {'Data': (
+                    f'{email} just confirmed a newsletter subscription.\n\n'
+                    f'Topics: {cats}\nAreas: {regs}\n'
+                )}},
+            }},
+        )
+    except Exception as e:
+        print(f"Subscriber notice failed: {e}")
+
+
 # ─── Routes ───────────────────────────────────────────────────────
 
 def route_index(event):
@@ -453,6 +480,10 @@ def route_confirm_post(event):
             return _html(_render('error.html',
                                  error='Selected newsletters are no longer accepting subscriptions'), 400)
 
+        # Only a real change of state is worth a notice: a new contact, or
+        # one coming back from opted-out. Re-clicking a confirm link while
+        # already subscribed sends nothing.
+        newly_subscribed = False
         for newsletter_slug in newsletters:
             newsletter_config = NEWSLETTERS[newsletter_slug]
             contact_list_name = newsletter_config['contact_list_name']
@@ -465,10 +496,17 @@ def route_confirm_post(event):
                     TopicPreferences=[{'TopicName': topic_name,
                                        'SubscriptionStatus': 'OPT_IN'}],
                 )
+                newly_subscribed = True
             except ses.exceptions.AlreadyExistsException:
                 contact = ses.get_contact(
                     ContactListName=contact_list_name, EmailAddress=email)
                 existing_preferences = contact['TopicPreferences']
+                was_opted_in = not contact.get('UnsubscribeAll') and any(
+                    p.get('TopicName') == topic_name
+                    and p.get('SubscriptionStatus') == 'OPT_IN'
+                    for p in existing_preferences)
+                if not was_opted_in:
+                    newly_subscribed = True
                 topic_found = False
                 for pref in existing_preferences:
                     if pref['TopicName'] == topic_name:
@@ -498,6 +536,9 @@ def route_confirm_post(event):
         regions = _clean_slugs(regions_raw, set(REGIONS.keys()))
         if categories or regions:
             db.put_subscriber_preferences(email, categories, regions)
+
+        if newly_subscribed:
+            _notify_admin_of_subscriber(email, categories, regions)
 
         return {'statusCode': 303, 'body': '',
                 'headers': {'Location': f'{BASE_URL}/confirm/success',

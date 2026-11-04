@@ -24,6 +24,7 @@ os.environ.setdefault("TOPIC_NAME", "dctech")
 os.environ.setdefault("BASE_URL", "https://dctech.events/newsletter")
 os.environ.setdefault("PATH_PREFIX", "/newsletter")
 os.environ.setdefault("PREFS_KEY_ID", "test-prefs-key")
+os.environ.setdefault("ADMIN_EMAIL", "admin@example.com")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api'))
 
@@ -418,3 +419,43 @@ def test_the_form_carries_no_csrf_token():
         body = app.route_index({"headers": headers})["body"]
         assert "csrf_token" not in body and "temp_id" not in body
     assert not hasattr(app, "secrets")  # no Secrets Manager client at all
+
+
+# ── new-subscriber notice ───────────────────────────────────────────
+
+def _admin_notices():
+    return [m for m in app.ses.sent
+            if m["Destination"]["ToAddresses"] == ["admin@example.com"]]
+
+
+def test_a_new_subscriber_notifies_the_admin():
+    app.route_confirm_post(
+        _confirm_event("fresh@example.com", categories=["ai"]))
+    [notice] = _admin_notices()
+    assert "fresh@example.com" in notice["Content"]["Simple"]["Subject"]["Data"]
+    body = notice["Content"]["Simple"]["Body"]["Text"]["Data"]
+    assert "Topics: ai" in body and "Areas: all" in body
+
+
+def test_a_returning_subscriber_notifies_the_admin():
+    # A literal, not OPT_OUT: list(OPT_OUT) shares its dict, and earlier
+    # confirm tests flip that dict to OPT_IN in place.
+    app.ses.contacts["back@example.com"] = [
+        {"TopicName": "dctech", "SubscriptionStatus": "OPT_OUT"}]
+    app.route_confirm_post(_confirm_event("back@example.com"))
+    assert len(_admin_notices()) == 1
+
+
+def test_reconfirming_while_subscribed_sends_no_notice():
+    app.ses.contacts["member@example.com"] = [dict(p) for p in OPT_IN]
+    app.route_confirm_post(_confirm_event("member@example.com"))
+    assert _admin_notices() == []
+
+
+def test_a_failed_notice_does_not_fail_the_confirmation(monkeypatch):
+    def boom(**kwargs):
+        raise RuntimeError("ses down")
+    monkeypatch.setattr(app.ses, "send_email", boom)
+    resp = app.route_confirm_post(_confirm_event("unlucky@example.com"))
+    assert resp["statusCode"] == 303
+    assert app._is_subscribed("unlucky@example.com")

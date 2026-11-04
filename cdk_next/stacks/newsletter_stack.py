@@ -113,6 +113,9 @@ class NextNewsletterStack(cdk.Stack):
                 # /edit/preferences.html on the site root; BASE_URL above
                 # is this function's own /newsletter mount.
                 "SITE_URL": config.BASE_URL,
+                # route_confirm_post emails this address about each new
+                # subscriber, via the same ses:SendEmail grant as above.
+                "ADMIN_EMAIL": config.NEWSLETTER_ADMIN_EMAIL,
             },
             log_group=logs.LogGroup(
                 self,
