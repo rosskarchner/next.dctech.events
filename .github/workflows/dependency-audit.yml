@@ -38,6 +38,9 @@ jobs:
           # directly (not a venv) — the same directories build_lambdas.sh
           # just populated, so this audits exactly what actually gets
           # deployed, not a second, potentially-different resolution.
+          # calendar_qc is no longer built (retired 2026-09-19). calgen shows
+          # up as "not found on PyPI" in the skip list; that is informational
+          # (it is the in-repo package), not a failure.
           # ops/updates_publisher/social_publisher/qa_trigger/
           # site_generator_trigger have no third-party deps of their own
           # (stdlib + the Lambda-provided boto3 only) — nothing to audit.
@@ -45,5 +48,4 @@ jobs:
             --path cdk_next/build/api \
             --path cdk_next/build/mcp \
             --path cdk_next/build/ical_aggregator \
-            --path cdk_next/build/newsletter \
-            --path cdk_next/build/calendar_qc
+            --path cdk_next/build/newsletter

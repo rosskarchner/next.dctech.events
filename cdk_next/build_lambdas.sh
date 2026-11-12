@@ -133,37 +133,11 @@ if [ -e lambda_src/qa_trigger/handler.py ]; then
   rm -rf build/qa_trigger/test_*.py build/qa_trigger/__pycache__
 fi
 
-# ── calendar_qc (AgentCore Runtime asset) ───────────────────────────
-# NOT a Lambda: AgentCore Runtime is Graviton-only, so this one target builds
-# aarch64 wheels. Installing the x86_64 set used everywhere else above yields
-# a runtime that fails at cold start with an ELF class error.
-if [ -d agents/calendar_qc ]; then
-  mkdir -p build/calendar_qc
-  cp -r agents/calendar_qc/. build/calendar_qc/
-  rm -rf build/calendar_qc/test_*.py build/calendar_qc/__pycache__
-  # --only-binary :all: is not just speed here. A source build would compile
-  # against this machine's architecture and silently ship x86_64 objects to a
-  # Graviton runtime; failing the build is the correct outcome instead.
-  #
-  # This lands around 280M unpacked / 92M zipped, mostly playwright's bundled
-  # node driver — which the browser tool needs even though the browser itself
-  # runs remotely. AgentCore direct-code limits are 250M zipped / 750M
-  # unpacked, so there is room, but check both if dependencies grow.
-  # strands-agents-tools[agent_core_browser] pulls in pillow transitively;
-  # 12.2.0 (the resolved version as of 2026-09-01) has 20 known CVEs fixed in
-  # 12.3.0 (pip-audit). NOT pinned to 12.3.0 here: that release has no
-  # aarch64/py3.12 wheels published yet (source-only), and --only-binary
-  # :all: above is load-bearing, not just speed — so there is currently no
-  # way to pick up the fix without also allowing a source build, which risks
-  # silently shipping wrong-arch objects to this Graviton runtime. Re-check
-  # once wheels land; the dependency-audit CI workflow will keep flagging
-  # this until then.
-  uv pip install --python-platform aarch64-manylinux_2_17 \
-    --python-version "$PY_VERSION" --link-mode=copy --only-binary :all: \
-    --target build/calendar_qc \
-    strands-agents "strands-agents-tools[agent_core_browser]" \
-    bedrock-agentcore "mcp>=1.9,<2" httpx
-fi
+# calendar_qc (agents/calendar_qc) is NOT built: NextQaAgentStack was retired
+# 2026-09-19 and app.py no longer instantiates it, so its asset never ships.
+# Building it anyway pulled in strands-agents-tools' transitive pillow pin,
+# which kept failing the dependency-audit workflow for code nobody deploys.
+# See git history of this file for the aarch64 install recipe if it returns.
 
 # ── site_generator trigger (pure stdlib + boto3) ────────────────────
 if [ -e lambda_src/site_generator/trigger/handler.py ]; then
