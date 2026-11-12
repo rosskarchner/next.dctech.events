@@ -7,11 +7,12 @@ valid, empty calendar; and one organizer often cross-lists the same online serie
 under several city-named groups. This prints, per feed, how many events are
 coming up, the next two (date, title, location), and flags the patterns above.
 
-    python3 .claude/skills/discovery/probe_feeds.py mywauug opensearch-project-washington-dc
-    python3 .claude/skills/discovery/probe_feeds.py https://api.lu.ma/ics/get?entity=calendar&id=cal-XXXX
+    packages/calgen/.venv/bin/python .claude/skills/discovery/probe_feeds.py mywauug opensearch-project-washington-dc
+    packages/calgen/.venv/bin/python .claude/skills/discovery/probe_feeds.py 'https://api.lu.ma/ics/get?entity=calendar&id=cal-XXXX'
 
-A bare word is treated as a Meetup group slug. Needs `icalendar` (a calgen
-dependency, so it is present wherever calgen's tests run). Read-only; makes only
+A bare word is treated as a Meetup group slug. Needs `icalendar`, a calgen
+dependency: run it with calgen's venv as above, since the system python3 doesn't
+have it. Read-only; makes only
 GET requests to the feeds you name.
 
 Reading the output:
@@ -53,7 +54,7 @@ METRO = {
     "washington", "arlington", "alexandria", "fairfax", "reston", "tysons",
     "tysons corner", "mclean", "vienna", "herndon", "ashburn", "sterling",
     "leesburg", "manassas", "falls church", "springfield", "chantilly",
-    "centreville", "burke", "woodbridge", "dulles", "mclean", "oakton",
+    "centreville", "burke", "woodbridge", "dulles", "mc lean", "oakton",
     "bethesda", "silver spring", "rockville", "gaithersburg", "germantown",
     "potomac", "chevy chase", "takoma park", "college park", "greenbelt",
     "hyattsville", "laurel", "bowie", "upper marlboro", "riverdale", "beltsville",

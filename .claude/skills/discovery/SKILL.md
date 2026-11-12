@@ -251,8 +251,9 @@ Each step is cheap; the later ones cost a fetch.
 3. **In scope?** DC-area organizer, tech subject (see Scope). A national series,
    a vendor webinar mill, or a general networking group stops here.
 4. **Find the feed**, then run
-   `python3 .claude/skills/discovery/probe_feeds.py <slug-or-feed-url> ...`
-   (several at once is fine). It reports each Meetup group's home city and the
+   `packages/calgen/.venv/bin/python .claude/skills/discovery/probe_feeds.py <slug-or-feed-url> ...`
+   (several at once is fine). Use calgen's venv, not the system `python3`:
+   the script needs `icalendar`, which the system Python doesn't have. It reports each Meetup group's home city and the
    upcoming events per feed, and flags the patterns below. Then
    `verify_ical_feed` confirms the feed parses; `propose_group` re-verifies it.
    - **`[City, ST] OUT`** — the group is based outside DC, VA and MD. Skip it
