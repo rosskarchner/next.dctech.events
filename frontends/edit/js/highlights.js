@@ -40,6 +40,20 @@
     return d.toISOString().slice(0, 10);
   }
 
+  // Today in DC (en-CA formats as YYYY-MM-DD), matching the server's
+  // LOCAL_TZ, so an event is "past" on the same day the site drops it.
+  function dcToday() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date());
+  }
+
+  // The last day a highlighted event runs (a multi-day event stays current
+  // until its end_date), mirroring highlights.last_day on the server.
+  function lastDay(h) {
+    return h.end_date && h.end_date > (h.date || '') ? h.end_date : (h.date || '');
+  }
+
   function row(h) {
     const start = h.date ? addDays(h.date, -21) : '';
     const buyer = h.kind === 'paid'
@@ -67,7 +81,11 @@
       const data = await request(`/api/admin/highlights${query}`);
       el('price-label').textContent = data.price_usd && data.price_usd !== '0'
         ? `Price: $${data.price_usd}` : 'Price not set: paid highlights are off';
-      const rows = data.highlights || [];
+      const includePast = el('include-past').checked;
+      const today = dcToday();
+      // Rows with no date are kept: hiding them would hide a data problem.
+      const rows = (data.highlights || []).filter(
+        (h) => includePast || !lastDay(h) || lastDay(h) >= today);
       el('hl-rows').innerHTML = rows.length
         ? rows.map(row).join('')
         : '<tr><td colspan="6" class="muted">Nothing here.</td></tr>';
@@ -132,6 +150,7 @@
   function init() {
     if (!DctechAuth.requireAdmin()) return;
     el('status-filter').addEventListener('change', load);
+    el('include-past').addEventListener('change', load);
     el('hl-rows').addEventListener('click', onAction);
     el('pick-form').addEventListener('submit', onPick);
     load();
