@@ -27,9 +27,9 @@
                                 {% endfor %}
                                 <li class="h-event event{% if ns.icon_slug %} has-category-icon{% endif %}{% if event.highlight %} has-pick{% endif %}">
                                     {% if ns.icon_slug %}
-                                        <img class="event-category-icon" src="/static/images/categories/{{ ns.icon_slug }}.png" width="64" height="64" loading="lazy" alt="{{ categories[ns.icon_slug].name if categories and ns.icon_slug in categories else ns.icon_slug }}">
+                                        <img class="event-category-icon" src="/static/images/categories/{{ ns.icon_slug }}.png" width="40" height="40" loading="lazy" alt="{{ categories[ns.icon_slug].name if categories and ns.icon_slug in categories else ns.icon_slug }}">
                                     {% endif %}
-                                    <a class="u-url p-name" href="{{ event.url }}" target="_blank" rel="noopener noreferrer">{{ event.title }}</a>{% if event.display_title != event.title %} <span class="p-summary">{{ event.display_title | replace(event.title, '') }}</span>{% endif %}{% if event.permalink %}<a class="event-permalink" href="{{ event.permalink }}" aria-label="Permalink to {{ event.title }} on {{ site_name }}" title="Permalink on {{ site_name }}">🔎</a>{% endif %}
+                                    <a class="u-url p-name" href="{{ event.url }}" target="_blank" rel="noopener noreferrer">{{ event.title }}</a>{% if event.display_title != event.title %} <span class="p-summary">{{ event.display_title | replace(event.title, '') }}</span>{% endif %}{% if event.permalink %}<a class="event-permalink" href="{{ event.permalink }}" aria-label="See more event details for {{ event.title }}" title="see more event details">🛈</a>{% endif %}
                                     {% if event.highlight %}<a class="pick-label pick-label-{{ 'editor' if event.highlight.kind == 'editor' else 'buyer' }}" href="/highlights/">{{ event.highlight.label }}</a>{% endif %}
                                     {% if event.is_recurring %}<span class="recurring-badge">🔄 Recurring</span><span class="recurring-note">Confirm date/time with the organizer</span>{% endif %}
                                     {# dt-start is the event's own start: on its start day with the
@@ -41,34 +41,18 @@
                                     {% if not (event.time and on_start_day) %}<data class="dt-start" value="{{ ev_start }}"></data>{% endif %}
                                     {% if event.end_date and event.end_date > ev_start %}<data class="dt-end" value="{{ event.end_date }}"></data>{% endif %}
                                     <div class="event-details">
-                                        {% if event.location %}
-                                            <div class="p-location event-location">
-                                                {{ event.location }}
-                                            </div>
-                                        {% endif %}
-                                        {% if event.group %}
-                                           <div class="p-organizer h-card">
-                                            {% if event.group_website %}
-                                                <a class="u-url p-name" href="{{ event.group_website }}" target="_blank" rel="noopener noreferrer">{{ event.group }}</a>
-                                            {% else %}
-                                                <span class="p-name">{{ event.group }}</span>
-                                            {% endif %}
-                                            </div>
-                                        {% endif %}
+                                        {# Location, organizer and categories share one quiet line so
+                                           the title is the only strong link in the card. #}
+                                        <div class="event-meta">
+                                        {% if event.location %}<span class="p-location event-location">{{ event.location }}</span>{% endif %}
+                                        {% if event.group %}<span class="p-organizer h-card">by {% if event.group_website %}<a class="u-url p-name" href="{{ event.group_website }}" target="_blank" rel="noopener noreferrer">{{ event.group }}</a>{% else %}<span class="p-name">{{ event.group }}</span>{% endif %}</span>{% endif %}
+                                        {% if event.categories %}<span class="event-categories">{% for cat_slug in event.categories %}{% if categories and cat_slug in categories %}<a href="/categories/{{ cat_slug }}/" class="category-badge">{{ categories[cat_slug].name }}</a>{% endif %}{% endfor %}</span>{% endif %}
+                                        </div>
                                         {% if event.also_published_by %}
                                             <div class="also-published-by">
                                                 Also published by 
                                                 {% for alt_group in event.also_published_by %}
                                                     <a href="{{ alt_group.url }}" target="_blank" rel="noopener noreferrer">{{ alt_group.group }}</a>{% if not loop.last %}{% if loop.revindex == 2 %} and {% else %}, {% endif %}{% endif %}
-                                                {% endfor %}
-                                            </div>
-                                        {% endif %}
-                                        {% if event.categories %}
-                                            <div class="event-categories">
-                                                {% for cat_slug in event.categories %}
-                                                    {% if categories and cat_slug in categories %}
-                                                        <a href="/categories/{{ cat_slug }}/" class="category-badge">{{ categories[cat_slug].name }}</a>
-                                                    {% endif %}
                                                 {% endfor %}
                                             </div>
                                         {% endif %}
