@@ -16,6 +16,15 @@ Mastodon and Bluesky. Items are resolved without posting when:
 * it is a virtual event (the enqueuer already drops these; this catches ones
   queued before that, or reclassified since).
 
+An event more than HOLD_DAYS away is neither posted nor resolved: it is held,
+by moving its GSI1SK from the enqueue time to the moment it comes within
+HOLD_DAYS (midnight Eastern, HOLD_DAYS before its date). The pending query
+only asks for GSI1SK <= now, so a held item costs nothing until it is due,
+then rejoins the queue ahead of anything enqueued after that moment. When it
+does come up it is re-checked from scratch — a postponed event is held again,
+a cancelled one skipped. (An event moved *earlier* is not noticed until its
+old release time; if that is after the new date, it is skipped as past.)
+
 Which one gets posted is not plain FIFO. A feed that lands dozens of events in
 one sync would otherwise hold the queue for days, so the worker prefers an
 event whose group is not among the last RECENT_GROUP_WINDOW groups posted
@@ -44,7 +53,7 @@ Manual invoke, to drain the queue without waiting for the next hour:
 """
 import json
 import os
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -71,6 +80,9 @@ NETWORKS = (("mastodon", "mastodon_id"), ("bluesky", "bluesky_uri"))
 CANDIDATE_LIMIT = 100
 RECENT_GROUP_WINDOW = 3
 STATE_PK = "SOCIALQUEUE#STATE"
+
+# Don't announce an event until it is less than this many days away.
+HOLD_DAYS = 30
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -155,13 +167,34 @@ def _is_past(event, now=None):
     return event_date < now.date()
 
 
+def _now():
+    return datetime.now(EASTERN)
+
+
+def _iso_utc(dt):
+    """Same format the enqueuer writes to GSI1SK, so the two sort together."""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _held_until(event, now=None):
+    """GSI1SK to park this item under if it is still more than HOLD_DAYS
+    away, else None. Called only after _is_past, so the date parses."""
+    now = now or _now()
+    event_date = datetime.strptime(str(event.get("date")), "%Y-%m-%d").date()
+    release = datetime.combine(event_date - timedelta(days=HOLD_DAYS),
+                               dt_time.min, tzinfo=EASTERN)
+    return _iso_utc(release) if release > now else None
+
+
 # ── the queue ────────────────────────────────────────────────────────
 
 
 def _pending(table):
+    # Held items sit under a future GSI1SK (see _hold) and are left out.
     resp = table.query(
         IndexName="GSI1",
-        KeyConditionExpression=Key("GSI1PK").eq("SOCIALQUEUE#PENDING"),
+        KeyConditionExpression=(Key("GSI1PK").eq("SOCIALQUEUE#PENDING")
+                                & Key("GSI1SK").lte(_iso_utc(_now()))),
         ScanIndexForward=True,
         Limit=CANDIDATE_LIMIT,
     )
@@ -208,6 +241,15 @@ def _resolve(table, queue_pk, status):
         UpdateExpression="SET #status = :status REMOVE GSI1PK, GSI1SK",
         ExpressionAttributeNames={"#status": "status"},
         ExpressionAttributeValues={":status": status},
+    )
+
+
+def _hold(table, queue_pk, release):
+    """Park a not-yet-due item until `release`, keeping it pending."""
+    table.update_item(
+        Key={"PK": queue_pk, "SK": "META"},
+        UpdateExpression="SET GSI1SK = :release",
+        ExpressionAttributeValues={":release": release},
     )
 
 
@@ -290,6 +332,7 @@ def _process_one(table):
 
     viable = []
     first_skip = None
+    first_hold = None
     for queue_item in pending:
         queue_pk = queue_item["PK"]
         guid = str(queue_item.get("event_guid") or queue_pk.split("#", 1)[1])
@@ -300,6 +343,11 @@ def _process_one(table):
             reason = "virtual event"
         elif _is_past(event):
             reason = "event date has passed"
+        elif release := _held_until(event):
+            _hold(table, queue_pk, release)
+            first_hold = first_hold or {"status": "held", "pk": queue_pk,
+                                        "until": release}
+            continue
         else:
             viable.append((queue_item, event))
             continue
@@ -308,7 +356,7 @@ def _process_one(table):
                                     "reason": reason}
 
     if not viable:
-        return first_skip
+        return first_skip or first_hold
 
     recent = _recent_groups(table)
     results = {}
@@ -342,7 +390,7 @@ def _process_one(table):
         results[network] = {"status": "posted", "pk": queue_pk, "url": url}
 
     if not results:
-        return first_skip or {"status": "empty"}
+        return first_skip or first_hold or {"status": "empty"}
 
     posted_groups = []
     for queue_pk, (queue_item, event) in touched.items():

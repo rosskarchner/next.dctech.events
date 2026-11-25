@@ -29,6 +29,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "social_publisher"
 
 import app  # noqa: E402
 
+_real_held_until = app._held_until
+
 
 def _event(**overrides):
     item = {
@@ -153,7 +155,12 @@ class _FakeTable:
         return {"Item": item} if item else {}
 
     def query(self, IndexName, KeyConditionExpression, ScanIndexForward=True, Limit=None):
-        pending = [i for i in self.items.values() if i.get("GSI1PK") == "SOCIALQUEUE#PENDING"]
+        # Honour the worker's `GSI1PK = X AND GSI1SK <= now` key condition.
+        (_, pk_value), (_, sk_max) = (
+            c.get_expression()["values"]
+            for c in KeyConditionExpression.get_expression()["values"])
+        pending = [i for i in self.items.values()
+                   if i.get("GSI1PK") == pk_value and i.get("GSI1SK", "") <= sk_max]
         pending.sort(key=lambda i: i.get("GSI1SK", ""), reverse=not ScanIndexForward)
         return {"Items": pending[:Limit] if Limit else pending}
 
@@ -376,6 +383,7 @@ def _posted_pk(result):
 
 def _stub_posting(monkeypatch):
     monkeypatch.setattr(app, "_is_past", lambda event, now=None: False)
+    monkeypatch.setattr(app, "_held_until", lambda event, now=None: None)
     monkeypatch.setattr(app.networks, "mastodon_post",
                          lambda secret, text, idempotency_key=None:
                          {"id": "1", "url": "https://m/1"})
@@ -460,3 +468,68 @@ def test_a_virtual_event_is_skipped_not_posted(monkeypatch):
     table.items[("EVENT#v1", "META")]["location_type"] = "virtual"
     assert _posted_pk(app._process_one(table)) == "SOCIALQUEUE#p1"
     assert table.items[("SOCIALQUEUE#v1", "META")]["status"] == "skipped"
+
+
+# ── holding far-off events ───────────────────────────────────────────
+
+
+def _at(*args):
+    return datetime(*args, tzinfo=ZoneInfo("America/New_York"))
+
+
+def test_an_event_31_days_out_is_held_until_it_is_30_days_out():
+    now = _at(2026, 9, 30, 12, 0)
+    # 2026-10-31 minus 30 days = midnight Eastern on 2026-10-01 (04:00Z).
+    assert app._held_until(_event(date="2026-10-31"), now=now) == "2026-10-01T04:00:00Z"
+
+
+def test_an_event_within_30_days_is_not_held():
+    now = _at(2026, 10, 1, 0, 0, 1)
+    assert app._held_until(_event(date="2026-10-31"), now=now) is None
+    assert app._held_until(_event(date="2026-10-02"), now=now) is None
+
+
+def test_a_far_off_event_is_parked_not_posted_or_resolved(monkeypatch):
+    _stub_posting(monkeypatch)
+    monkeypatch.setattr(app, "_held_until", _real_held_until)
+    monkeypatch.setattr(app, "_now", lambda: _at(2026, 9, 15, 12, 0))
+    table = _FakeTable(_seed(
+        ("far", "AFCEA", "2026-12-01", "2026-09-01T00:00:00Z"),
+        ("near", "HacDC", "2026-10-01", "2026-09-02T00:00:00Z"),
+    ))
+    assert _posted_pk(app._process_one(table)) == "SOCIALQUEUE#near"
+    far = table.items[("SOCIALQUEUE#far", "META")]
+    assert far["status"] == "pending"
+    assert far["GSI1PK"] == "SOCIALQUEUE#PENDING"
+    assert far["GSI1SK"] == "2026-11-01T04:00:00Z"
+    assert "mastodon_id" not in far
+
+    # Nothing else is due until the release time...
+    assert app._process_one(table) == {"status": "empty"}
+
+    # ...and then it is picked up and posted.
+    monkeypatch.setattr(app, "_now", lambda: _at(2026, 11, 1, 9, 0))
+    assert _posted_pk(app._process_one(table)) == "SOCIALQUEUE#far"
+
+
+def test_a_run_with_only_far_off_events_reports_held(monkeypatch):
+    _stub_posting(monkeypatch)
+    monkeypatch.setattr(app, "_held_until", _real_held_until)
+    monkeypatch.setattr(app, "_now", lambda: _at(2026, 9, 15, 12, 0))
+    table = _FakeTable(_seed(("far", "AFCEA", "2026-12-01", "2026-09-01T00:00:00Z")))
+    result = app._process_one(table)
+    assert result == {"status": "held", "pk": "SOCIALQUEUE#far",
+                      "until": "2026-11-01T04:00:00Z"}
+
+
+def test_a_postponed_event_is_held_again_when_it_comes_due(monkeypatch):
+    _stub_posting(monkeypatch)
+    monkeypatch.setattr(app, "_held_until", _real_held_until)
+    monkeypatch.setattr(app, "_now", lambda: _at(2026, 9, 15, 12, 0))
+    table = _FakeTable(_seed(("far", "AFCEA", "2026-12-01", "2026-09-01T00:00:00Z")))
+    app._process_one(table)
+    table.items[("EVENT#far", "META")]["date"] = "2027-01-15"
+
+    monkeypatch.setattr(app, "_now", lambda: _at(2026, 11, 1, 9, 0))
+    assert app._process_one(table)["status"] == "held"
+    assert table.items[("SOCIALQUEUE#far", "META")]["GSI1SK"] == "2026-12-16T05:00:00Z"
