@@ -68,7 +68,7 @@
                   "name": {{ event.title | tojson }},
                   "url": {{ event.url | tojson }},
                   {% if event.time %}
-                  "startDate": "{{ day.date }}T{{ event.time }}",
+                  "startDate": {{ day.date | iso_local(event.time) | tojson }},
                   {% endif %}
                   {% if event.group %}
                   "organizer": {

@@ -1,16 +1,20 @@
 """Site-wide feeds index, sitemap, and site-wide events JSON/iCal/RSS."""
 import json
 import os
+from datetime import timedelta
 
 from flask import Response, render_template
 
+from calgen.lastmod import get_event_lastmods
 from calgen.location_utils import get_region_name
 from calgen.site_config import get_config
+from calgen.structured import iana_timezone
 from calgen.updates import get_all_posts
 from calgen.routes.common import (
     THIN_FACET_MIN_EVENTS, get_events, get_categories, get_events_by_slug,
     get_recently_added, get_all_months, get_all_week_ids,
-    get_category_month_counts, _generate_ical_feed, _generate_rss_feed,
+    get_category_month_counts, get_week_identifier, local_today, _generate_ical_feed,
+    _generate_rss_feed, public_events_json,
 )
 
 
@@ -75,8 +79,15 @@ def register_routes(app):
         for slug in get_categories().keys():
             urls.append({'loc': f"{base_url}/categories/{slug}/"})
 
+        # Event pages carry the date `calgen lastmod` last saw their rendered
+        # content change, carried across builds; absent when unknown. Unlike
+        # the listing pages, a single event has a real change date to report.
+        event_lastmods = get_event_lastmods()
         for slug in get_events_by_slug():
-            urls.append({'loc': f"{base_url}/events/{slug}/"})
+            url = {'loc': f"{base_url}/events/{slug}/"}
+            if event_lastmods.get(slug):
+                url['lastmod'] = event_lastmods[slug]
+            urls.append(url)
 
         if get_recently_added():
             urls.append({'loc': f"{base_url}/just-added/"})
@@ -110,6 +121,51 @@ def register_routes(app):
             xml.append('  </url>')
         xml.append('</urlset>')
         return Response('\n'.join(xml), mimetype='application/xml')
+
+    @app.route("/llms.txt")
+    def llms_txt():
+        """A map of the site for language-model agents (llmstxt.org).
+
+        Says what the site covers, where the machine-readable data is, and
+        the one rule that matters: details belong to the organizer, so link
+        there and tell people to confirm. Rendered per build so the category
+        and location lists stay current.
+        """
+        cfg = get_config()
+        plugin = app.region_plugin
+        events = get_events()
+        categories = []
+        for slug, category in sorted(get_categories().items(), key=lambda x: x[1]['name']):
+            count = sum(1 for e in events if slug in e.get('categories', []))
+            if count:
+                categories.append({'slug': slug, 'name': category['name'],
+                                   'description': category.get('description', ''),
+                                   'count': count})
+        regions = []
+        if plugin:
+            for region in plugin.list_regions():
+                count = sum(1 for e in events if e.get('region') == region['slug'])
+                if count:
+                    regions.append({'slug': region['slug'], 'name': region['name'],
+                                    'count': count})
+        body = render_template('llms.txt',
+                               base_url=cfg.get('base_url', ''),
+                               timezone=iana_timezone(),
+                               total=len(events),
+                               categories=categories,
+                               regions=regions,
+                               week_ids=[get_week_identifier(local_today() + timedelta(weeks=i))
+                                         for i in range(4)])
+        return Response(body, mimetype='text/plain')
+
+    @app.route("/calendar.json")
+    def calendar_json():
+        """Every upcoming event in the public shape (calgen.structured).
+
+        /events.json stays as it is: its internal record shape is what the
+        MCP tools and existing scripts read, guid included.
+        """
+        return public_events_json(get_events(), title="Every upcoming event", page="/")
 
     @app.route("/events.json")
     def events_json():

@@ -36,6 +36,19 @@
             </div>
         </div>
 
+        <!-- JSON for scripts and AI agents -->
+        <div style="margin-top: 2rem;">
+            <h3>JSON for Developers and AI Agents</h3>
+            <div class="feed-list" style="margin-left: 1rem;">
+                <div class="feed-item" style="margin-bottom: 1rem;">
+                    <strong>All Upcoming Events (JSON)</strong>
+                    <br>
+                    <a href="{{ base_url }}/calendar.json" style="font-family: monospace; font-size: 0.9em;">{{ base_url }}/calendar.json</a>
+                    <p style="margin: 0.5rem 0 0 0; color: #666;">Every category, location and week page also has an <code>events.json</code> beside it with the same events. <a href="{{ base_url }}/llms.txt">llms.txt</a> describes the fields and lists every file.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Category Feeds -->
         {% if categories %}
         <div style="margin-top: 2rem;">
@@ -51,6 +64,9 @@
                     <br>
                     <span style="margin-left: 1rem;">RSS:</span> 
                     <a href="{{ base_url }}/categories/{{ category.slug }}/feed.xml" style="font-family: monospace; font-size: 0.9em;">{{ base_url }}/categories/{{ category.slug }}/feed.xml</a>
+                    <br>
+                    <span style="margin-left: 1rem;">JSON:</span>
+                    <a href="{{ base_url }}/categories/{{ category.slug }}/events.json" style="font-family: monospace; font-size: 0.9em;">{{ base_url }}/categories/{{ category.slug }}/events.json</a>
                 </div>
                 {% endfor %}
             </div>

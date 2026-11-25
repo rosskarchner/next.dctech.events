@@ -16,6 +16,7 @@
 {% block og_image_alt %}Events for Week of {{ week_start_formatted }}{% endblock %}
 
 {% block extra_head %}
+<link rel="alternate" type="application/json" title="Events for Week of {{ week_start_formatted }} (JSON)" href="events.json">
 <!-- JSON-LD Structured Data -->
 <script type="application/ld+json">
 {

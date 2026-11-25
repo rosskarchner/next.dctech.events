@@ -23,6 +23,7 @@ import os
 from datetime import datetime
 
 from calgen.site_config import get_config
+from calgen.structured import iso_local
 from calgen.regions import load_region_plugin  # noqa: E402
 
 from calgen.routes.common import (
@@ -42,6 +43,7 @@ from calgen.routes import newsletter as _newsletter_routes
 from calgen.routes import listings as _listings_routes
 from calgen.routes import sponsors as _sponsors_routes
 from calgen.routes import highlights as _highlights_routes
+from calgen import indexnow as _indexnow
 
 
 def create_app(site_dir=None):
@@ -67,6 +69,10 @@ def create_app(site_dir=None):
     app.region_plugin = load_region_plugin(site_dir)
     app.category_icon_slugs = _load_category_icon_slugs(static_dir)
 
+    # Listing pages' JSON-LD needs the same offset-qualified times as the
+    # event page; see calgen.structured.iso_local.
+    app.jinja_env.filters['iso_local'] = iso_local
+
     _register_routes(app)
     _groups_routes.register_routes(app)
     _events_routes.register_routes(app)
@@ -78,6 +84,7 @@ def create_app(site_dir=None):
     _listings_routes.register_routes(app)
     _sponsors_routes.register_routes(app)
     _highlights_routes.register_routes(app)
+    _indexnow.register_routes(app)
     return app
 
 

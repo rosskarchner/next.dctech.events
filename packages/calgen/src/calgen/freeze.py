@@ -100,6 +100,39 @@ def create_freezer(app):
     def ical_feed():
         yield {}
 
+    # Machine-readable views for agents and scripts (calgen.structured).
+    @freezer.register_generator
+    def llms_txt():
+        yield {}
+
+    @freezer.register_generator
+    def calendar_json():
+        yield {}
+
+    @freezer.register_generator
+    def category_events_json():
+        for slug in get_categories().keys():
+            yield {'slug': slug}
+
+    @freezer.register_generator
+    def location_events_json():
+        if plugin:
+            for region in plugin.list_regions():
+                yield {'slug': region['slug']}
+
+    @freezer.register_generator
+    def week_events_json():
+        # Same weeks as week_page, archived ones included, so every week page
+        # has its JSON beside it.
+        for week_id in get_all_week_ids(12):
+            yield {'week_id': week_id}
+
+    @freezer.register_generator
+    def indexnow_key_file():
+        # Endpoint exists only when config.yaml has indexnow_key.
+        if 'indexnow_key_file' in app.view_functions:
+            yield {}
+
     @freezer.register_generator
     def events_rss_feed():
         yield {}

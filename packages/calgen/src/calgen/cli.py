@@ -9,7 +9,10 @@ Commands:
   calgen og-preview Render one card from CLI args, or a sample grid — no
                     _data/, no DynamoDB export, for fast local iteration on
                     the card design itself
+  calgen lastmod    Record which event pages changed since the last build
+                    (sitemap <lastmod>, IndexNow)
   calgen build      Freeze the site to static HTML
+  calgen indexnow   Ping IndexNow with the pages `lastmod` found changed
 
 Event data comes from DynamoDB via cdk_next's export_dynamo_to_calgen.py,
 which writes the _groups/, _categories/, _single_events/, _recurring_events/,
@@ -224,6 +227,48 @@ def og_images(site_dir):
         written += 1
 
     click.echo(f"Wrote {written} social share cards to {out_dir}")
+
+
+@cli.command()
+@click.option('--site-dir', default='.', type=click.Path(), help='Site directory (default: .)')
+def lastmod(site_dir):
+    """Record which event pages changed since the last build.
+
+    Run after `calgen pipeline` and before `calgen build`: sitemap.xml reads
+    the result for each event's <lastmod>, and the state file it writes under
+    static/ is published so the next build can compare against it. Put the
+    previous build's copy at _data/previous_event_lastmod.json first, or every
+    event is treated as having no comparable history (see calgen.lastmod).
+    """
+    _prepare_site_dir(site_dir)
+    from calgen import lastmod as lastmod_mod
+    from calgen.routes.common import get_events_by_slug, local_today
+
+    had_previous = lastmod_mod.load_previous() is not None
+    # The same event set the sitemap and the event pages are built from.
+    events = list(get_events_by_slug().values())
+    state, changed = lastmod_mod.run(events, local_today().isoformat())
+    dated = sum(1 for entry in state.values() if entry.get('lastmod'))
+    click.echo(f"lastmod: {len(state)} event pages, {dated} dated, "
+               f"{len(changed)} new or changed"
+               + ('' if had_previous else ' (no previous state; nothing compared)'))
+
+
+@cli.command()
+@click.option('--site-dir', default='.', type=click.Path(), help='Site directory (default: .)')
+@click.option('--dry-run', is_flag=True, help='Print what would be submitted, send nothing')
+def indexnow(site_dir, dry_run):
+    """Tell IndexNow search engines (Bing and partners) which pages changed.
+
+    Run after the site is published, so a crawler that follows up finds the
+    new page and the key file. Submits only the event pages `calgen lastmod`
+    found new or changed, plus the homepage when there were any. Does nothing
+    without `indexnow_key` in config.yaml. Never exits non-zero: a failed
+    ping only means the crawler finds the change on its own schedule.
+    """
+    _prepare_site_dir(site_dir)
+    from calgen.indexnow import submit_changed
+    click.echo(submit_changed(dry_run=dry_run))
 
 
 @cli.command()

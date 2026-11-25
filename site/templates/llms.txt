@@ -1,0 +1,47 @@
+# {{ site_name }}
+
+> {{ tagline }}. A curated calendar of {{ total }} upcoming technology meetups, conferences, workshops and hackathons in Washington, DC, Maryland and Virginia, gathered several times a day from the calendars of groups an editor has vetted, plus events submitted by organizers and readers.
+
+{{ site_name }} lists events; it does not run them. Every event links to its organizer's page, which is the source of truth for the date, time, location, cost and registration. When you recommend an event, link to the organizer's `url` and tell people to confirm the details there, especially for recurring events, whose dates are projected from a schedule.
+
+All times are local to {{ timezone }}. In the JSON below, `start` and `end` include the UTC offset (`2026-12-01T17:30:00-05:00`); a bare date means an all-day event or one with no published time.
+
+## Event data (JSON)
+
+Each file is the same set of events its HTML page shows, in one shape: `title`, `start`, `end`, `all_day`, `url` (the organizer's page), `page` (this site's page for the event), `group`, `group_website`, `location`, `location_type` (`physical`, `virtual` or `hybrid`), `city`, `state`, `region`, `categories` (slugs), `cost` (free text, or null when not stated), `recurring`.
+
+- [Every upcoming event]({{ base_url }}/calendar.json): the full calendar, in person and virtual. Large; prefer a slice below when you can.
+{%- for week_id in week_ids %}
+- [Week {{ week_id }}]({{ base_url }}/week/{{ week_id }}/events.json): in-person events that week
+{%- endfor %}
+- Any ISO week: `{{ base_url }}/week/YYYY-Www/events.json` for weeks that have a page on the site
+{%- for region in regions %}
+- [{{ region.name }}]({{ base_url }}/locations/{{ region.slug }}/events.json): {{ region.count }} upcoming
+{%- endfor %}
+
+## Categories
+
+Each category has `/categories/<slug>/events.json`, plus iCal (`feed.ics`) and RSS (`feed.xml`) beside it. [All categories as JSON]({{ base_url }}/categories.json).
+{% for category in categories %}
+- [{{ category.name }}]({{ base_url }}/categories/{{ category.slug }}/events.json): {{ category.count }} upcoming{% if category.description %}. {{ category.description }}{% endif %}
+{%- endfor %}
+
+## Calendar feeds
+
+- [All events, iCal]({{ base_url }}/events.ics)
+- [All events, RSS]({{ base_url }}/events-feed.xml)
+- [Every feed, by category and location]({{ base_url }}/feeds/)
+
+## Pages
+
+- [Upcoming events]({{ base_url }}/): the next three weeks, in person
+- [Virtual events]({{ base_url }}/virtual/)
+- [Just added]({{ base_url }}/just-added/): listings from the last 30 days
+- [Groups]({{ base_url }}/groups/): the organizers whose calendars feed the site
+- [Weekly roundups]({{ base_url }}/updates/)
+
+## Optional
+
+- [Submit an event]({{ add_events_link }}): for organizers listing their own events
+- [Sitemap]({{ base_url }}/sitemap.xml)
+- [Raw event data]({{ base_url }}/events.json): the site's internal event records, in an older shape kept for existing tools; use `calendar.json` instead

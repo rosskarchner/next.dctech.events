@@ -89,6 +89,12 @@ BUILDSPEC = {
                 # build: it swallows its own errors, and `|| true` covers an
                 # import-time crash too.
                 "python ../reconcile_highlights.py --table $TABLE_NAME || true",
+                # Event-page <lastmod> in sitemap.xml: compare this build's
+                # events against the last published state (calgen.lastmod).
+                # A missing or unreadable previous copy is fine — the step
+                # then dates only what createdAt can vouch for.
+                'aws s3 cp "s3://$SITE_BUCKET/static/lastmod.json" _data/previous_event_lastmod.json --only-show-errors || true',
+                "calgen lastmod --site-dir .",
                 # Must run after pipeline (needs _data/all_events.json) and
                 # before build (Frozen-Flask copies static/ into the frozen
                 # output wholesale, so these need to already be there).
@@ -125,6 +131,10 @@ BUILDSPEC = {
                 'aws s3 sync build/ "s3://$SITE_BUCKET/" --delete --exclude "edit/*" --exclude "*.html" --cache-control "public, max-age=86400"',
                 'aws s3 sync build/ "s3://$SITE_BUCKET/" --delete --exclude "*" --include "*.html" --exclude "edit/*" --cache-control "public, max-age=0, must-revalidate"',
                 'aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*"',
+                # After publish and invalidation, so a crawler that follows up
+                # finds the new pages and the /<key>.txt file. Never fails the
+                # build (calgen indexnow swallows its own errors).
+                "calgen indexnow --site-dir . || true",
             ],
         },
     },

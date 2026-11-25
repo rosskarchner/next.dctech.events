@@ -37,3 +37,4 @@ node_modules/
 # beads per-machine runtime state
 .beads.gate.lock
 .beads/.auto-import-issues.jsonl
+site/static/lastmod.json

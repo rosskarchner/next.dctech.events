@@ -62,7 +62,9 @@ def test_jsonld_all_day_event_uses_its_real_start_and_end_on_every_day(html):
 
 def test_jsonld_timed_event_keeps_its_time(html):
     [meet] = [i for i in _jsonld_items(html) if i['name'] == 'Evening Meetup']
-    assert meet['startDate'] == f'{D1.isoformat()}T18:00'
+    # With the site's UTC offset for that date (calgen.structured.iso_local).
+    assert meet['startDate'].startswith(f'{D1.isoformat()}T18:00:00')
+    assert meet['startDate'][-6:] in ('-05:00', '-04:00')
     assert 'endDate' not in meet
 
 

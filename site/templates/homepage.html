@@ -41,6 +41,7 @@
 <!-- Feed links -->
 <link rel="alternate" type="application/rss+xml" title="{{ site_name }} RSS Feed" href="/events-feed.xml">
 <link rel="alternate" type="text/calendar" title="{{ site_name }} iCal Feed" href="/events.ics">
+<link rel="alternate" type="application/json" title="{{ site_name }} events as JSON" href="/calendar.json">
 
 <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 
@@ -82,7 +83,7 @@
                      all-day event. The event's own start, not this day's,
                      so a "continuing" entry doesn't claim to start today;
                      the time only belongs with the start day. #}
-                  "startDate": "{{ event.date or day.date }}{% if event.time and day.date == (event.date or day.date) %}T{{ event.time }}{% endif %}",
+                  "startDate": {{ (event.date or day.date) | iso_local(event.time if day.date == (event.date or day.date) else '') | tojson }},
                   {% if event.end_date and event.end_date > (event.date or '') %}
                   "endDate": {{ event.end_date | tojson }},
                   {% endif %}

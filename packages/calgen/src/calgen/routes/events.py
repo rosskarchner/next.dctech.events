@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from flask import render_template
 
 from calgen.location_utils import extract_location_info
+from calgen.structured import event_end_iso, event_start_iso, split_place
 from calgen.site_config import get_config
 from calgen.event_utils import has_specific_time
 from calgen.routes.common import (get_categories, get_event_by_slug, _generate_ical_feed,
@@ -28,22 +29,6 @@ def _format_event_time(event):
         return datetime.strptime(raw.strip(), '%H:%M').time().strftime('%-I:%M %p').lower()
     except ValueError:
         return ''
-
-
-def _event_end_iso(event):
-    """schema.org endDate, only when the data actually supports one.
-
-    Google wants endDate on Event, but inventing one (start + 2h, say) would
-    put a fact in the markup that no feed asserted. Emitted only for events
-    carrying an explicit end_date; otherwise the property is omitted.
-    """
-    end_date = event.get('end_date')
-    if not end_date:
-        return ''
-    end_time = event.get('end_time')
-    if end_time and isinstance(end_time, str) and ':' in end_time:
-        return f"{end_date}T{end_time}"
-    return str(end_date)
 
 
 def register_routes(app):
@@ -71,7 +56,11 @@ def register_routes(app):
                                source_host=urlparse(event.get('url', '') or '').netloc,
                                formatted_date=_format_event_date(event),
                                formatted_time=_format_event_time(event),
-                               end_datetime=_event_end_iso(event),
+                               # schema.org values with the site's UTC offset; see
+                               # calgen.structured for why bare times are not enough.
+                               start_datetime=event_start_iso(event),
+                               end_datetime=event_end_iso(event),
+                               place=split_place(event.get('location', '')),
                                categories=get_categories(),
                                base_url=cfg.get('base_url', ''))
 

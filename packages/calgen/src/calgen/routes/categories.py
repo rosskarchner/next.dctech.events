@@ -9,7 +9,7 @@ from calgen.site_config import get_config
 from calgen.routes.common import (
     THIN_FACET_MIN_EVENTS, get_events, get_categories, get_sidebar_data, local_today,
     filter_events_by_month, prepare_events_by_day, _generate_ical_feed,
-    _generate_rss_feed, select_highlights,
+    _generate_rss_feed, select_highlights, public_events_json,
 )
 
 
@@ -127,3 +127,13 @@ def register_routes(app):
             f"Upcoming {category['name']} events",
             f"{base_url}/categories/{slug}/"
         )
+
+    @app.route("/categories/<slug>/events.json")
+    def category_events_json(slug):
+        categories = get_categories()
+        if slug not in categories:
+            return "Category not found", 404
+        events = [e for e in get_events() if slug in e.get('categories', [])]
+        return public_events_json(
+            events, title=f"Upcoming {categories[slug]['name']} events",
+            page=f"/categories/{slug}/")

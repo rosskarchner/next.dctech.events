@@ -13,7 +13,7 @@ from calgen.routes.common import (
     get_events, get_stats, get_upcoming_months, get_categories_with_event_counts,
     get_all_months, get_sidebar_data, filter_events_to_upcoming_days,
     filter_events_by_month, is_virtual_event, prepare_events_by_day,
-    select_highlights,
+    select_highlights, public_events_json,
 )
 
 RECENTLY_ADDED_WINDOW_DAYS = 7
@@ -46,6 +46,28 @@ def filter_events_by_week(events, week_start, week_end):
         except ValueError:
             continue
     return filtered
+
+
+def _week_events(week_id):
+    """(week_start, week_end, in-person events) for one ISO week.
+
+    Live events for the part of the week still ahead, the frozen capture for
+    the part already gone. For a wholly future week the archive adds nothing;
+    for a wholly past one it is all there is. Raises ValueError for a
+    malformed week_id.
+    """
+    try:
+        year, week_num = parse_week_identifier(week_id)
+        week_start, week_end = get_iso_week_dates(year, week_num)
+    except Exception as e:
+        raise ValueError(week_id) from e
+    archived = get_archived_week(week_id)
+    week_events = filter_in_person_events(merge_events(
+        filter_events_by_week(get_events(), week_start, week_end),
+        filter_events_by_week(archived['events'], week_start, week_end)
+        if archived else [],
+    ))
+    return week_start, week_end, week_events
 
 
 def get_iso_week_dates(year, week):
@@ -117,23 +139,23 @@ def register_routes(app):
                                stats=stats,
                                base_url=base_url)
 
+    @app.route("/week/<week_id>/events.json")
+    def week_events_json(week_id):
+        try:
+            week_start, _, week_events = _week_events(week_id)
+        except ValueError:
+            return "Invalid week identifier", 404
+        return public_events_json(
+            week_events,
+            title=f"In-person events for the week of {week_start.strftime('%B %-d, %Y')}",
+            page=f"/week/{week_id}/")
+
     @app.route("/week/<week_id>/")
     def week_page(week_id):
         try:
-            year, week_num = parse_week_identifier(week_id)
-            week_start, week_end = get_iso_week_dates(year, week_num)
-        except Exception:
+            week_start, week_end, week_events = _week_events(week_id)
+        except ValueError:
             return "Invalid week identifier", 404
-
-        # Live events for the part of the week still ahead, the frozen
-        # capture for the part already gone. For a wholly future week the
-        # archive adds nothing; for a wholly past one it is all there is.
-        archived = get_archived_week(week_id)
-        week_events = filter_in_person_events(merge_events(
-            filter_events_by_week(get_events(), week_start, week_end),
-            filter_events_by_week(archived['events'], week_start, week_end)
-            if archived else [],
-        ))
         days = prepare_events_by_day(week_events)
         week_start_formatted = week_start.strftime('%B %-d, %Y')
         stats = {'upcoming_events': len(week_events)}

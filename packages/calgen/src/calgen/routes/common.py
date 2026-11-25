@@ -43,6 +43,7 @@ from calgen.event_utils import (calculate_event_hash, event_last_day, event_slug
                                 has_specific_time)
 from calgen.location_utils import extract_location_info
 from calgen.site_config import get_config
+from calgen.structured import public_events_document
 
 # Valid US state/territory codes for location route validation
 VALID_US_STATES = {
@@ -853,3 +854,15 @@ def select_highlights(events, today=None):
         })
     picked.sort(key=lambda h: (h['date'], h['time']))
     return picked
+
+
+def public_events_json(events, *, title, page):
+    """A /…/events.json slice: the public event shape, see calgen.structured.
+
+    Same event set as the HTML page at `page`, so an agent that reads the JSON
+    and a person who reads the page are told the same thing.
+    """
+    doc = public_events_document(events, title=title, page=page,
+                                 base_url=get_config().get('base_url', ''))
+    return Response(json.dumps(doc, indent=2, ensure_ascii=False),
+                    mimetype='application/json')

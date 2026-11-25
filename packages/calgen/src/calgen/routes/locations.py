@@ -4,7 +4,7 @@ from flask import render_template
 from calgen.site_config import get_config
 from calgen.routes.common import (
     get_events, prepare_events_by_day, _generate_ical_feed, _generate_rss_feed, local_today,
-    get_sidebar_data,
+    get_sidebar_data, public_events_json,
 )
 
 
@@ -86,3 +86,16 @@ def register_routes(app):
             f"Upcoming technology events in {region['name']}",
             f"{base_url}/locations/{slug}/"
         )
+
+    @app.route("/locations/<slug>/events.json")
+    def location_events_json(slug):
+        plugin = app.region_plugin
+        if not plugin:
+            return "Region not found", 404
+        region = next((r for r in plugin.list_regions() if r['slug'] == slug), None)
+        if not region:
+            return "Region not found", 404
+        events = [e for e in get_events() if e.get('region') == slug]
+        return public_events_json(
+            events, title=f"Upcoming technology events in {region['name']}",
+            page=f"/locations/{slug}/")

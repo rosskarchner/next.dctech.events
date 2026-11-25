@@ -9,6 +9,10 @@ add_groups_link: https://dctech.events/edit/submit-group.html
 newsletter_signup_link: https://dctech.events/newsletter/
 edit_home_link: https://dctech.events/edit/index.html
 
+# IndexNow key (not a secret; see calgen/indexnow.py). calgen serves it back
+# at /<key>.txt to prove the site is ours. Remove to stop pinging.
+indexnow_key: "18d34e582c7a612e41f99ae8ab03ebf1"
+
 # Timezone for event display and processing
 timezone: "US/Eastern"
 

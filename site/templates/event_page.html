@@ -152,7 +152,7 @@
   "name": {{ event.title | tojson }},
   "url": {{ (base_url ~ '/events/' ~ slug ~ '/') | tojson }},
   "image": [{{ (base_url ~ self.og_image()) | tojson }}],
-  "startDate": "{{ event.date }}{% if event.time %}T{{ event.time }}{% endif %}"
+  "startDate": {{ start_datetime | tojson }}
   {% if end_datetime %},"endDate": {{ end_datetime | tojson }}{% endif %}
   ,"eventStatus": "https://schema.org/EventScheduled"
   ,"eventAttendanceMode": "https://schema.org/{% if event.virtual %}Online{% else %}Offline{% endif %}EventAttendanceMode"
@@ -164,12 +164,13 @@
     "url": {{ (event.url or base_url) | tojson }}
     {% else %}
     "@type": "Place",
-    "name": {{ event.location | tojson }},
+    "name": {{ (place.name or event.location) | tojson }},
     "address": {
       "@type": "PostalAddress",
-      "streetAddress": {{ event.location | tojson }}
+      "streetAddress": {{ (place.street or event.location) | tojson }}
       {% if city %},"addressLocality": {{ city | tojson }}{% endif %}
       {% if state %},"addressRegion": {{ state | tojson }}{% endif %}
+      {% if place.postal_code %},"postalCode": {{ place.postal_code | tojson }}{% endif %}
       ,"addressCountry": "US"
     }
     {% endif %}
