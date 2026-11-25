@@ -1,7 +1,7 @@
 """NextApiStack — API Lambda (backend fork) + MCP Lambda behind one REST API.
 
 Mirrors infrastructure/lib/lambda-api-stack.ts route/authorizer layout, minus
-the queue-notification/cleanup Lambdas (not part of this scope). The /mcp
+the queue-notification Lambda (not part of this scope). The /mcp
 resource uses an AWS_IAM authorizer (trusted agents/Lambdas only); /mcp-agent
 uses a bearer-token authorizer for callers with no AWS credentials to sign
 with, namely Claude Scheduled Tasks — see the comment above that resource.

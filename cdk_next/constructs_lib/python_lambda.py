@@ -15,8 +15,8 @@ touch and confirm it shows no replacement before deploying, the same way
 this was verified when ops_stack.py was first converted.
 
 log_group_id has no default derived from construct_id: existing log group
-ids across stacks don't follow the function's own construct_id (e.g.
-NextCleanupUnconfirmedUsers's log group is "NextCleanupLogGroup", not
+ids across stacks don't always follow the function's own construct_id (the
+since-removed NextCleanupUnconfirmedUsers used "NextCleanupLogGroup", not
 "NextCleanupUnconfirmedUsersLogGroup") — pass the exact existing string when
 converting a call site, or a new one of your choosing for a new Lambda.
 """
